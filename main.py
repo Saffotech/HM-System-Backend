@@ -30,7 +30,7 @@ app.include_router(roles_router)  # ← add this
 def home():
     return {"message": "Hospital api running.."}
 
-from Routers.appointments import (
+from Routers.appointment_router import (
     router as appointments_router
 )
 

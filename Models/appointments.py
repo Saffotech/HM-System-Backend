@@ -17,20 +17,46 @@ from zoneinfo import ZoneInfo
 
 
 class Appointment(Base):
+
     __tablename__ = "appointments"
 
-    id = Column(Integer, primary_key=True, index=True)
+    # ======================================================
+    # Primary Key
+    # ======================================================
 
-    # temporary without foreign key
-    patient_id = Column(Integer, nullable=False)
+    id = Column(
+        Integer,
+        primary_key=True,
+        index=True
+    )
 
-    patient_name = Column(String,nullable=False)
+    # ======================================================
+    # Patient Information
+    # ======================================================
+
+    patient_id = Column(
+        Integer,
+        nullable=False
+    )
+
+    patient_name = Column(
+        String,
+        nullable=False
+    )
+
+    # ======================================================
+    # Doctor Information
+    # ======================================================
 
     doctor_id = Column(
         Integer,
         ForeignKey("users.id"),
         nullable=False
     )
+
+    # ======================================================
+    # Appointment Schedule
+    # ======================================================
 
     appointment_date = Column(
         Date,
@@ -42,10 +68,19 @@ class Appointment(Base):
         nullable=False
     )
 
+    # ======================================================
+    # Appointment Status
+    # ======================================================
+
     status = Column(
         String,
-        default="scheduled"
+        default="scheduled",
+        nullable=False
     )
+
+    # ======================================================
+    # Medical Information
+    # ======================================================
 
     reason = Column(
         String,
@@ -57,11 +92,9 @@ class Appointment(Base):
         nullable=True
     )
 
-    created_by = Column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True
-    )
+    # ======================================================
+    # Audit Fields
+    # ======================================================
 
     created_at = Column(
         DateTime(timezone=True),
@@ -79,6 +112,10 @@ class Appointment(Base):
             ZoneInfo("Asia/Kolkata")
         )
     )
+
+    # ======================================================
+    # Relationships
+    # ======================================================
 
     doctor = relationship(
         "User",
