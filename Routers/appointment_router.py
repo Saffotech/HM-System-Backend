@@ -1,18 +1,36 @@
 from datetime import date
-from fastapi import APIRouter,Depends,status
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    status
+)
+
 from sqlalchemy.orm import Session
+
 from database import get_db
-from dependencies import get_current_user,PermissionChecker
+
+from dependencies import (
+    get_current_user,
+    PermissionChecker
+)
+
 from Models.user import User
-from Schemas.appointment_schema import AppointmentStatusUpdate
+
+from Schemas.appointment_schema import (
+    AppointmentStatusUpdate
+)
+
 from Services.appointment_service import (
 
     get_today_appointments_service,
     get_appointment_by_id_service,
     update_appointment_status_service,
     get_appointment_history_service,
-    get_appointments_by_date_service
+    get_appointments_by_date_service,
+    get_dashboard_stats_service
 )
+
 router = APIRouter(
     prefix="/appointments",
     tags=["Appointments"]
@@ -20,40 +38,85 @@ router = APIRouter(
 
 
 # ==========================================================
-# 1. Get Today's Appointments
+# Dashboard Stats
 # ==========================================================
 
-@router.get("/today",
+@router.get(
+    "/dashboard-stats",
+    status_code=status.HTTP_200_OK
+)
+def get_dashboard_stats(
+
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(
+        PermissionChecker("appointments:view")
+    )
+):
+
+    stats = get_dashboard_stats_service(
+        db=db,
+        doctor_id=current_user.id
+    )
+
+    return {
+
+        "success": True,
+        "message": (
+            "Dashboard stats fetched successfully"
+        ),
+        "data": stats
+    }
+
+
+# ==========================================================
+# Get Today's Appointments
+# ==========================================================
+
+@router.get(
+    "/today",
     status_code=status.HTTP_200_OK
 )
 def get_today_appointments(
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
+    _: bool = Depends(
+        PermissionChecker("appointments:view")
+    )
 ):
+
     appointments = get_today_appointments_service(
         db=db,
         doctor_id=current_user.id
     )
+
     return {
+
         "success": True,
         "message": (
             "Today's appointments fetched successfully"
         ),
-        "appointment" : len(appointments),
+        "appointment": len(appointments),
         "appointments": appointments
     }
 
 
-@router.get("/history",
+# ==========================================================
+# Appointment History
+# ==========================================================
+
+@router.get(
+    "/history",
     status_code=status.HTTP_200_OK
 )
 def get_appointment_history(
 
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-
-    _: bool = Depends(PermissionChecker("appointments:view"))
+    _: bool = Depends(
+        PermissionChecker("appointments:view")
+    )
 ):
 
     appointments = get_appointment_history_service(
@@ -67,16 +130,17 @@ def get_appointment_history(
         "message": (
             "Appointment history fetched successfully"
         ),
-        "Total appointment" : len(appointments),
+        "total_appointments": len(appointments),
         "appointments": appointments
     }
 
 
 # ==========================================================
-# 3. Get Appointments By Date
+# Get Appointments By Date
 # ==========================================================
 
-@router.get("/by-date/{appointment_date}",
+@router.get(
+    "/by-date/{appointment_date}",
     status_code=status.HTTP_200_OK
 )
 def get_appointments_by_date(
@@ -84,7 +148,9 @@ def get_appointments_by_date(
     appointment_date: date,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
+    _: bool = Depends(
+        PermissionChecker("appointments:view")
+    )
 ):
 
     appointments = get_appointments_by_date_service(
@@ -100,25 +166,33 @@ def get_appointments_by_date(
         "message": (
             "Appointments fetched successfully"
         ),
-        "total appointment" : len(appointments),
+        "total_appointments": len(appointments),
         "appointments": appointments
     }
 
 
 # ==========================================================
-# 4. Update Appointment Status
+# Update Appointment Status
 # ==========================================================
 
-@router.put("/{appointment_id}/status",
+@router.put(
+    "/{appointment_id}/status",
     status_code=status.HTTP_200_OK
 )
 def update_appointment_status(
 
     appointment_id: int,
     appointment_data: AppointmentStatusUpdate,
+
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update"))
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker("appointments:update")
+    )
 ):
 
     appointment = update_appointment_status_service(
@@ -135,24 +209,31 @@ def update_appointment_status(
         "message": (
             "Appointment status updated successfully"
         ),
-        "status" : status,
         "appointment": appointment
     }
 
 
 # ==========================================================
-# 5. Get Appointment By ID
+# Get Appointment By ID
 # ==========================================================
 
-@router.get("/{appointment_id}",
+@router.get(
+    "/{appointment_id}",
     status_code=status.HTTP_200_OK
 )
 def get_appointment_by_id(
 
     appointment_id: int,
+
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker("appointments:view")
+    )
 ):
 
     appointment = get_appointment_by_id_service(
@@ -163,6 +244,7 @@ def get_appointment_by_id(
     )
 
     return {
+
         "success": True,
         "appointment": appointment
     }

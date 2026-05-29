@@ -5,6 +5,10 @@ from Routers import auth
 from Routers.roles import router as roles_router  # ← add this
 from Models import user, role
 from Models import appointments
+from Models.prescriptions import (
+    Prescription,
+    PrescriptionItem
+)
 
 Base.metadata.create_all(bind=engine)
 
@@ -33,5 +37,21 @@ def home():
 from Routers.appointment_router import (
     router as appointments_router
 )
-
 app.include_router(appointments_router)
+
+from Routers.patient_queue_router import router as patient_queue_router
+app.include_router(patient_queue_router)
+
+from Routers.patient_history_router import (
+    router as patient_router
+)
+
+app.include_router(patient_router)
+
+
+from Routers.prescription_router import (
+    router as prescription_router
+)
+
+app.include_router(prescription_router)
+
