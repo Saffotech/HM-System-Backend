@@ -1,35 +1,17 @@
-from fastapi import (
-    APIRouter,
-    Depends,
-    status
-)
-
+from fastapi import APIRouter,Depends,status
 from sqlalchemy.orm import Session
-
 from database import get_db
-
-from dependencies import (
-    get_current_user,
-    PermissionChecker
-)
-
+from dependencies import get_current_user,PermissionChecker
 from Models.user import User
-
 from Schemas.prescription_schema import (
     PrescriptionCreate,
     PrescriptionResponse
 )
-
 from Services.prescription_service import (
-
     create_prescription_service,
-
     get_prescription_by_id_service,
-
     get_patient_prescriptions_service,
-
     update_prescription_service,
-
     delete_prescription_service
 )
 
@@ -51,24 +33,15 @@ router = APIRouter(
 def create_prescription(
 
     prescription_data: PrescriptionCreate,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker("prescriptions:create")
-    )
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("prescriptions:create"))
 ):
 
     prescription = create_prescription_service(
 
         db=db,
-
         prescription_data=prescription_data,
-
         doctor_id=current_user.id
     )
 
@@ -87,20 +60,14 @@ def create_prescription(
 def get_prescription_by_id(
 
     prescription_id: int,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    )
+    current_user: User = Depends(get_current_user)
 ):
 
     prescription = get_prescription_by_id_service(
 
         db=db,
-
         prescription_id=prescription_id,
-
         doctor_id=current_user.id
     )
 
@@ -119,21 +86,15 @@ def get_prescription_by_id(
 def get_patient_prescriptions(
 
     patient_id: int,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    )
+    current_user: User = Depends(get_current_user)
 ):
 
     prescriptions = (
         get_patient_prescriptions_service(
 
             db=db,
-
             patient_id=patient_id,
-
             doctor_id=current_user.id
         )
     )
@@ -153,28 +114,17 @@ def get_patient_prescriptions(
 def update_prescription(
 
     prescription_id: int,
-
     prescription_data: PrescriptionCreate,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker("prescriptions:update")
-    )
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("prescriptions:update"))
 ):
 
     prescription = update_prescription_service(
 
         db=db,
-
         prescription_id=prescription_id,
-
         prescription_data=prescription_data,
-
         doctor_id=current_user.id
     )
 
@@ -207,9 +157,7 @@ def delete_prescription(
     result = delete_prescription_service(
 
         db=db,
-
         prescription_id=prescription_id,
-
         doctor_id=current_user.id
     )
 

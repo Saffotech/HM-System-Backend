@@ -9,6 +9,7 @@ from Models.prescriptions import (
     Prescription,
     PrescriptionItem
 )
+from Models.lab_test_order import LabTestOrder
 
 Base.metadata.create_all(bind=engine)
 
@@ -54,4 +55,7 @@ from Routers.prescription_router import (
 )
 
 app.include_router(prescription_router)
+
+from Routers.lab_test_router import router as lab_test_router
+app.include_router(lab_test_router)
 
