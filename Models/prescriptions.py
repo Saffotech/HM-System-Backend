@@ -10,10 +10,10 @@ class Prescription(Base):
     id = Column(Integer, primary_key=True , index=True)
     appointment_id = Column(Integer,ForeignKey("appointments.id"),
                             nullable=False,unique=True)
-    patient_id = Column(Integer,nullable=False,unique=True)
+    patient_id = Column(Integer,nullable=False)
     patient_name = Column(String,nullable=True)
 
-    doctor_id = Column(Integer, ForeignKey('users.id'),nullable=False,unique=True)
+    doctor_id = Column(Integer, ForeignKey('users.id'),nullable=False)
     diagnosis = Column(String , nullable=False)
     notes = Column(String,nullable=True)
 
@@ -31,6 +31,7 @@ class Prescription(Base):
             ZoneInfo("Asia/Kolkata")
         )
     )
+    appointment = relationship("Appointment")
 
     doctor = relationship("User", foreign_keys=[doctor_id])
 
@@ -50,7 +51,7 @@ class PrescriptionItem(Base):
     medicine_name = Column(String,nullable=False)
     dosage = Column(String,nullable=False)
     frequency = Column(String,nullable=False)
-    duration = Column(String,nullable=False)
+    duration = Column(Integer,nullable=False)
     instructions = Column(Text,nullable=True)
 
     created_at = Column(DateTime(timezone=True),

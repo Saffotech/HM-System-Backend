@@ -5,10 +5,7 @@ from Routers import auth
 from Routers.roles import router as roles_router  # ← add this
 from Models import user, role
 from Models import appointments
-from Models.prescriptions import (
-    Prescription,
-    PrescriptionItem
-)
+from Models.prescriptions import Prescription,PrescriptionItem
 from Models.lab_test_order import LabTestOrder
 
 Base.metadata.create_all(bind=engine)
