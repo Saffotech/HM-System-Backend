@@ -1,0 +1,441 @@
+agement
+Hospital-wide bed board
+**Stat Cards:** Assign Bed / Total Beds / Available / Occupied
+**Filters:**
+- Ward tabs (All / General / ICU / Private / Pediatric)
+- Status tabs (All / Available / Occupied)
+- Search by Patient Name / Patient ID
+**Bed Card:**
+| Field | Description |
+|---|---|
+| Bed No | Bed number |
+| Ward | Ward name |
+| Status | Available / Occupied |
+| Patient | Patient or Vacant |
+| Department | Dept if occupied |
+| Admitted Date | If occupied |
+| Action | Assign / Ward drilldown |
+________________________________________
+## 📌 View 14 — Ward Status
+Single ward view
+**Banner:** Ward Name + Occupancy %
+**Stats:** Total / Available / Occupied
+| Field | Description |
+|---|---|
+| Bed | Bed number |
+| Patient | Patient or Vacant |
+| Department | Department |
+| Admitted | Admission date |
+________________________________________
+## 📌 View 15 — Assign Bed (Modal)
+Allocate a bed
+**Fields:** Select Patient / Ward / Available Bed / Admission Details / Confirm
+________________________________________
+## 📌 View 16 — Payment History
+Ledger of all payments
+**Analytics Cards (clickable filters):** Total Collected / Online (UPI) / Cash / Card
+| Field | Description |
+|---|---|
+| Patient | Name + ID |
+| Bill ID | Linked invoice |
+| Date | Payment date |
+| Mode | Cash / Card / UPI / Insurance |
+| Amount | Paid amount |
+| Reference | Transaction ref |
+| Bill Status | Linked bill status |
+| Action | View Bill |
+**Filters:** Search by Patient / Patient ID / Bill ID / Reference
+________________________________________
+________________________________________
+# 🩺 2. Doctor
+________________________________________
+## 📌 View 1 — Dashboard
+First screen after doctor logs in
+**Fields/Elements:**
+- Today's Appointments
+- Patients Waiting
+- Completed Consultations
+- Emergency Cases (highlighted in red)
+- Lab Reports Pending
+- Today's Appointments table (Time, Patient, Type, Status, Actions)
+- Patient Queue (position, name, time, reason)
+- Quick Patient Search (Name / UHID / Mobile)
+- Notifications preview
+- Recent Patients
+- This Week metrics (Patients Seen / Records / Prescriptions / Lab Orders)
+________________________________________
+## 📌 View 2 — Patients / EMR
+All patients with medical records
+| Field | Description |
+|---|---|
+| UHID | Patient ID |
+| Name | Patient name |
+| Age / Gender | Demographics |
+| Phone | Contact |
+| Allergies | Highlighted if present |
+| Action | Open EMR |
+**EMR Viewer (Modal) Tabs:**
+- Visits → Date, Time, Reason, Status
+- Diagnoses → Symptoms, Diagnosis, Treatment, Date
+- Prescriptions → Medicine list, Active status
+- Labs → Test, Status, Result, Date
+________________________________________
+## 📌 View 3 — Prescriptions
+All prescriptions
+| Field | Description |
+|---|---|
+| Date | Rx date |
+| Patient | Patient name |
+| Medicines | Medicine summary |
+| Status | Active / Completed |
+| Action | Update / End |
+**New / Update Prescription (Modal):**
+- Patient (locked on edit)
+- Medicine rows → Name / Dosage / Frequency / Duration / Instructions
+- Add Medicine Row
+- Save Button
+________________________________________
+## 📌 View 4 — Lab Tests
+All lab orders raised by doctor
+| Field | Description |
+|---|---|
+| Date | Order date |
+| Patient | Patient name |
+| Test | Test name |
+| Status | Ordered / Sample Collected / Completed |
+| Action | Advance Status / View |
+**Order Lab Test (Modal):** Patient / Test / Submit
+**Lab Detail (Modal):** Patient + Date / Status / Result / Doctor Notes / Save
+________________________________________
+## 📌 View 5 — Calendar
+Doctor's schedule
+**Week View:** 7-day tiles with appointment count (today highlighted)
+**Today / Upcoming:**
+| Field | Description |
+|---|---|
+| Time / Date | Schedule |
+| Patient | Patient name |
+| Reason | Visit reason |
+| Status | Booked / Completed / Cancelled |
+| Action | Complete (if scheduled) |
+________________________________________
+## 📌 View 6 — Notifications
+Doctor inbox
+| Field | Description |
+|---|---|
+| Title / Message | Notification body |
+| Timestamp | When received |
+| Priority / Type | Category |
+| Status | Read / Unread |
+**Action:** Mark all read / click to mark read
+________________________________________
+## 📌 View 7 — Consultation (Modal)
+Launched from a patient appointment
+**Fields:**
+- Patient Info (read only)
+- Symptoms
+- Diagnosis
+- Treatment Plan
+- Quick Prescribe (medicines)
+- Quick Notes
+- Save / Complete Consultation
+________________________________________
+This matches your Lab Technician / Patient template exactly. Want me to also add **🔬 Lab Technician** and **🧑‍💼 Patient** views for this same system (if those roles exist in the app), or export this as a `.md` file in the repo?
+
+========================================================================
+4. Pharmacist
+========================================================================
+💊 4. Pharmacist
+---
+Manage medicine inventory, verify prescriptions, dispense medicines, track stock movements, manage suppliers, and monitor expiry/reorder levels.
+---
+📌 View 1 — Dashboard
+First screen after Pharmacist logs in
+Fields/Elements:
+•Total Prescriptions Today
+•Medicines Dispensed Today
+•Pending Prescriptions
+•Low Stock Medicines
+•Out of Stock Medicines
+•Expiring Soon Medicines
+•Today's Revenue (Pharmacy Sales)
+•Recent Dispensing Activity
+•Recent Stock Activity
+•Quick Action Buttons →
+oDispense Medicine
+oAdd Medicine Stock
+oView Inventory
+oCheck Expiry Items
+---
+📌 View 2 — Prescription Queue
+All prescriptions received from doctors
+FieldDescription
+Prescription IDUnique prescription number
+Patient IDPatient number
+Patient NameFull patient name
+Doctor NamePrescribing doctor
+DepartmentOPD / IPD / Emergency
+Prescription DateDate prescribed
+Total MedicinesNumber of medicines
+PriorityNormal / Urgent
+StatusPending / Processing / Dispensed
+Action ButtonView Prescription
+---
+📌 View 3 — Prescription Detail View
+Patient Information:
+•Patient Name
+•Patient ID
+•Age
+•Gender
+•Doctor Name
+•Diagnosis
+Prescription Items:
+FieldDescription
+Medicine NamePrescribed medicine
+Dosagee.g. 500mg
+FrequencyTwice Daily
+Duration5 Days
+QuantityRequired quantity
+Available StockCurrent stock
+Substitute AvailableYes / No
+RemarksDoctor instructions
+Action Buttons:
+•Dispense All
+•Partial Dispense
+•Request Doctor Clarification
+•Print Prescription
+---
+📌 View 4 — Dispense Medicine Screen
+FieldDescription
+Prescription IDLinked prescription
+Patient NameAuto-filled
+Medicine NameAuto-filled
+Batch NumberSelected stock batch
+Expiry DateAuto-filled
+Quantity PrescribedPrescription quantity
+Quantity DispensedActual quantity given
+Dispensed ByLogged-in pharmacist
+Dispensed Date & TimeAuto timestamp
+RemarksOptional note
+Status:
+•Pending
+•Partially Dispensed
+•Dispensed
+Action Buttons:
+•Confirm Dispense
+•Print Medicine Slip
+•Save
+---
+📌 View 5 — Medicine Inventory
+Master inventory management
+FieldDescription
+Medicine IDUnique medicine code
+Medicine NameName of medicine
+Generic NameGeneric drug name
+CategoryTablet / Syrup / Injection
+ManufacturerCompany name
+Batch NumberBatch code
+Purchase PriceCost price
+Selling PriceSale price
+Current StockAvailable quantity
+Minimum StockReorder threshold
+Expiry DateMedicine expiry
+Storage LocationRack/Shelf location
+StatusAvailable / Low Stock / Out of Stock
+Action Buttons:
+•View
+•Edit
+•Update Stock
+•Delete
+---
+📌 View 6 — Add New Medicine
+FieldDescription
+Medicine NameName
+Generic NameGeneric equivalent
+Brand NameBrand
+CategoryTablet / Syrup / Injection
+ManufacturerCompany
+UnitPiece / Strip / Bottle
+Purchase PriceCost
+Selling PriceMRP
+Tax PercentageGST
+Minimum Stock LevelAlert threshold
+Storage InstructionsStorage notes
+DescriptionMedicine details
+Action Buttons:
+•Save Medicine
+•Reset
+---
+📌 View 7 — Stock Inward (Purchase Entry)
+Medicine received from supplier
+FieldDescription
+Purchase IDAuto-generated
+Supplier NameMedicine supplier
+Invoice NumberSupplier invoice
+Invoice DateDate
+Medicine NameMedicine received
+Batch NumberBatch
+QuantityReceived quantity
+Purchase PriceCost price
+Expiry DateBatch expiry
+Received ByPharmacist
+RemarksOptional
+Action Buttons:
+•Add Item
+•Save Purchase Entry
+---
+📌 View 8 — Stock Outward
+Medicine stock movement tracking
+FieldDescription
+Transaction IDAuto-generated
+Medicine NameMedicine
+Quantity RemovedUsed quantity
+ReasonDispensed / Damaged / Expired
+Date & TimeTimestamp
+Handled ByPharmacist
+RemarksOptional
+---
+📌 View 9 — Low Stock Alerts
+FieldDescription
+Medicine NameName
+Current StockAvailable quantity
+Minimum StockThreshold
+Required QuantityNeeded quantity
+SupplierDefault supplier
+StatusLow Stock / Critical
+Action Buttons:
+•Create Purchase Order
+•View Supplier
+---
+📌 View 10 — Expiry Management
+FieldDescription
+Medicine NameName
+Batch NumberBatch
+Expiry DateExpiry date
+Days RemainingAuto-calculated
+Current StockAvailable quantity
+StatusExpiring Soon / Expired
+Action Buttons:
+•Mark Expired
+•Remove Stock
+•Print Report
+---
+📌 View 11 — Supplier Management
+FieldDescription
+Supplier IDUnique ID
+Supplier NameCompany name
+Contact PersonName
+Mobile NumberPhone
+EmailEmail address
+GST NumberTax registration
+AddressSupplier address
+StatusActive / Inactive
+Action Buttons:
+•Add Supplier
+•Edit Supplier
+•View Purchase History
+---
+📌 View 12 — Purchase Orders
+FieldDescription
+PO NumberPurchase order ID
+Supplier NameSupplier
+Created DateDate
+Expected DeliveryDate
+Total AmountOrder value
+StatusDraft / Ordered / Received
+Action Buttons:
+•Create PO
+•Print PO
+•Receive Goods
+---
+📌 View 13 — Pharmacy Billing
+FieldDescription
+Invoice IDInvoice number
+Patient NamePatient
+Prescription IDLinked prescription
+Medicine ChargesMedicine total
+DiscountApplicable discount
+TaxGST
+Total AmountFinal amount
+Payment StatusPaid / Pending
+Payment MethodCash / Card / UPI
+Action Buttons:
+•Generate Invoice
+•Print Invoice
+•View Invoice
+---
+📌 View 14 — Dispensing History
+FieldDescription
+Dispense IDUnique ID
+Patient NamePatient
+Prescription IDPrescription
+Medicine CountTotal medicines
+Dispensed ByPharmacist
+Date & TimeTimestamp
+StatusCompleted
+Action Buttons:
+•View Details
+•Print
+---
+📌 View 15 — Reports & Analytics
+Inventory Reports:
+•Current Stock Report
+•Low Stock Report
+•Out of Stock Report
+•Expiry Report
+Sales Reports:
+•Daily Sales
+•Monthly Sales
+•Medicine-wise Sales
+•Revenue Summary
+Purchase Reports:
+•Purchase History
+•Supplier-wise Purchase
+•Purchase Cost Summary
+Dispensing Reports:
+•Prescription Fulfillment Rate
+•Pending Prescriptions
+•Medicine Consumption Trends
+---
+📌 View 16 — Search & Filter
+Filter Options:
+•Search by Medicine Name
+•Search by Generic Name
+•Search by Batch Number
+•Search by Patient Name
+•Search by Prescription ID
+•Filter by Category
+•Filter by Supplier
+•Filter by Expiry Date
+•Filter by Low Stock
+•Filter by Status
+---
+📌 View 17 — Notifications Center
+Alerts:
+•New Prescription Received
+•Low Stock Alert
+•Critical Stock Alert
+•Medicine Expiring Soon
+•Purchase Order Received
+•Supplier Delivery Update
+•Out of Stock Medicine Alert
+Action Buttons:
+•View
+•Acknowledge
+•Clear Notification
+---
+📌 View 18 — Controlled Drug Register (Optional Advanced HMS)
+For narcotics and regulated medicines
+FieldDescription
+Entry IDUnique record
+Medicine NameControlled medicine
+Patient NameRecipient
+Doctor NamePrescribing doctor
+Quantity DispensedQuantity
+Date & TimeTimestamp
+Dispensed ByPharmacist
+RemarksMandatory notes
+Action Buttons:
+•View Log
+•Print Register
+•Audit History

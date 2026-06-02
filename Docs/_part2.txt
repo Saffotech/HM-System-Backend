@@ -1,0 +1,390 @@
+Assigned work shift            |
+| Experience        | Years of experience            |
+| Qualification     | Educational details            |
+| Certifications    | Professional certificates      |
+| License Number    | Medical license if applicable  |
+| Employee Status   | Active / Resigned / Terminated |
+## Salary Information
+| Field               | Description      |
+| ------------------- | ---------------- |
+| Salary Type         | Monthly / Hourly |
+| Basic Salary        | Base salary      |
+| Bank Account Number | Salary account   |
+| IFSC Code           | Bank IFSC        |
+| PAN Number          | PAN card         |
+| Aadhaar Number      | Aadhaar ID       |
+| PF Number           | Provident Fund   |
+| ESI Number          | Insurance number |
+## Documents Upload
+* Resume Upload
+* Offer Letter Upload
+* ID Proof Upload
+* Aadhaar Copy Upload
+* PAN Copy Upload
+* Degree Certificate Upload
+* Experience Letter Upload
+## Buttons
+* Save Employee
+* Update Employee
+* Cancel
+---
+# 📌 View 4 — Attendance Management
+Manage daily employee attendance
+| Field             | Description                 |
+| ----------------- | --------------------------- |
+| Attendance ID     | Auto-generated              |
+| Employee Name     | Staff member                |
+| Department        | Employee department         |
+| Date              | Attendance date             |
+| Check-In Time     | Login time                  |
+| Check-Out Time    | Exit time                   |
+| Total Hours       | Calculated working hours    |
+| Overtime Hours    | Extra working hours         |
+| Attendance Status | Present / Absent / Half Day |
+| Remarks           | Optional note               |
+| Action            | Edit / Approve              |
+## Features
+* Manual attendance marking
+* Biometric integration
+* Shift attendance tracking
+* Monthly attendance summary
+---
+# 📌 View 5 — Leave Management
+Employee leave requests
+| Field         | Description                   |
+| ------------- | ----------------------------- |
+| Leave ID      | Unique leave number           |
+| Employee Name | Requesting employee           |
+| Department    | Employee department           |
+| Leave Type    | Sick / Casual / Paid          |
+| Start Date    | Leave start                   |
+| End Date      | Leave end                     |
+| Total Days    | Auto calculated               |
+| Reason        | Leave reason                  |
+| Applied Date  | Request date                  |
+| Leave Status  | Pending / Approved / Rejected |
+| Approved By   | HR/Admin name                 |
+| Action        | Approve / Reject / View       |
+---
+# 📌 View 6 — Payroll Management
+Salary and payroll processing
+| Field          | Description               |
+| -------------- | ------------------------- |
+| Payroll ID     | Unique payroll number     |
+| Employee Name  | Employee receiving salary |
+| Salary Month   | Payroll month             |
+| Basic Salary   | Base amount               |
+| HRA            | House rent allowance      |
+| Allowances     | Additional allowances     |
+| Bonus          | Bonus amount              |
+| Incentives     | Performance incentives    |
+| Deductions     | Total deductions          |
+| PF Deduction   | Provident fund            |
+| Tax Deduction  | Professional tax          |
+| Net Salary     | Final salary              |
+| Payment Date   | Salary paid date          |
+| Payment Status | Pending / Paid            |
+| Action         | Generate Payslip / View   |
+## Features
+* Auto salary generation
+* PDF payslip generation
+* Salary history tracking
+---
+# 📌 View 7 — Recruitment Management
+Manage hospital hiring
+| Field            | Description          |
+| ---------------- | -------------------- |
+| Candidate ID     | Auto-generated       |
+| Candidate Name   | Applicant name       |
+| Mobile Number    | Candidate contact    |
+| Email            | Candidate email      |
+| Applied Position | Job role             |
+| Department       | Related department   |
+| Experience       | Work experience      |
+| Resume           | Uploaded resume      |
+| Interview Date   | Scheduled interview  |
+| Interviewer      | Assigned interviewer |
+| Interview Status | Pending / Completed  |
+| Selection Status | Selected / Rejected  |
+| Joining Status   | Joined / Not Joined  |
+| Action           | View / Update        |
+---
+# 📌 View 8 — Shift & Scheduling
+Employee duty management
+| Field             | Description               |
+| ----------------- | ------------------------- |
+| Shift ID          | Unique shift number       |
+| Shift Name        | Morning / Evening / Night |
+| Start Time        | Shift start               |
+| End Time          | Shift end                 |
+| Shift Type        | Regular / Emergency       |
+| Assigned Employee | Employee assigned         |
+| Department        | Related department        |
+| Status            | Active / Inactive         |
+| Action            | Assign / Edit             |
+## Features
+* Weekly roster
+* Emergency shift assignment
+* Shift swap requests
+---
+# 📌 View 9 — Performance & Appraisal
+Employee performance review
+| Field          | Description             |
+| -------------- | ----------------------- |
+| Appraisal ID   | Unique appraisal number |
+| Employee Name  | Staff name              |
+| Review Period  | Monthly / Quarterly     |
+| Rating         | Performance score       |
+| Strengths      | Positive points         |
+| Weaknesses     | Improvement areas       |
+| Goals          | Future targets          |
+| Remarks        | HR comments             |
+| Reviewed By    | Reviewer name           |
+| Appraisal Date | Review date             |
+| Action         | View / Update           |
+---
+# 📌 View 10 — Employee Documents
+All uploaded employee files
+| Field               | Description              |
+| ------------------- | ------------------------ |
+| Document ID         | Auto-generated           |
+| Employee Name       | Related employee         |
+| Document Type       | Resume / PAN / Aadhaar   |
+| Upload Date         | File upload date         |
+| Uploaded By         | HR/Admin                 |
+| Verification Status | Verified / Pending       |
+| Action              | View / Download / Delete |
+---
+# 📌 View 11 — Exit Management
+Employee resignation & settlement
+| Field                   | Description               |
+| ----------------------- | ------------------------- |
+| Resignation ID          | Unique resignation number |
+| Employee Name           | Leaving employee          |
+| Department              | Employee department       |
+| Resignation Date        | Submitted date            |
+| Last Working Day        | Final working date        |
+| Reason                  | Resignation reason        |
+| Clearance Status        | Pending / Completed       |
+| Exit Interview Notes    | HR remarks                |
+| Final Settlement Status | Pending / Completed       |
+| Action                  | Approve / Close           |
+---
+# 📌 View 12 — Search & Filters
+Quick employee search system
+## Search Options:
+* Search by Employee Name
+* Search by Employee ID
+* Search by Department
+* Search by Designation
+* Search by Mobile Number
+* Search by Employment Type
+## Filter Options:
+* Filter by Department
+* Filter by Shift
+* Filter by Employee Status
+* Filter by Joining Date
+* Filter by Attendance Status
+* Filter by Leave Status
+---
+# 🔐 HR Manager Permissions
+## HR Can:
+* Add/Edit employees
+* Manage attendance
+* Approve leaves
+* Generate payroll
+* Manage recruitment
+* Assign shifts
+* Upload documents
+* Manage resignations
+* View HR reports
+## HR Cannot:
+* Access patient medical records
+* Write prescriptions
+* Modify hospital core settings
+* Access pharmacy inventory
+* Modify lab reports
+---
+# 🚀 Advanced Features
+* Biometric attendance integration
+* SMS & Email notifications
+* Employee self-service portal
+* Auto payroll generation
+* Holiday calendar management
+* Staff ID card generation
+* KPI & performance tracking
+* Multi-branch employee management
+* Role-based access control
+* Audit logs & activity tracking
+Here is the full spec in your exact format.
+________________________________________
+
+========================================================================
+Billing Counter + Doctor (block 2)
+========================================================================
+# Detailed Views & Fields
+________________________________________
+# 🧾 1. Billing Counter (OPD Front Desk)
+________________________________________
+## 📌 View 1 — Dashboard
+First screen after login
+**Fields/Elements:**
+- Greeting + Staff Name (Billing Counter)
+- Today's Date
+- Total Patients
+- Total Appointments
+- Beds Free
+- Pending Bills (highlighted)
+- Quick Actions → Billing / New Patient / Book Appointment / Assign Bed
+- Today's Appointments feed
+- Bed Status bar (ward-wise occupancy)
+- Recent Patients list
+________________________________________
+## 📌 View 2 — Appointments List
+All appointments in the system
+| Field | Description |
+|---|---|
+| Patient Name | Who the visit is for |
+| Patient ID | Unique patient number |
+| Doctor / Dept | Who they are seeing |
+| Schedule | Date & Time |
+| Status | Scheduled / Completed / Cancelled |
+| Action Button | Reschedule / Complete / Cancel |
+**Status Summary Pills:** Scheduled / Completed / Cancelled counts
+________________________________________
+## 📌 View 3 — Book Appointment
+When front desk books a visit
+**Fields:**
+- Patient (search/select) — read details auto-fill
+- Department
+- Doctor (based on department)
+- Doctor Profile (qualification, fee)
+- Select Date (no past dates)
+- Select Time Slot (Available / Booked greyed out)
+- Reason for Visit
+- Notes
+- Revisit/Registration Fee logic (auto: waived if within revisit window)
+- Consultation Fee + Total preview
+- Confirm Button
+**After Booking:**
+- Appointment ID generated
+- Confirmation shown
+- Status → Scheduled
+________________________________________
+## 📌 View 4 — Doctor Availability
+To check open slots before booking
+**Fields:**
+- Select Department
+- Select Doctor
+- Select Date
+- Slot Grid → Available / Booked
+________________________________________
+## 📌 View 5 — Patient List
+All registered patients
+| Field | Description |
+|---|---|
+| Patient | Avatar + Name + ID |
+| Contact | Phone / Gender |
+| Blood | Blood Group |
+| Registered | Registration Date |
+| Action | View / Update / Delete |
+________________________________________
+## 📌 View 6 — Register Patient
+New patient registration + first bill
+**Step 1 — Patient Form:**
+| Field | Description |
+|---|---|
+| Full Name | Required |
+| Gender | Patient gender |
+| Phone | 10 digits required |
+| Date of Birth | Required |
+| Address | Optional |
+| State | Optional |
+| Aadhaar | Formatted input |
+| Blood Group | Optional |
+| Department | For doctor assignment |
+| Assigned Doctor | Required |
+**Step 2 — Bill Preview:**
+| Field | Description |
+|---|---|
+| Registration Fee | Fixed line item |
+| Consultation Fee | Doctor fee line item |
+| Sub Total / Tax / Total | Auto-calculated |
+| Amount Received | Payment input |
+| Payment Mode | Cash / Card / UPI / Insurance |
+**After Save:** Patient ID + Bill ID + Balance + Status shown
+________________________________________
+## 📌 View 7 — Patient Profile
+360° patient view
+**Header:** Name + ID + Actions (Update / Generate Bill / Delete)
+**KPI Cards:** Appointments / Total Billed / Paid / Outstanding
+**Tabs:**
+- **Overview** → Demographics, Department, Doctor, Allergies, Registered Date
+- **Visits** → Date, Doctor, Department, Type, Status, Reason
+- **Billing** → Bill ID, Date, Total, Paid, Balance, Status, View
+- **Admission** → Bed No, Ward, Patient, Department, Admitted Date
+- **Medical** → Diagnosis, Symptoms, Treatment, Doctor, Date
+________________________________________
+## 📌 View 8 — Update Patient
+Edit patient details
+**Fields:** Full Name / Gender / Phone / Blood Group / Address / State / Aadhaar
+________________________________________
+## 📌 View 9 — Billing List
+All invoices
+**KPI Cards:** Total Billed / Collected / Outstanding / Collection Rate
+| Field | Description |
+|---|---|
+| Bill Info | Bill ID + Date |
+| Patient | Patient name |
+| Total | Invoice total |
+| Balance | Due amount |
+| Status | Paid / Partial / Unpaid |
+| Action | View / Collect |
+**Filters:**
+- Search by Patient / Bill ID / Appointment ID
+- Date Scope → All / Today / Yesterday / Custom Date
+- Filter by Status → All / Paid / Unpaid / Partial
+________________________________________
+## 📌 View 10 — Generate Bill
+Create a new bill
+**Fields:**
+- Select Patient (searchable, clear-on-empty)
+- Patient Info Card (Name, ID, Phone, Blood, Doctor, Department) — read only
+- Open Bill Warning (if unpaid bill exists today)
+- Quick Add Items dropdown
+- Item Table → Item / Qty / Unit Price / Status (Paid/Unpaid) / Subtotal
+- Add Row button
+- Payment Mode → Cash / Card / UPI / Insurance
+- Pay Later (checkbox)
+- Amount Received
+- Summary → Sub Total / Tax / Grand Total / Receiving Now / Balance
+- Submit Button
+**After Save:** Bill ID + Total + Paid + Balance + Status + Mode
+________________________________________
+## 📌 View 11 — View Bill (Print)
+Printable invoice
+**Fields:**
+- Hospital Header (name, address, GSTIN)
+- Invoice ID + Date
+- Billed To (patient details)
+- Service Details (visit type, department, doctor)
+- Status Stamp (Paid / Unpaid / Partial)
+- Items Table → #, Description, Qty, Unit Price, Amount
+- Payment History → Date, Mode, Reference, Amount
+- Summary → Sub Total / Tax / Total / Paid / Balance
+- Signature blocks + footer
+- Actions → Collect Payment / Print / Delete
+________________________________________
+## 📌 View 12 — Collect Payment (Modal)
+Record a payment
+| Field | Description |
+|---|---|
+| Select Bill | Unpaid / Partial only |
+| Patient | Auto from bill |
+| Bill ID | Selected invoice |
+| Total / Paid / Balance Due | Read only |
+| Amount to Collect | Payment input |
+| Payment Method | Cash / Card / UPI / Insurance |
+| Transaction Reference | Required for Card / UPI |
+________________________________________
+## 📌 View 13 — Bed Man

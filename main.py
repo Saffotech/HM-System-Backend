@@ -2,8 +2,9 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
 from Routers import auth
-from Routers.roles import router as roles_router  # ← add this
-from Models import user, role
+from Routers.roles import router as roles_router
+from Models import user, role, department, opd_billing  # noqa: F401
+from Routers.opd import router as opd_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -24,6 +25,7 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(roles_router)  # ← add this
+app.include_router(opd_router)
 
 @app.get("/")
 def home():

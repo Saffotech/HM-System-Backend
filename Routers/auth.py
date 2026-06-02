@@ -31,7 +31,8 @@ def register(data: UserCreate, db: Session = Depends(get_db)):
         last_name  = data.last_name,
         email      = data.email,
         password   = hash_password(data.password),
-        role_id    = data.role_id   # ← role_id not role
+        role_id    = data.role_id,   # ← role_id not role
+        department_id = data.department_id,  # ← add
     )
     db.add(new_user)
     db.commit()
