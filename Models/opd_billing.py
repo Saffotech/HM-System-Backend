@@ -46,7 +46,7 @@ class Appointment(Base):
     reason = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     appointment_type = Column(String, default="opd")  # opd / follow-up
-    status = Column(String, default="scheduled")  # scheduled / completed / cancelled
+    status = Column(String, default="scheduled")  # scheduled / waiting / in_progress / completed / cancelled
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now)
 

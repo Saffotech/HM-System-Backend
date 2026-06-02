@@ -1,10 +1,13 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from database import Base, engine
+from database import Base, engine, SessionLocal
 from Routers import auth
 from Routers.roles import router as roles_router
 from Models import user, role, department, opd_billing  # noqa: F401
 from Routers.opd import router as opd_router
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.doctor_lab_test_order import LabTestOrder
+from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
@@ -24,9 +27,34 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
-app.include_router(roles_router)  # ← add this
+app.include_router(roles_router)
 app.include_router(opd_router)
 
 @app.get("/")
 def home():
     return {"message": "Hospital api running.."}
+
+from Routers.doctor_appointment_router import (
+    router as appointments_router
+)
+app.include_router(appointments_router)
+
+from Routers.doctor_patient_queue_router import router as patient_queue_router
+app.include_router(patient_queue_router)
+
+from Routers.doctor_patient_history_router import (
+    router as patient_router
+)
+
+app.include_router(patient_router)
+
+
+from Routers.doctor_prescription_router import (
+    router as prescription_router
+)
+
+app.include_router(prescription_router)
+
+from Routers.doctor_lab_test_router import router as lab_test_router
+app.include_router(lab_test_router)
+
