@@ -5,8 +5,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
 from Models.user import User
-from Schemas.patient_history_schema import PaginationSchema
-from Services.patient_history_service import (
+from Schemas.doctor_patient_history_schema import PaginationSchema
+from Services.doctor_patient_history_service import (
     get_patients_service,
     get_patient_details_service
 )

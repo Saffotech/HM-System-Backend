@@ -3,8 +3,8 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-from Models.patient_queue import PatientQueue
-from Models.appointments import Appointment
+from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_appointments import Appointment
 
 # ==========================================================
 # Generate Token Number

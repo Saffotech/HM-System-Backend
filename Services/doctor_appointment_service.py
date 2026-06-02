@@ -2,8 +2,8 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from Models.appointments import Appointment
-from Schemas.appointment_schema import AppointmentStatus
+from Models.doctor_appointments import Appointment
+from Schemas.doctor_appointment_schema import AppointmentStatus
 
 # ==========================================================
 # Get Today's Appointments

@@ -2,13 +2,13 @@ from sqlalchemy.orm import Session
 from sqlalchemy import or_
 from fastapi import HTTPException
 
-from Models.appointments import Appointment
-from Models.lab_test_order import (
+from Models.doctor_appointments import Appointment
+from Models.doctor_lab_test_order import (
     LabTestOrder,
     LabTestStatus
 )
 
-from Schemas.lab_test_schema import (
+from Schemas.doctor_lab_test_schema import (
     LabTestCreate,
     LabTestUpdate
 )

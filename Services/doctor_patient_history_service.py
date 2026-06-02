@@ -1,7 +1,7 @@
 from datetime import date
 from sqlalchemy import (extract,or_)
 from sqlalchemy.orm import Session
-from Models.appointments import Appointment
+from Models.doctor_appointments import Appointment
 
 # ==========================================================
 # Get Patients Service

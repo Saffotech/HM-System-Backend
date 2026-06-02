@@ -10,14 +10,14 @@ from database import get_db
 
 from Models.user import User
 
-from Schemas.lab_test_schema import (
+from Schemas.doctor_lab_test_schema import (
     LabTestCreate,
     LabTestUpdate,
     LabTestResponse,
     LabTestListResponse
 )
 
-from Services.lab_test_service import (
+from Services.doctor_lab_test_service import (
     create_lab_test_service,
     get_lab_tests_service,
     update_lab_test_service,

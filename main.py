@@ -4,9 +4,9 @@ from database import Base, engine, SessionLocal
 from Routers import auth
 from Routers.roles import router as roles_router  # ← add this
 from Models import user, role
-from Models import appointments
-from Models.prescriptions import Prescription,PrescriptionItem
-from Models.lab_test_order import LabTestOrder
+from Models import doctor_appointments
+from Models.doctor_prescriptions import Prescription,PrescriptionItem
+from Models.doctor_lab_test_order import LabTestOrder
 
 Base.metadata.create_all(bind=engine)
 
@@ -32,27 +32,27 @@ app.include_router(roles_router)  # ← add this
 def home():
     return {"message": "Hospital api running.."}
 
-from Routers.appointment_router import (
+from Routers.doctor_appointment_router import (
     router as appointments_router
 )
 app.include_router(appointments_router)
 
-from Routers.patient_queue_router import router as patient_queue_router
+from Routers.doctor_patient_queue_router import router as patient_queue_router
 app.include_router(patient_queue_router)
 
-from Routers.patient_history_router import (
+from Routers.doctor_patient_history_router import (
     router as patient_router
 )
 
 app.include_router(patient_router)
 
 
-from Routers.prescription_router import (
+from Routers.doctor_prescription_router import (
     router as prescription_router
 )
 
 app.include_router(prescription_router)
 
-from Routers.lab_test_router import router as lab_test_router
+from Routers.doctor_lab_test_router import router as lab_test_router
 app.include_router(lab_test_router)
 

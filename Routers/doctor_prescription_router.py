@@ -3,11 +3,11 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
 from Models.user import User
-from Schemas.prescription_schema import (
+from Schemas.doctor_prescription_schema import (
     PrescriptionCreate,
     PrescriptionResponse
 )
-from Services.prescription_service import (
+from Services.doctor_prescription_service import (
     create_prescription_service,
     get_prescription_by_id_service,
     get_patient_prescriptions_service,

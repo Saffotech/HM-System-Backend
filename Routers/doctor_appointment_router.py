@@ -17,11 +17,11 @@ from dependencies import (
 
 from Models.user import User
 
-from Schemas.appointment_schema import (
+from Schemas.doctor_appointment_schema import (
     AppointmentStatusUpdate
 )
 
-from Services.appointment_service import (
+from Services.doctor_appointment_service import (
 
     get_today_appointments_service,
     get_appointment_by_id_service,

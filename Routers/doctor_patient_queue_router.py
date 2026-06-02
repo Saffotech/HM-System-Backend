@@ -3,8 +3,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
 from Models.user import User
-from Schemas.patient_queue_schema import AddPatientQueueSchema
-from Services.patient_queue_service import (
+from Schemas.doctor_patient_queue_schema import AddPatientQueueSchema
+from Services.doctor_patient_queue_service import (
 
     add_patient_to_queue_service,
     get_today_queue_service,
