@@ -1,15 +1,11 @@
-from pydantic import BaseModel, Field
-from datetime import date, time, datetime
-from typing import Optional
+from datetime import datetime
 from enum import Enum
+from typing import Optional
 
+from pydantic import BaseModel, Field
 
-# ==========================================================
-# Appointment Status Enum
-# ==========================================================
 
 class AppointmentStatus(str, Enum):
-
     scheduled = "scheduled"
     waiting = "waiting"
     in_progress = "in_progress"
@@ -17,56 +13,33 @@ class AppointmentStatus(str, Enum):
     cancelled = "cancelled"
 
 
-# ==========================================================
-# Update Appointment Status Schema
-# ==========================================================
-
 class AppointmentStatusUpdate(BaseModel):
-
     status: AppointmentStatus
 
 
-# ==========================================================
-# Appointment Response Schema
-# ==========================================================
-
 class AppointmentResponse(BaseModel):
+    """Matches OPD appointments + joined patient fields."""
 
     id: int
+    appointment_uid: str
     patient_id: int
     patient_name: str
     patient_phone: str
-    patient_age: Optional[int]
-    patient_gender: Optional[str]
+    patient_age: Optional[int] = None
+    patient_gender: Optional[str] = None
     patient_uhid: str
     doctor_id: int
-
-    appointment_date: date
-    appointment_time: time
-
+    department_id: int
+    scheduled_at: Optional[str] = None
+    appointment_date: Optional[str] = None
+    appointment_time: Optional[str] = None
     appointment_type: str
-    priority: str
     status: str
+    reason: Optional[str] = None
+    notes: Optional[str] = None
+    created_at: Optional[str] = None
 
-    reason: Optional[str]
-    notes: Optional[str]
-
-    checked_in_at: Optional[datetime]
-    consultation_started_at: Optional[datetime]
-    consultation_completed_at: Optional[datetime]
-
-    created_at: datetime
-    updated_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ==========================================================
-# Pagination Schema
-# ==========================================================
 
 class PaginationSchema(BaseModel):
-
-    page: int = Field(default=1,ge=1)
-    limit: int = Field(default=10,ge=1,le=100)
+    page: int = Field(default=1, ge=1)
+    limit: int = Field(default=10, ge=1, le=100)

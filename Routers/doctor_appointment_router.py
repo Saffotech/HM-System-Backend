@@ -1,22 +1,16 @@
 from datetime import date
-
 from fastapi import (
     APIRouter,
     Depends,
     status
 )
-
 from sqlalchemy.orm import Session
-
 from database import get_db
-
 from dependencies import (
     get_current_user,
     PermissionChecker
 )
-
 from Models.user import User
-
 from Schemas.doctor_appointment_schema import (
     AppointmentStatusUpdate
 )

@@ -1,0 +1,721 @@
+# HMS API Reference (Frontend Integration)
+
+Complete endpoint list for the Hospital Management System backend. Use this document to integrate React (or any client) with the API.
+
+**Interactive docs (when backend is running):** `http://127.0.0.1:8000/docs`
+
+---
+
+## Base URL
+
+| Environment | URL |
+|-------------|-----|
+| Local (direct) | `http://127.0.0.1:8000` |
+| Local (Vite proxy) | `/api` → proxied to backend (see `hms-frontend/vite.config.ts`) |
+
+All paths below are relative to the base URL (e.g. `POST /auth/login` → `http://127.0.0.1:8000/auth/login`).
+
+---
+
+## Authentication
+
+### How to call protected APIs
+
+1. `POST /auth/login` with email + password.
+2. Store `access_token` from the response.
+3. Send on every protected request:
+
+```http
+Authorization: Bearer <access_token>
+```
+
+### Login response (use for routing & UI)
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer",
+  "role": "opd_billing",
+  "permissions": ["patients:view", "opd:view", "billing:view", ...],
+  "first_name": "Ravi",
+  "user_id": 3
+}
+```
+
+- **Route by `role`:** `admin`, `doctor`, `nurse`, `opd_billing`, `pharmacist`
+- **Show/hide buttons by `permissions`:** e.g. only show "Register Patient" if `patients:create` is in the array
+- **Re-login required** after backend permission changes in the database
+
+### Common HTTP status codes
+
+| Code | Meaning |
+|------|---------|
+| 200 | OK |
+| 201 | Created |
+| 400 | Validation / business rule error (`detail` in body) |
+| 401 | Missing or invalid token |
+| 403 | No permission or account deactivated |
+| 404 | Resource not found |
+| 409 | Conflict (duplicate email, phone, patient, etc.) |
+
+Error body shape (FastAPI):
+
+```json
+{ "detail": "Human-readable message" }
+```
+
+---
+
+## Route prefixes (important)
+
+Doctor and OPD both use **appointments**, but different URLs:
+
+| Module | Prefix | Who uses it |
+|--------|--------|-------------|
+| OPD front desk | `/opd/...` | `opd_billing` |
+| Doctor clinical | `/appointments`, `/queue`, `/patients`, `/prescriptions`, `/lab-tests` | `doctor` |
+
+Do not mix them up. OPD books at `POST /opd/appointments`; doctor reads at `GET /appointments/today`.
+
+---
+
+# 1. Auth (`/auth`)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| POST | `/auth/register` | No | Register staff user |
+| POST | `/auth/login` | No | Login, get JWT |
+| GET | `/auth/me` | Yes | Current user profile |
+
+### POST `/auth/register`
+
+**Body**
+
+```json
+{
+  "first_name": "Amit",
+  "last_name": "Kumar",
+  "email": "doctor@hospital.com",
+  "password": "password123",
+  "role_id": 2,
+  "department_id": 1
+}
+```
+
+**Response 201**
+
+```json
+{
+  "message": "Staff registered successfully",
+  "user_id": 5,
+  "email": "doctor@hospital.com",
+  "role": "doctor"
+}
+```
+
+### POST `/auth/login`
+
+**Body**
+
+```json
+{
+  "email": "billing@hospital.com",
+  "password": "password123"
+}
+```
+
+**Response 200** — see [Login response](#authentication) above.
+
+### GET `/auth/me`
+
+**Response 200**
+
+```json
+{
+  "user_id": 3,
+  "email": "billing@hospital.com",
+  "first_name": "Ravi",
+  "last_name": "Singh",
+  "role": "opd_billing",
+  "role_id": 4,
+  "is_active": true,
+  "created_at": "2026-05-21 ..."
+}
+```
+
+---
+
+# 2. Roles (`/roles`)
+
+Mostly **admin** setup. `GET /roles/` has no permission check (public list).
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/roles/` | None | List roles + permission names |
+| POST | `/roles/` | `roles:create` | Create role |
+| POST | `/roles/permissions` | `roles:create` | Create permission |
+| POST | `/roles/{role_id}/permissions` | `roles:create` | Assign permissions to role |
+
+### POST `/roles/{role_id}/permissions`
+
+**Body**
+
+```json
+{
+  "permission_ids": [1, 2, 5, 8]
+}
+```
+
+---
+
+# 3. OPD & Billing (`/opd`)
+
+**Role:** `opd_billing` (and admin with full permissions).
+
+### 3.1 Dashboard & lookup
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/opd/dashboard` | `opd:view` | Stats cards + recent visits |
+| GET | `/opd/patient/search?phone=` | `patients:view` | Search by phone |
+| GET | `/opd/patients?search=&page=&limit=` | `patients:view` | Patient list |
+| GET | `/opd/patient/{id}` | `patients:view` | Single patient |
+| GET | `/opd/patient/{id}/profile` | `patients:view` | Profile + visits + billing summary |
+| PUT | `/opd/patient/{id}` | `patients:update` | Update patient |
+| DELETE | `/opd/patient/{id}` | `patients:delete` | Soft-delete patient |
+| GET | `/opd/departments` | `opd:view` | Active departments |
+| GET | `/opd/doctors/department/{department_id}` | `opd:view` | Doctors in department |
+
+#### GET `/opd/patient/search?phone=9567154627`
+
+**Found**
+
+```json
+{
+  "found": true,
+  "patient_id": 1,
+  "patient_uid": "P-1001",
+  "name": "Amaresh Maurya",
+  "phone": "9567154627",
+  "blood_group": "O+",
+  "gender": "Male",
+  "aadhaar": null
+}
+```
+
+**Not found**
+
+```json
+{
+  "found": false,
+  "message": "New patient. Please register."
+}
+```
+
+#### GET `/opd/dashboard`
+
+```json
+{
+  "visits_today": 12,
+  "patients_total": 340,
+  "pending_bills": 5,
+  "appointments_today": 8,
+  "beds_free": 4,
+  "beds_total": 8,
+  "recent_visits": [ /* QueueVisitItem[] max 5 */ ]
+}
+```
+
+### 3.2 Billing & registration
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| POST | `/opd/bill/preview` | `billing:view` | Preview fees only |
+| POST | `/opd/patient/preview-bill` | `billing:view` | Same preview (full register body) |
+| POST | `/opd/patient/register` | `patients:create` | New patient + visit + bill |
+| POST | `/opd/visit` | `opd:create` | Existing patient new visit |
+| POST | `/opd/bill/generate` | `billing:create` | Bill with extra line items |
+| GET | `/opd/visit/{visit_id}/invoice` | `billing:view` | Printable invoice |
+| GET | `/opd/bills` | `billing:view` | Bill list + KPIs |
+| POST | `/opd/visit/{visit_id}/pay` | `billing:update` | Collect payment |
+| GET | `/opd/payments/history` | `billing:view` | Payment ledger |
+| GET | `/opd/queue/today` | `opd:view` | Today's OPD visit queue |
+
+#### POST `/opd/patient/register`
+
+**Query params**
+
+| Param | Default | Description |
+|-------|---------|-------------|
+| `payment_mode` | `cash` | `cash` \| `card` \| `upi` \| `insurance` |
+| `pay_later` | `false` | If true, no payment recorded |
+| `amount_received` | null | Partial pay amount (optional) |
+
+**Body** — patient fields + billing fields:
+
+```json
+{
+  "first_name": "Amaresh",
+  "last_name": "Maurya",
+  "phone": "9567154627",
+  "gender": 1,
+  "date_of_birth": "1990-05-15",
+  "department_id": 1,
+  "doctor_id": 2,
+  "registration_fee": 200,
+  "consultation_fee": 800,
+  "gst_percent": 5
+}
+```
+
+**Gender codes:** `1` Male, `2` Female, `3` Other, `4` Prefer not to say
+
+**Response 201**
+
+```json
+{
+  "message": "Patient registered successfully",
+  "patient_id": "P-1001",
+  "bill_number": "BILL-001",
+  "token_number": "OPD-20260602-001",
+  "visit_id": 1
+}
+```
+
+#### POST `/opd/visit`
+
+**Query:** same as register (`payment_mode`, `pay_later`, `amount_received`)
+
+**Body**
+
+```json
+{
+  "patient_id": 1,
+  "department_id": 1,
+  "doctor_id": 2,
+  "registration_fee": 0,
+  "consultation_fee": 800,
+  "gst_percent": 5,
+  "waive_registration_fee": true
+}
+```
+
+**Response 201**
+
+```json
+{
+  "message": "OPD visit created successfully",
+  "patient_id": "P-1001",
+  "bill_number": "BILL-002",
+  "token_number": "OPD-20260602-002",
+  "visit_id": 2,
+  "grand_total": 840,
+  "payment_status": "paid"
+}
+```
+
+#### POST `/opd/visit/{visit_id}/pay`
+
+**Body**
+
+```json
+{
+  "payment_mode": "upi",
+  "paid_amount": 500,
+  "transaction_reference": "TXN123456"
+}
+```
+
+`transaction_reference` is **required** for `card` and `upi`.
+
+#### GET `/opd/bills`
+
+**Query**
+
+| Param | Description |
+|-------|-------------|
+| `status` | `paid` \| `partial` \| `pending` |
+| `search` | Patient name, UID, bill or token |
+| `today_only` | boolean |
+| `from_date`, `to_date` | ISO datetime |
+| `page`, `limit` | Pagination |
+
+**Response** includes `summary` (total_billed, total_collected, total_outstanding, collection_rate_percent) and `bills[]`.
+
+### 3.3 OPD appointments (front desk booking)
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| POST | `/opd/appointments` | `appointments:create` | Book appointment |
+| GET | `/opd/appointments` | `appointments:view` | List appointments |
+| PATCH | `/opd/appointments/{id}` | `appointments:update` | Update status/time/notes |
+| POST | `/opd/appointments/{id}/cancel` | `appointments:update` | Cancel |
+| GET | `/opd/appointments/doctor/{doctor_id}/slots` | `appointments:view` | Slot grid |
+
+#### POST `/opd/appointments`
+
+**Body**
+
+```json
+{
+  "patient_id": 1,
+  "doctor_id": 2,
+  "department_id": 1,
+  "scheduled_at": "2026-06-05T10:30:00+05:30",
+  "reason": "Follow-up",
+  "notes": null,
+  "appointment_type": "opd"
+}
+```
+
+**Response 201** — `AppointmentOut`:
+
+```json
+{
+  "id": 1,
+  "appointment_uid": "APT-0001",
+  "patient_id": 1,
+  "patient_name": "Amaresh Maurya",
+  "patient_uid": "P-1001",
+  "doctor_id": 2,
+  "doctor_name": "Dr. Sharma",
+  "department_id": 1,
+  "department_name": "General Medicine",
+  "scheduled_at": "2026-06-05T10:30:00+05:30",
+  "reason": "Follow-up",
+  "notes": null,
+  "appointment_type": "opd",
+  "status": "scheduled"
+}
+```
+
+#### GET `/opd/appointments/doctor/{doctor_id}/slots`
+
+**Query:** `department_id` (required), `date` (required, `YYYY-MM-DD`)
+
+```json
+{
+  "doctor_id": 2,
+  "date": "2026-06-05",
+  "slots": [
+    { "time": "09:00", "status": "available" },
+    { "time": "09:30", "status": "booked" }
+  ]
+}
+```
+
+### 3.4 Beds
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/opd/beds?ward=&status=&search=` | `opd:view` | All beds + stats |
+| GET | `/opd/beds/ward/{ward_name}` | `opd:view` | Ward detail |
+| POST | `/opd/beds/assign` | `opd:create` | Assign patient to bed |
+| POST | `/opd/beds/{bed_id}/release` | `opd:create` | Release bed |
+
+#### POST `/opd/beds/assign`
+
+```json
+{
+  "bed_id": 1,
+  "patient_id": 1,
+  "department_id": 1
+}
+```
+
+---
+
+# 4. Doctor module
+
+**Role:** `doctor` (permissions: `appointments:view`, `appointments:update`, `prescriptions:create`, etc.)
+
+Uses the **same** `appointments` table as OPD (`scheduled_at`, `appointment_uid`, `status`).
+
+### Appointment status workflow (doctor)
+
+```
+scheduled → waiting → in_progress → completed
+         ↘ cancelled (from scheduled / waiting / in_progress)
+```
+
+Queue flow often sets: add to queue → `waiting`, start consult → `in_progress`, complete → `completed`.
+
+### 4.1 Doctor appointments (`/appointments`)
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/appointments/dashboard-stats` | `appointments:view` | Today counts |
+| GET | `/appointments/today` | `appointments:view` | Today's list |
+| GET | `/appointments/history` | `appointments:view` | Completed history |
+| GET | `/appointments/by-date/{appointment_date}` | `appointments:view` | By date (`YYYY-MM-DD`) |
+| GET | `/appointments/{appointment_id}` | `appointments:view` | Single appointment |
+| PUT | `/appointments/{appointment_id}/status` | `appointments:update` | Change status |
+
+**Wrapper response** (most list endpoints):
+
+```json
+{
+  "success": true,
+  "message": "Today's appointments fetched successfully",
+  "appointment": 5,
+  "appointments": [ /* appointment objects */ ]
+}
+```
+
+**Single appointment object** (from doctor services):
+
+```json
+{
+  "id": 1,
+  "appointment_uid": "APT-0001",
+  "patient_id": 1,
+  "patient_name": "Amaresh Maurya",
+  "patient_phone": "9567154627",
+  "patient_age": 35,
+  "patient_gender": "Male",
+  "patient_uhid": "P-1001",
+  "doctor_id": 2,
+  "department_id": 1,
+  "scheduled_at": "2026-06-05T10:30:00+05:30",
+  "appointment_date": "2026-06-05",
+  "appointment_time": "10:30:00",
+  "appointment_type": "opd",
+  "status": "scheduled",
+  "reason": "Fever",
+  "notes": null,
+  "created_at": "2026-06-02T09:00:00+05:30"
+}
+```
+
+#### PUT `/appointments/{appointment_id}/status`
+
+**Body**
+
+```json
+{
+  "status": "waiting"
+}
+```
+
+Allowed values: `scheduled`, `waiting`, `in_progress`, `completed`, `cancelled` (must follow workflow).
+
+#### GET `/appointments/dashboard-stats`
+
+```json
+{
+  "success": true,
+  "message": "Dashboard stats fetched successfully",
+  "data": {
+    "today_appointments": 10,
+    "patients_waiting": 3,
+    "patients_in_progress": 1,
+    "completed_consultations": 4,
+    "cancelled_appointments": 0
+  }
+}
+```
+
+### 4.2 Patient queue (`/queue`)
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| POST | `/queue/add` | `appointments:update` | Add appointment to queue |
+| GET | `/queue/today` | `appointments:view` | Today's queue |
+| PUT | `/queue/start/{queue_id}` | `appointments:update` | Start consultation |
+| PUT | `/queue/complete/{queue_id}` | `appointments:update` | Complete consultation |
+| GET | `/queue/current` | `appointments:view` | Current in-progress patient |
+
+#### POST `/queue/add`
+
+```json
+{
+  "appointment_id": 1
+}
+```
+
+**Response 201**
+
+```json
+{
+  "success": true,
+  "message": "Patient added to queue successfully",
+  "queue": { /* PatientQueue row */ }
+}
+```
+
+#### PUT `/queue/start/{queue_id}`
+
+```json
+{
+  "success": true,
+  "message": "Consultation started successfully",
+  "waiting_minutes": 12.5,
+  "queue": { /* ... */ }
+}
+```
+
+### 4.3 Patient history (`/patients`) — doctor only
+
+Not the same as `GET /opd/patients`.
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| GET | `/patients?page=&limit=&search=&filter_date=&month=&year=` | `appointments:view` | Completed visits list |
+| GET | `/patients/{patient_uhid}` | `appointments:view` | History for one patient UID |
+
+**Response** — list uses same appointment-shaped objects as doctor appointments.
+
+### 4.4 Prescriptions (`/prescriptions`)
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| POST | `/prescriptions` | `prescriptions:create` | Create prescription |
+| GET | `/prescriptions/{prescription_id}` | Yes (login) | Get one |
+| GET | `/prescriptions/patient/{patient_id}` | Yes (login) | List by patient |
+| PUT | `/prescriptions/{prescription_id}` | `prescriptions:update` | Update |
+| DELETE | `/prescriptions/{prescription_id}` | `prescriptions:delete` | Delete |
+
+> Ensure doctor role has `prescriptions:update` and `prescriptions:delete` in DB if you use PUT/DELETE.
+
+#### POST `/prescriptions`
+
+**Body**
+
+```json
+{
+  "appointment_id": 1,
+  "diagnosis": "Viral fever",
+  "notes": "Rest and fluids",
+  "items": [
+    {
+      "medicine_name": "Paracetamol",
+      "dosage": "500mg",
+      "frequency": "Twice daily",
+      "duration": "5 days",
+      "instructions": "After food"
+    }
+  ]
+}
+```
+
+Requires appointment `status` = `completed`.
+
+### 4.5 Lab tests (`/lab-tests`)
+
+| Method | Path | Permission | Description |
+|--------|------|------------|-------------|
+| POST | `/lab-tests` | Login only | Create order |
+| GET | `/lab-tests?search=&skip=&limit=` | Login only | List/search |
+| PUT | `/lab-tests/{test_id}` | Login only | Update (ordered only) |
+| PATCH | `/lab-tests/{test_id}/cancel` | Login only | Cancel |
+
+#### POST `/lab-tests`
+
+```json
+{
+  "appointment_id": 1,
+  "test_name": "CBC",
+  "category": "Blood Test",
+  "priority": "Normal",
+  "clinical_notes": "Routine check"
+}
+```
+
+**Status values:** `ordered`, `sample_collected`, `processing`, `completed`, `cancelled`
+
+---
+
+# 5. Permission cheat sheet by role
+
+### `opd_billing`
+
+`patients:view`, `patients:create`, `patients:update`, `patients:delete`, `opd:view`, `opd:create`, `billing:view`, `billing:create`, `billing:update`, `appointments:view`, `appointments:create`, `appointments:update`
+
+### `doctor`
+
+`patients:view`, `opd:view`, `prescriptions:create`, `lab:create`, `lab:view`, `appointments:view`, `appointments:update`  
+(Add `prescriptions:update`, `prescriptions:delete` if using those endpoints.)
+
+### `admin`
+
+All permissions (from seed).
+
+---
+
+# 6. Frontend integration tips
+
+1. **Axios/fetch:** attach `Authorization: Bearer ${token}` on every call except login/register.
+2. **403 on OPD routes:** re-login after DB permission changes.
+3. **Date/time:** send ISO 8601 with timezone for `scheduled_at` (e.g. `2026-06-05T10:30:00+05:30`).
+4. **Pagination:** OPD patients/bills use `page` + `limit`; lab tests use `skip` + `limit`.
+5. **Swagger:** use `/docs` to try requests with "Authorize" button.
+6. **Role flows:** screen-by-screen guides in [roles/](./roles/) (OPD, doctor, etc.).
+
+---
+
+# 7. Quick endpoint index (A–Z by path)
+
+| Method | Path |
+|--------|------|
+| GET | `/` |
+| POST | `/auth/login` |
+| GET | `/auth/me` |
+| POST | `/auth/register` |
+| GET | `/appointments/by-date/{date}` |
+| GET | `/appointments/dashboard-stats` |
+| GET | `/appointments/history` |
+| GET | `/appointments/today` |
+| GET | `/appointments/{id}` |
+| PUT | `/appointments/{id}/status` |
+| POST | `/lab-tests` |
+| GET | `/lab-tests` |
+| PUT | `/lab-tests/{test_id}` |
+| PATCH | `/lab-tests/{test_id}/cancel` |
+| GET | `/opd/appointments` |
+| POST | `/opd/appointments` |
+| PATCH | `/opd/appointments/{id}` |
+| POST | `/opd/appointments/{id}/cancel` |
+| GET | `/opd/appointments/doctor/{doctor_id}/slots` |
+| GET | `/opd/beds` |
+| POST | `/opd/beds/assign` |
+| POST | `/opd/beds/{bed_id}/release` |
+| GET | `/opd/beds/ward/{ward_name}` |
+| POST | `/opd/bill/generate` |
+| POST | `/opd/bill/preview` |
+| GET | `/opd/bills` |
+| GET | `/opd/dashboard` |
+| GET | `/opd/departments` |
+| GET | `/opd/doctors/department/{department_id}` |
+| GET | `/opd/patient/search` |
+| GET | `/opd/patient/{id}` |
+| GET | `/opd/patient/{id}/profile` |
+| PUT | `/opd/patient/{id}` |
+| DELETE | `/opd/patient/{id}` |
+| POST | `/opd/patient/preview-bill` |
+| POST | `/opd/patient/register` |
+| GET | `/opd/patients` |
+| GET | `/opd/payments/history` |
+| GET | `/opd/queue/today` |
+| POST | `/opd/visit` |
+| GET | `/opd/visit/{visit_id}/invoice` |
+| POST | `/opd/visit/{visit_id}/pay` |
+| GET | `/patients` |
+| GET | `/patients/{patient_uhid}` |
+| POST | `/prescriptions` |
+| GET | `/prescriptions/patient/{patient_id}` |
+| GET | `/prescriptions/{prescription_id}` |
+| PUT | `/prescriptions/{prescription_id}` |
+| DELETE | `/prescriptions/{prescription_id}` |
+| POST | `/queue/add` |
+| PUT | `/queue/complete/{queue_id}` |
+| GET | `/queue/current` |
+| PUT | `/queue/start/{queue_id}` |
+| GET | `/queue/today` |
+| GET | `/roles/` |
+| POST | `/roles/` |
+| POST | `/roles/permissions` |
+| POST | `/roles/{role_id}/permissions` |
+
+---
+
+*Last aligned with backend routers: Auth, Roles, OPD (`Routers/opd.py`), Doctor (appointment, queue, patients, prescriptions, lab-tests).*

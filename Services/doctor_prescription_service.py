@@ -1,6 +1,6 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from Models.doctor_appointments import Appointment
+from Models.opd_billing import Appointment
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
 from Schemas.doctor_prescription_schema import PrescriptionCreate
 

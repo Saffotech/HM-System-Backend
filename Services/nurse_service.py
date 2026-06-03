@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from Models.doctor_appointments import Appointment
+from Models.opd_billing import Appointment
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nursing_notes import NursingNote
 

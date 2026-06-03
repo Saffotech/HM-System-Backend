@@ -7,6 +7,7 @@ class UserCreate(BaseModel):
     email:      EmailStr
     password:   str = Field(..., min_length=8)
     role_id:    int  # FK to roles table
+    department_id: Optional[int] = None  # only relevant for Doctor/Nurse
 
 class UserLogin(BaseModel):
     email:    EmailStr

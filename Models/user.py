@@ -17,6 +17,13 @@ class User(Base):
     # RBAC — role_id replaces role string
     role_id         = Column(Integer, ForeignKey("roles.id"), nullable=True)
     role_obj        = relationship("Role")
+    department_id = Column(
+        Integer,
+        ForeignKey("departments.id"),
+        nullable=True
+    )
+
+    department = relationship("Department")
 
     # profile
     gender          = Column(Integer, nullable=True)
