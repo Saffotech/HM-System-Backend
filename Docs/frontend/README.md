@@ -4,13 +4,16 @@ Screens, user flows, and API calls for **React app only**.
 
 Backend API details → see [../backend/](../backend/)
 
+**Full API reference (integration):** [API-REFERENCE.md](./API-REFERENCE.md)
+
 ---
 
 ## Start here (in order)
 
-1. **[frontend-guide.md](./frontend-guide.md)** — project setup, auth, routing rules
-2. **[flows/auth-flow.md](./flows/auth-flow.md)** — login → dashboard (all roles)
-3. Open **your role file** in [roles/](./roles/)
+1. **[API-REFERENCE.md](./API-REFERENCE.md)** — all endpoints, auth, request/response examples
+2. **[frontend-guide.md](./frontend-guide.md)** — project setup, auth, routing rules
+3. **[flows/auth-flow.md](./flows/auth-flow.md)** — login → dashboard (all roles)
+4. Open **your role file** in [roles/](./roles/) for screen-by-screen flows
 
 ---
 

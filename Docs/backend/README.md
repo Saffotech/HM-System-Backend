@@ -7,6 +7,8 @@ API + database only. **No UI.**
 1. [backend-guide.md](./backend-guide.md) — how the project works
 2. Pick your role file in [roles/](./roles/)
 
+Frontend API integration doc: [../frontend/API-REFERENCE.md](../frontend/API-REFERENCE.md)
+
 ## Role modules
 
 | File | Database role | Status |
