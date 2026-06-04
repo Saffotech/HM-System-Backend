@@ -41,3 +41,4 @@ class User(Base):
     is_active       = Column(Boolean, default=True)
     created_at      = Column(DateTime(timezone=True),
                         default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))
+
