@@ -16,6 +16,7 @@ from Schemas.opd_schema import (
     BedOut,
     BillPreviewRequest,
     BillPreviewResponse,
+    BillUpdateRequest,
     CollectPayment,
     GenerateBillRequest,
     OpdVisitCreate,
@@ -174,12 +175,19 @@ def register_and_pay(
     payment_mode: str = "cash",
     pay_later: bool = False,
     amount_received: Optional[float] = None,
+    transaction_reference: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:create")),
 ):
     return opd_service.register_new_patient(
-        db, data, current_user.id, payment_mode, pay_later, amount_received
+        db,
+        data,
+        current_user.id,
+        payment_mode,
+        pay_later,
+        amount_received,
+        transaction_reference,
     )
 
 
@@ -189,12 +197,19 @@ def create_visit_for_patient(
     payment_mode: str = "cash",
     pay_later: bool = False,
     amount_received: Optional[float] = None,
+    transaction_reference: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:create")),
 ):
     return opd_service.create_visit_for_existing_patient(
-        db, data, current_user.id, payment_mode, pay_later, amount_received
+        db,
+        data,
+        current_user.id,
+        payment_mode,
+        pay_later,
+        amount_received,
+        transaction_reference,
     )
 
 
@@ -243,6 +258,27 @@ def list_bills(
         page=page,
         limit=limit,
     )
+
+
+@router.put("/bills/{visit_id}")
+def update_bill(
+    visit_id: int,
+    data: BillUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("billing:update")),
+):
+    return opd_service.update_bill(db, visit_id, data)
+
+
+@router.delete("/bills/{visit_id}")
+def delete_bill(
+    visit_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("billing:delete")),
+):
+    return opd_service.delete_bill(db, visit_id)
 
 
 @router.post("/visit/{visit_id}/pay")

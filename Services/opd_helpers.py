@@ -38,6 +38,23 @@ def validate_payment_mode(payment_mode: str) -> None:
         )
 
 
+def ensure_immediate_payment_valid(
+    payment_mode: str,
+    pay_later: bool,
+    paid: float,
+    transaction_reference: Optional[str] = None,
+) -> None:
+    """Validate payment mode and card/upi reference when recording payment now."""
+    if pay_later or paid <= 0:
+        return
+    validate_payment_mode(payment_mode)
+    if payment_mode in ("card", "upi") and not transaction_reference:
+        raise HTTPException(
+            status_code=400,
+            detail="transaction_reference required for card and upi payments",
+        )
+
+
 def bill_totals_from_subtotal(subtotal: float, gst_percent: float) -> Tuple[float, float, float]:
     gst_amount = round(subtotal * gst_percent / 100, 2)
     return subtotal, gst_amount, round(subtotal + gst_amount, 2)
@@ -179,12 +196,7 @@ def record_payment(
     recorded_by: int,
     transaction_reference: Optional[str] = None,
 ) -> PaymentTransaction:
-    validate_payment_mode(payment_mode)
-    if payment_mode in ("card", "upi") and not transaction_reference:
-        raise HTTPException(
-            status_code=400,
-            detail="transaction_reference required for card and upi payments",
-        )
+    ensure_immediate_payment_valid(payment_mode, pay_later=False, paid=amount, transaction_reference=transaction_reference)
     txn = PaymentTransaction(
         visit_id=visit.id,
         amount=amount,
@@ -219,3 +231,7 @@ def payment_history_rows(db: Session, visit_id: int) -> list[dict]:
         }
         for r in rows
     ]
+
+
+def normalize_aadhaar(value: str) -> str:
+    return value.replace(" ", "").replace("-", "").strip()

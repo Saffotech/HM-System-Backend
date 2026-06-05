@@ -15,6 +15,7 @@ from Schemas.opd_schema import (
     BillPreviewRequest,
     BillPreviewResponse,
     BillSummary,
+    BillUpdateRequest,
     CollectPayment,
     GenerateBillRequest,
     OpdVisitCreate,
@@ -78,6 +79,7 @@ def create_visit(
     payment_mode: str = "cash",
     amount_received: Optional[float] = None,
     extra_items: Optional[List[dict]] = None,
+    transaction_reference: Optional[str] = None
 ) -> OpdVisit:
     h.get_department(db, billing.department_id)
     doctor = h.get_doctor_in_department(db, billing.doctor_id, billing.department_id)
@@ -96,6 +98,8 @@ def create_visit(
         paid = amount_received if amount_received is not None else grand_total
         balance = round(max(grand_total - paid, 0), 2)
         status = "paid" if balance <= 0 else "partial"
+
+    h.ensure_immediate_payment_valid(payment_mode, pay_later, paid, transaction_reference)
 
     visit = OpdVisit(
         bill_number=bill_number,
@@ -125,7 +129,7 @@ def create_visit(
         h.save_extra_bill_items(db, visit.id, extra_items)
 
     if paid > 0:
-        h.record_payment(db, visit, paid, payment_mode, registered_by)
+        h.record_payment(db, visit, paid, payment_mode, registered_by, transaction_reference)
 
     return visit
 
@@ -137,13 +141,23 @@ def register_new_patient(
     payment_mode: str = "cash",
     pay_later: bool = False,
     amount_received: Optional[float] = None,
+    transaction_reference: Optional[str] = None,
 ) -> RegisterSuccessResponse:
-    if not pay_later:
-        h.validate_payment_mode(payment_mode)
-
-    existing = db.query(Patient).filter(Patient.phone == data.phone).first()
+    aadhaar = h.normalize_aadhaar(data.aadhaar_number)
+    data = data.model_copy(update={"aadhaar_number": aadhaar})
+    existing = (
+        db.query(Patient)
+        .filter(
+            Patient.aadhaar_number == data.aadhaar_number,
+            Patient.is_active.is_(True),
+        )
+        .first()
+    )
     if existing:
-        raise HTTPException(status_code=409, detail=f"Patient already exists. UID: {existing.patient_uid}")
+        raise HTTPException(
+            status_code=409,
+            detail=f"Patient with this Aadhaar already exists. UID: {existing.patient_uid}",
+        )
 
     patient = patient_to_model(data, h.next_patient_uid(db), registered_by)
     db.add(patient)
@@ -154,6 +168,7 @@ def register_new_patient(
         pay_later=pay_later,
         payment_mode=payment_mode,
         amount_received=amount_received,
+        transaction_reference=transaction_reference,
     )
     db.commit()
     db.refresh(visit)
@@ -174,10 +189,8 @@ def create_visit_for_existing_patient(
     payment_mode: str = "cash",
     pay_later: bool = False,
     amount_received: Optional[float] = None,
+    transaction_reference: Optional[str] = None,
 ) -> VisitSuccessResponse:
-    if not pay_later:
-        h.validate_payment_mode(payment_mode)
-
     patient = h.get_patient(db, data.patient_id)
     billing = data.model_copy(update={"registration_fee": 0.0}) if data.waive_registration_fee else data
 
@@ -186,6 +199,7 @@ def create_visit_for_existing_patient(
         pay_later=pay_later,
         payment_mode=payment_mode,
         amount_received=amount_received,
+        transaction_reference=transaction_reference,
     )
     db.commit()
     db.refresh(visit)
@@ -199,7 +213,6 @@ def create_visit_for_existing_patient(
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
     )
-
 
 def generate_bill(
     db: Session, data: GenerateBillRequest, registered_by: int
@@ -220,6 +233,7 @@ def generate_bill(
         payment_mode=data.payment_mode,
         amount_received=data.amount_received,
         extra_items=extra or None,
+        transaction_reference=data.transaction_reference,
     )
     db.commit()
     db.refresh(visit)
@@ -302,6 +316,17 @@ def update_patient(db: Session, patient_id: int, data: PatientUpdate) -> Patient
         if db.query(Patient).filter(Patient.phone == updates["phone"], Patient.id != patient_id).first():
             raise HTTPException(status_code=409, detail="Phone number already in use")
 
+    if "aadhaar_number" in updates:
+        updates["aadhaar_number"] = h.normalize_aadhaar(updates["aadhaar_number"])
+    if "aadhaar_number" in updates and updates["aadhaar_number"] != patient.aadhaar_number:
+        dup = db.query(Patient).filter(
+            Patient.aadhaar_number == updates["aadhaar_number"],
+            Patient.id != patient_id,
+            Patient.is_active.is_(True),
+        ).first()
+        if dup:
+            raise HTTPException(status_code=409, detail="Aadhaar number already in use")
+
     if "gender" in updates:
         updates["gender"] = gender_code_to_label(updates.pop("gender"))
 
@@ -374,7 +399,11 @@ def build_invoice(db: Session, visit_id: int) -> dict:
 
 
 def _bills_query(db: Session, status, search, today_only, from_date, to_date):
-    q = db.query(OpdVisit, Patient).join(Patient, OpdVisit.patient_id == Patient.id)
+    q = (
+        db.query(OpdVisit, Patient)
+        .join(Patient, OpdVisit.patient_id == Patient.id)
+        .filter(OpdVisit.status != "cancelled")
+    )
     if status:
         q = q.filter(OpdVisit.payment_status == status)
     if today_only:
@@ -464,6 +493,110 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
         "total_paid": visit.paid_amount,
         "balance_due": visit.balance_due,
         "payment_status": visit.payment_status,
+    }
+
+
+def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
+    visit, patient, _, _ = h.get_visit_with_relations(db, visit_id)
+
+    if visit.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Cannot update a cancelled bill")
+    if visit.payment_status == "paid":
+        raise HTTPException(status_code=400, detail="Cannot update a fully paid bill")
+
+    updates = data.model_dump(exclude_unset=True)
+    extra_items_raw = updates.pop("extra_items", "__unset__")
+
+    new_dept = updates.get("department_id", visit.department_id)
+    new_doc = updates.get("doctor_id", visit.doctor_id)
+    if "department_id" in updates or "doctor_id" in updates:
+        h.get_doctor_in_department(db, new_doc, new_dept)
+        visit.department_id = new_dept
+        visit.doctor_id = new_doc
+
+    for field in ("registration_fee", "consultation_fee", "gst_percent"):
+        if field in updates:
+            setattr(visit, field, updates[field])
+
+    fees_or_doctor_changed = any(
+        k in updates for k in ("registration_fee", "consultation_fee", "gst_percent", "department_id", "doctor_id")
+    )
+
+    if extra_items_raw != "__unset__" or fees_or_doctor_changed:
+        db.query(BillItem).filter(BillItem.visit_id == visit_id).delete()
+        doctor = db.query(User).filter(User.id == visit.doctor_id).first()
+        h.save_default_bill_items(db, visit, doctor)
+        if extra_items_raw != "__unset__" and extra_items_raw:
+            extra_subtotal = h.save_extra_bill_items(
+                db,
+                visit.id,
+                [
+                    {
+                        "description": item["description"],
+                        "qty": item["qty"],
+                        "unit_price": item["unit_price"],
+                    }
+                    for item in extra_items_raw
+                ],
+            )
+        else:
+            extra_subtotal = 0.0
+    else:
+        items = h.list_bill_items(db, visit_id)
+        extra_subtotal = sum(
+            i.amount
+            for i in items
+            if i.description != "Registration Fee" and "Consultation" not in i.description
+        )
+
+    subtotal = visit.registration_fee + visit.consultation_fee + extra_subtotal
+    subtotal, gst_amount, grand_total = h.bill_totals_from_subtotal(subtotal, visit.gst_percent)
+    visit.subtotal = subtotal
+    visit.gst_amount = gst_amount
+    visit.grand_total = grand_total
+
+    paid = visit.paid_amount or 0
+    visit.balance_due = round(max(grand_total - paid, 0), 2)
+    if visit.balance_due <= 0:
+        visit.payment_status = "paid"
+    elif paid > 0:
+        visit.payment_status = "partial"
+    else:
+        visit.payment_status = "pending"
+
+    db.commit()
+    db.refresh(visit)
+
+    return {
+        "message": "Bill updated successfully",
+        "visit_id": visit.id,
+        "bill_number": visit.bill_number,
+        "patient_uid": patient.patient_uid,
+        "grand_total": visit.grand_total,
+        "balance_due": visit.balance_due,
+        "payment_status": visit.payment_status,
+    }
+
+
+def delete_bill(db: Session, visit_id: int) -> dict:
+    visit, _, _, _ = h.get_visit_with_relations(db, visit_id)
+
+    if visit.status == "cancelled":
+        raise HTTPException(status_code=400, detail="Bill already cancelled")
+    if (visit.paid_amount or 0) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot cancel bill with payments recorded",
+        )
+
+    visit.status = "cancelled"
+    visit.payment_status = "cancelled"
+    db.commit()
+
+    return {
+        "message": "Bill cancelled successfully",
+        "visit_id": visit.id,
+        "bill_number": visit.bill_number,
     }
 
 

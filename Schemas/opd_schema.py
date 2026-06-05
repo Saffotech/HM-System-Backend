@@ -25,6 +25,13 @@ class BillPreviewRequest(BaseModel):
 
 class PatientRegisterRequest(PatientFields, VisitBillingFields):
     """New patient + first OPD visit + payment (single front-desk flow)."""
+    aadhaar_number: str = Field(
+        ...,
+        min_length=12,
+        max_length=12,
+        pattern=r"^\d{12}$",
+        description="12-digit Aadhaar number",
+    )
 
     class Config:
         json_schema_extra = {
@@ -32,6 +39,7 @@ class PatientRegisterRequest(PatientFields, VisitBillingFields):
                 "first_name": "Amaresh",
                 "last_name": "Maurya",
                 "phone": "9567154627",
+                "aadhaar_number": "123456789012",
                 "gender": 1,
                 "department_id": 1,
                 "doctor_id": 2,
@@ -100,6 +108,18 @@ class GenerateBillRequest(BaseModel):
     pay_later: bool = False
     payment_mode: str = "cash"
     amount_received: Optional[float] = None
+    transaction_reference: Optional[str] = None
+
+
+class BillUpdateRequest(BaseModel):
+    """Update an existing bill — only sent fields are changed."""
+
+    department_id: Optional[int] = None
+    doctor_id: Optional[int] = None
+    registration_fee: Optional[float] = Field(None, ge=0)
+    consultation_fee: Optional[float] = Field(None, ge=0)
+    gst_percent: Optional[float] = Field(None, ge=0, le=100)
+    extra_items: Optional[List[ExtraBillItem]] = None
 
 
 class BillLineItem(BaseModel):
