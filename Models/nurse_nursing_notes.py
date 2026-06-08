@@ -6,7 +6,6 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
-    Float,
     DateTime,
     ForeignKey,
     Text,
@@ -25,21 +24,21 @@ def _now():
 
 
 # ==========================================================
-# VITAL STATUS
+# NOTE STATUS
 # ==========================================================
 
-class VitalStatus(str, enum.Enum):
-    RECORDED = "recorded"
-    REVIEWED = "reviewed"
+class NursingNoteStatus(str, enum.Enum):
+    ACTIVE = "active"
+    ARCHIVED = "archived"
 
 
 # ==========================================================
-# PATIENT VITALS
+# NURSING NOTE
 # ==========================================================
 
-class PatientVitals(Base):
+class NursingNote(Base):
 
-    __tablename__ = "patient_vitals"
+    __tablename__ = "nursing_notes"
 
     id = Column(
         Integer,
@@ -61,76 +60,36 @@ class PatientVitals(Base):
         index=True
     )
 
-    recorded_by = Column(
+    nurse_id = Column(
         Integer,
         ForeignKey("users.id"),
         nullable=False,
         index=True
     )
 
-    # ======================================================
-    # VITALS
-    # ======================================================
-
-    temperature = Column(
-        Float,
-        nullable=True
-    )
-
-    blood_pressure = Column(
-        String(20),
-        nullable=True
-    )
-
-    heart_rate = Column(
-        Integer,
-        nullable=True
-    )
-
-    respiratory_rate = Column(
-        Integer,
-        nullable=True
-    )
-
-    oxygen_saturation = Column(
-        Integer,
-        nullable=True
-    )
-
-    blood_sugar = Column(
-        Float,
-        nullable=True
-    )
-
-    weight = Column(
-        Float,
-        nullable=True
-    )
-
-    pain_level = Column(
-        Integer,
-        nullable=True
-    )
-
-    observation_notes = Column(
+    symptoms = Column(
         Text,
         nullable=True
     )
 
-    # ======================================================
-    # STATUS
-    # ======================================================
+    treatment_response = Column(
+        Text,
+        nullable=True
+    )
+
+    additional_notes = Column(
+        Text,
+        nullable=True
+    )
 
     status = Column(
-        Enum(VitalStatus),
+        Enum(NursingNoteStatus),
         nullable=False,
-        default=VitalStatus.RECORDED,
+        default=NursingNoteStatus.ACTIVE,
         index=True
     )
 
-    # ======================================================
-    # AUDIT FIELDS
-    # ======================================================
+    # Audit Fields
 
     created_by = Column(
         Integer,
@@ -144,7 +103,7 @@ class PatientVitals(Base):
         nullable=True
     )
 
-    recorded_at = Column(
+    created_at = Column(
         DateTime(timezone=True),
         default=_now,
         index=True
@@ -156,9 +115,7 @@ class PatientVitals(Base):
         onupdate=_now
     )
 
-    # ======================================================
-    # RELATIONSHIPS
-    # ======================================================
+    # Relationships
 
     appointment = relationship(
         "Appointment"
@@ -170,5 +127,5 @@ class PatientVitals(Base):
 
     nurse = relationship(
         "User",
-        foreign_keys=[recorded_by]
+        foreign_keys=[nurse_id]
     )

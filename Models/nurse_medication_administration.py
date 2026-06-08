@@ -6,11 +6,11 @@ from sqlalchemy import (
     Column,
     Integer,
     String,
-    Float,
     DateTime,
     ForeignKey,
     Text,
-    Enum
+    Enum,
+    Boolean
 )
 
 from sqlalchemy.orm import relationship
@@ -25,21 +25,23 @@ def _now():
 
 
 # ==========================================================
-# VITAL STATUS
+# STATUS
 # ==========================================================
 
-class VitalStatus(str, enum.Enum):
-    RECORDED = "recorded"
-    REVIEWED = "reviewed"
+class MedicationStatus(str, enum.Enum):
+    GIVEN = "given"
+    REFUSED = "refused"
+    MISSED = "missed"
+    DELAYED = "delayed"
 
 
 # ==========================================================
-# PATIENT VITALS
+# MEDICATION ADMINISTRATION
 # ==========================================================
 
-class PatientVitals(Base):
+class MedicationAdministration(Base):
 
-    __tablename__ = "patient_vitals"
+    __tablename__ = "medication_administrations"
 
     id = Column(
         Integer,
@@ -47,9 +49,9 @@ class PatientVitals(Base):
         index=True
     )
 
-    appointment_id = Column(
+    prescription_item_id = Column(
         Integer,
-        ForeignKey("appointments.id"),
+        ForeignKey("prescription_items.id"),
         nullable=False,
         index=True
     )
@@ -61,76 +63,64 @@ class PatientVitals(Base):
         index=True
     )
 
-    recorded_by = Column(
+    administered_by = Column(
         Integer,
         ForeignKey("users.id"),
         nullable=False,
         index=True
     )
 
-    # ======================================================
-    # VITALS
-    # ======================================================
+    # Snapshot Fields
 
-    temperature = Column(
-        Float,
+    medicine_name = Column(
+        String(255),
+        nullable=False
+    )
+
+    dosage = Column(
+        String(100),
         nullable=True
     )
 
-    blood_pressure = Column(
-        String(20),
+    frequency = Column(
+        String(100),
         nullable=True
     )
 
-    heart_rate = Column(
-        Integer,
+    bed_number = Column(
+        String(50),
         nullable=True
     )
 
-    respiratory_rate = Column(
-        Integer,
+    ward_name = Column(
+        String(100),
         nullable=True
     )
 
-    oxygen_saturation = Column(
-        Integer,
-        nullable=True
+    scheduled_time = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True
     )
 
-    blood_sugar = Column(
-        Float,
-        nullable=True
+    status = Column(
+        Enum(MedicationStatus),
+        nullable=False,
+        index=True
     )
 
-    weight = Column(
-        Float,
-        nullable=True
-    )
-
-    pain_level = Column(
-        Integer,
-        nullable=True
-    )
-
-    observation_notes = Column(
+    remarks = Column(
         Text,
         nullable=True
     )
 
-    # ======================================================
-    # STATUS
-    # ======================================================
-
-    status = Column(
-        Enum(VitalStatus),
-        nullable=False,
-        default=VitalStatus.RECORDED,
+    administered_at = Column(
+        DateTime(timezone=True),
+        default=_now,
         index=True
     )
 
-    # ======================================================
-    # AUDIT FIELDS
-    # ======================================================
+    is_active = Column(Boolean, default=True)
 
     created_by = Column(
         Integer,
@@ -144,10 +134,9 @@ class PatientVitals(Base):
         nullable=True
     )
 
-    recorded_at = Column(
+    created_at = Column(
         DateTime(timezone=True),
-        default=_now,
-        index=True
+        default=_now
     )
 
     updated_at = Column(
@@ -156,12 +145,9 @@ class PatientVitals(Base):
         onupdate=_now
     )
 
-    # ======================================================
-    # RELATIONSHIPS
-    # ======================================================
-
-    appointment = relationship(
-        "Appointment"
+    prescription_item = relationship(
+        "PrescriptionItem",
+        back_populates="administrations"
     )
 
     patient = relationship(
@@ -170,5 +156,15 @@ class PatientVitals(Base):
 
     nurse = relationship(
         "User",
-        foreign_keys=[recorded_by]
+        foreign_keys=[administered_by]
+    )
+
+    created_by_user = relationship(
+        "User",
+        foreign_keys=[created_by]
+    )
+
+    updated_by_user = relationship(
+        "User",
+        foreign_keys=[updated_by]
     )
