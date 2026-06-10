@@ -14,6 +14,7 @@ from Models.doctor_patient_queue import PatientQueue
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_nursing_notes import NursingNote
 from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_shift_handover import ShiftHandover,ShiftHandoverPatient
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Hospital Management API")
@@ -84,4 +85,9 @@ app.include_router(nurse_notes_router)
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router)
 app.include_router(medication_administration_router)
+
+
+from Routers.nurse_shift_handover_router import (
+    router as nurse_shift_handover_router)
+app.include_router(nurse_shift_handover_router)
 

@@ -5,7 +5,8 @@ from fastapi import (
     APIRouter,
     Depends,
     Query,
-    Path
+    Path,
+    status
 )
 
 from sqlalchemy.orm import Session
@@ -13,7 +14,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 
 from dependencies import (
-    get_current_user
+    get_current_user,
+    PermissionChecker
 )
 
 from Models.user import User
@@ -44,13 +46,23 @@ router = APIRouter(
 
 @router.post(
     "",
-    response_model=VitalResponse
+    response_model=VitalResponse,
+    status_code=status.HTTP_201_CREATED
 )
 def create_vital(
+
     vital_data: VitalCreate,
+
     db: Session = Depends(get_db),
+
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:create"
+        )
     )
 ):
 
@@ -70,18 +82,25 @@ def create_vital(
     response_model=VitalResponse
 )
 def update_vital(
+
+    vital_data: VitalUpdate,
+
     vital_id: int = Path(
         ...,
         ge=1,
         description="Vital Record ID"
     ),
 
-    vital_data: VitalUpdate = ...,
-
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:update"
+        )
     )
 ):
 
@@ -101,6 +120,7 @@ def update_vital(
     response_model=VitalResponse
 )
 def get_vital(
+
     vital_id: int = Path(
         ...,
         ge=1,
@@ -111,6 +131,12 @@ def get_vital(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:view"
+        )
     )
 ):
 
@@ -147,6 +173,12 @@ def get_all_vitals(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:view"
+        )
     )
 ):
 
@@ -221,6 +253,12 @@ def search_vitals(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:view"
+        )
     )
 ):
 

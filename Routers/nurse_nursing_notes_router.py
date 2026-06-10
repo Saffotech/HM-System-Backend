@@ -5,7 +5,8 @@ from fastapi import (
     APIRouter,
     Depends,
     Query,
-    Path
+    Path,
+    status
 )
 
 from sqlalchemy.orm import Session
@@ -13,7 +14,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 
 from dependencies import (
-    get_current_user
+    get_current_user,
+    PermissionChecker
 )
 
 from Models.user import User
@@ -44,13 +46,23 @@ router = APIRouter(
 
 @router.post(
     "",
-    response_model=NursingNoteResponse
+    response_model=NursingNoteResponse,
+    status_code=status.HTTP_201_CREATED
 )
 def create_note(
+
     note_data: NursingNoteCreate,
+
     db: Session = Depends(get_db),
+
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:create"
+        )
     )
 ):
 
@@ -71,18 +83,24 @@ def create_note(
 )
 def update_note(
 
+    note_data: NursingNoteUpdate,
+
     note_id: int = Path(
         ...,
         ge=1,
         description="Nursing Note ID"
     ),
 
-    note_data: NursingNoteUpdate = ...,
-
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:update"
+        )
     )
 ):
 
@@ -113,6 +131,12 @@ def get_note(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:view"
+        )
     )
 ):
 
@@ -149,6 +173,12 @@ def get_all_notes(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:view"
+        )
     )
 ):
 
@@ -223,6 +253,12 @@ def search_notes(
 
     current_user: User = Depends(
         get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:view"
+        )
     )
 ):
 
