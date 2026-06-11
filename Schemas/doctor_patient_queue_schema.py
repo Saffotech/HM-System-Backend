@@ -17,7 +17,8 @@ class PatientQueueSchema(BaseModel):
     patient_uuid : str
     patient_id : int
     patient_name : str
-
+    patient_phone: str | None = None
+    appointment_uid: str | None = None
     doctor_id : int
     token_number : int
 

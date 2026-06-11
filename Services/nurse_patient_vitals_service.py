@@ -1,0 +1,302 @@
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
+from fastapi import HTTPException
+from sqlalchemy import or_
+from sqlalchemy.orm import Session
+
+from Models.opd_billing import Appointment
+from Models.patient import Patient
+from Models.nurse_patient_vitals import PatientVitals
+from Models.doctor_patient_queue import PatientQueue
+
+from Schemas.nurse_schema import (
+    VitalCreate,
+    VitalUpdate
+)
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+# ==========================================================
+# CREATE VITAL
+# ==========================================================
+
+def create_vital_service(
+    db: Session,
+    vital_data: VitalCreate,
+    nurse_id: int
+):
+
+    appointment = (
+        db.query(Appointment)
+        .filter(
+            Appointment.id == vital_data.appointment_id
+        )
+        .first()
+    )
+
+    if not appointment:
+        raise HTTPException(
+            status_code=404,
+            detail="Appointment not found"
+        )
+
+    # Prevent duplicate vitals for same appointment
+    existing_vital = (
+        db.query(PatientVitals)
+        .filter(
+            PatientVitals.appointment_id == appointment.id
+        )
+        .first()
+    )
+
+    if existing_vital:
+        raise HTTPException(
+            status_code=400,
+            detail="Vitals already recorded for this appointment"
+        )
+
+    try:
+
+        vital = PatientVitals(
+            appointment_id=appointment.id,
+            patient_id=appointment.patient_id,
+            recorded_by=nurse_id,
+
+            status="recorded",
+
+            temperature=vital_data.temperature,
+            blood_pressure=vital_data.blood_pressure,
+            heart_rate=vital_data.heart_rate,
+            respiratory_rate=vital_data.respiratory_rate,
+            oxygen_saturation=vital_data.oxygen_saturation,
+            blood_sugar=vital_data.blood_sugar,
+            weight=vital_data.weight,
+            pain_level=vital_data.pain_level,
+            observation_notes=vital_data.observation_notes
+        )
+
+        db.add(vital)
+
+        queue = (
+            db.query(PatientQueue)
+            .filter(
+                PatientQueue.appointment_id == appointment.id
+            )
+            .first()
+        )
+
+        if queue and queue.status == "waiting":
+            queue.status = "vitals_completed"
+
+        db.commit()
+        db.refresh(vital)
+
+        return vital
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+# ==========================================================
+# UPDATE VITAL
+# ==========================================================
+
+def update_vital_service(
+    db: Session,
+    vital_id: int,
+    vital_data: VitalUpdate
+):
+
+    vital = (
+        db.query(PatientVitals)
+        .filter(
+            PatientVitals.id == vital_id
+        )
+        .first()
+    )
+
+    if not vital:
+        raise HTTPException(
+            status_code=404,
+            detail="Vital record not found"
+        )
+
+    try:
+
+        update_data = (
+            vital_data.model_dump(
+                exclude_unset=True
+            )
+        )
+
+        for field, value in update_data.items():
+            setattr(vital, field, value)
+
+        vital.updated_at = datetime.now(IST)
+
+        db.commit()
+        db.refresh(vital)
+
+        return vital
+
+    except Exception:
+        db.rollback()
+        raise
+
+
+# ==========================================================
+# GET SINGLE VITAL
+# ==========================================================
+
+def get_vital_by_id_service(
+    db: Session,
+    vital_id: int
+):
+
+    vital = (
+        db.query(PatientVitals)
+        .filter(
+            PatientVitals.id == vital_id
+        )
+        .first()
+    )
+
+    if not vital:
+        raise HTTPException(
+            status_code=404,
+            detail="Vital record not found"
+        )
+
+    return vital
+
+
+# ==========================================================
+# GET ALL VITALS
+# ==========================================================
+
+def get_all_vitals_service(
+    db: Session,
+    page: int = 1,
+    page_size: int = 20
+):
+
+    return (
+        db.query(PatientVitals)
+        .order_by(
+            PatientVitals.recorded_at.desc()
+        )
+        .offset(
+            (page - 1) * page_size
+        )
+        .limit(
+            page_size
+        )
+        .all()
+    )
+
+
+# ==========================================================
+# SEARCH / FILTER VITALS
+# ==========================================================
+
+def search_vitals_service(
+    db: Session,
+
+    patient_id: int | None = None,
+    appointment_id: int | None = None,
+
+    name: str | None = None,
+    phone: str | None = None,
+    uhid: str | None = None,
+
+    status: str | None = None,
+    recorded_by: int | None = None,
+
+    from_date: date | None = None,
+    to_date: date | None = None,
+
+    page: int = 1,
+    page_size: int = 20
+):
+
+    query = (
+        db.query(PatientVitals)
+        .join(
+            Patient,
+            Patient.id == PatientVitals.patient_id
+        )
+    )
+
+    if patient_id:
+        query = query.filter(
+            PatientVitals.patient_id == patient_id
+        )
+
+    if appointment_id:
+        query = query.filter(
+            PatientVitals.appointment_id == appointment_id
+        )
+
+    if name:
+        query = query.filter(
+            or_(
+                Patient.first_name.ilike(
+                    f"%{name}%"
+                ),
+                Patient.last_name.ilike(
+                    f"%{name}%"
+                )
+            )
+        )
+
+    if phone:
+        query = query.filter(
+            Patient.phone.ilike(
+                f"%{phone}%"
+            )
+        )
+
+    if uhid:
+        query = query.filter(
+            Patient.patient_uid.ilike(
+                f"%{uhid}%"
+            )
+        )
+
+    if status:
+        query = query.filter(
+            PatientVitals.status == status
+        )
+
+    if recorded_by:
+        query = query.filter(
+            PatientVitals.recorded_by == recorded_by
+        )
+
+    if from_date:
+        query = query.filter(
+            PatientVitals.recorded_at >= from_date
+        )
+
+    if to_date:
+        query = query.filter(
+            PatientVitals.recorded_at <
+            (to_date + timedelta(days=1))
+        )
+
+    return (
+        query
+        .order_by(
+            PatientVitals.recorded_at.desc()
+        )
+        .offset(
+            (page - 1) * page_size
+        )
+        .limit(
+            page_size
+        )
+        .all()
+    )
