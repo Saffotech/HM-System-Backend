@@ -1,7 +1,6 @@
 """Patient-related request/response schemas."""
 from datetime import date, datetime
 from typing import Optional
-
 from pydantic import BaseModel, Field
 
 GENDER_CODE_TO_LABEL = {
