@@ -18,11 +18,6 @@ from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertCreate
 )
 from Models.nurse_patient_vitals import PatientVitals
-
-from Models.nurse_medication_administration import (
-    MedicationAdministration
-)
-from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_medication_administration import (
     MedicationAdministration
 )
@@ -34,9 +29,6 @@ from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertEscalate
 )
 
-# ==========================================================
-# HELPERS
-# ==========================================================
 
 def _now():
     return datetime.now(
@@ -118,10 +110,6 @@ def _get_full_name(
         f"{user.last_name or ''}"
     ).strip()
 
-
-# ==========================================================
-# CREATE ALERT
-# ==========================================================
 
 # ==========================================================
 # CREATE ALERT
