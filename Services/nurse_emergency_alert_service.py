@@ -19,6 +19,9 @@ from Schemas.nurse_emergency_alert_schema import (
 )
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_medication_administration import (
+    MedicationAdministration
+)
 from Models.opd_billing import Appointment
 
 from Schemas.nurse_emergency_alert_schema import (
@@ -27,9 +30,6 @@ from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertEscalate
 )
 
-# ==========================================================
-# HELPERS
-# ==========================================================
 
 def _now():
     return datetime.now(
