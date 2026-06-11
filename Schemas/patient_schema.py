@@ -1,5 +1,5 @@
 """Patient-related request/response schemas."""
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from pydantic import BaseModel, Field
@@ -67,7 +67,9 @@ class PatientOut(BaseModel):
     date_of_birth: Optional[date]
     address: Optional[str]
     state: Optional[str]
+    aadhaar_number: Optional[str] = None
     is_active: bool
+    created_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True

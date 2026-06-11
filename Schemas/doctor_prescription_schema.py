@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from datetime import datetime
 from typing import Optional,List
 
@@ -9,6 +9,13 @@ class PrescriptionItemCreate(BaseModel):
     frequency: str
     duration: str
     instructions: Optional[str] = None
+
+    @field_validator('duration', mode='before')
+    @classmethod
+    def coerce_duration_input(cls, v):
+        if v is None:
+            return ''
+        return str(v).strip()
 
 class PrescriptionCreate(BaseModel):
 
@@ -25,6 +32,13 @@ class PrescriptionItemResponse(BaseModel):
     frequency : str
     duration : str
     instructions : str
+
+    @field_validator('duration', mode='before')
+    @classmethod
+    def coerce_duration_output(cls, v):
+        if v is None:
+            return ''
+        return str(v)
 
     class Config:
         from_attributes = True

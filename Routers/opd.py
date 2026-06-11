@@ -29,6 +29,11 @@ from Schemas.opd_schema import (
 from Schemas.patient_schema import PatientOut, PatientUpdate
 from dependencies import PermissionChecker, get_current_user
 from Services import appointment_service, bed_service, opd_service
+from Services.doctor_queue_next_service import (
+    list_pending_next_requests_service,
+    send_in_patient_service,
+)
+from Schemas.doctor_queue_next_request_schema import SendInPatientSchema
 
 router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
 
@@ -312,6 +317,34 @@ def today_queue(
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
     return opd_service.fetch_today_queue(db)
+
+
+@router.get("/queue/next-requests")
+def doctor_next_patient_requests(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    requests = list_pending_next_requests_service(db)
+    return {
+        "success": True,
+        "total": len(requests),
+        "requests": requests,
+    }
+
+
+@router.post("/queue/send-in", status_code=201)
+def send_in_patient(
+    body: SendInPatientSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("appointments:update")),
+):
+    return send_in_patient_service(
+        db=db,
+        appointment_id=body.appointment_id,
+        handled_by=current_user.id,
+    )
 
 
 # ── Appointments ──────────────────────────────────────────────

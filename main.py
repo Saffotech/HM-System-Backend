@@ -8,6 +8,7 @@ from Routers.opd import router as opd_router
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
+from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
 
 Base.metadata.create_all(bind=engine)
 
