@@ -37,8 +37,30 @@ permissions_list = [
     "appointments:create",
     "appointments:update",
     "reports:view",
-    "settings:manage"
-]
+    "settings:manage",
+    
+    "nurse_vitals:view",
+    "nurse_vitals:create",
+    "nurse_vitals:update",
+
+    "nurse_notes:view",
+    "nurse_notes:create",
+    "nurse_notes:update",
+
+    "nurse_medication:view",
+    "nurse_medication:create",
+    "nurse_medication:update",
+
+    "nurse_handover:view",
+    "nurse_handover:create",
+    "nurse_handover:update",
+    "nurse_handover:submit",
+
+    "emergency_alerts:view",
+    "emergency_alerts:create",
+    "emergency_alerts:update",
+    "emergency_alerts:escalate",
+    ]
 
 perm_objects = {}
 for p in permissions_list:
@@ -73,7 +95,29 @@ roles_data = {
         "permissions": [
             "patients:view",
             "opd:view",
-            "lab:view"
+            "lab:view",
+
+            "nurse_vitals:view",
+            "nurse_vitals:create",
+            "nurse_vitals:update",
+
+            "nurse_notes:view",
+            "nurse_notes:create",
+            "nurse_notes:update",
+
+            "nurse_medication:view",
+            "nurse_medication:create",
+            "nurse_medication:update",
+
+            "nurse_handover:view",
+            "nurse_handover:create",
+            "nurse_handover:update",
+            "nurse_handover:submit",
+
+            "emergency_alerts:view",
+            "emergency_alerts:create",
+            "emergency_alerts:update",
+            "emergency_alerts:escalate"
         ]
     },
     "opd_billing": {               # ← renamed from receptionist
