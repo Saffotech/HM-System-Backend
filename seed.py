@@ -54,6 +54,11 @@ permissions_list = [
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
+
+    "emergency_alerts:view",
+    "emergency_alerts:create",
+    "emergency_alerts:update",
+    "emergency_alerts:escalate",
     ]
 
 perm_objects = {}
@@ -106,7 +111,12 @@ roles_data = {
             "nurse_handover:view",
             "nurse_handover:create",
             "nurse_handover:update",
-            "nurse_handover:submit"
+            "nurse_handover:submit",
+
+            "emergency_alerts:view",
+            "emergency_alerts:create",
+            "emergency_alerts:update",
+            "emergency_alerts:escalate"
         ]
     },
     "opd_billing": {               # ← renamed from receptionist
