@@ -36,7 +36,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
+from Routers.opd import router as opd_router
 app.include_router(auth.router)
 app.include_router(roles_router)
 app.include_router(opd_router)

@@ -197,7 +197,7 @@ from Services.bed_service import seed_default_beds
 
 seed_default_beds(db)
 print("Default beds seeded (if empty)")
-
+ 
 print("\n✅ Seed completed successfully!")
 print("\nRole IDs to use in registration:")
 for name, rid in role_ids.items():

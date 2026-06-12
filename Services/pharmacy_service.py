@@ -100,7 +100,6 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
         items=[PharmacyPrescriptionItemOut.model_validate(i) for i in rx.items],
     )
 
-
 def dispense_prescription(
     db: Session,
     prescription_id: int,
