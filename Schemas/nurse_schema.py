@@ -67,6 +67,7 @@ class VitalResponse(BaseModel):
     pain_level: Optional[int]
     observation_notes: Optional[str]
 
+    status: Optional[str] = None
     recorded_at: datetime
 
     class Config:
@@ -117,6 +118,7 @@ class NursingNoteResponse(BaseModel):
     treatment_response: Optional[str]
     additional_notes: Optional[str]
 
+    status: Optional[str] = None
     created_at: datetime
 
     class Config:

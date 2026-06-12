@@ -107,85 +107,8 @@ def update_note(
     return update_note_service(
         db=db,
         note_id=note_id,
-        note_data=note_data
-    )
-
-
-# ==========================================================
-# GET SINGLE NOTE
-# ==========================================================
-
-@router.get(
-    "/{note_id}",
-    response_model=NursingNoteResponse
-)
-def get_note(
-
-    note_id: int = Path(
-        ...,
-        ge=1,
-        description="Nursing Note ID"
-    ),
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_notes:view"
-        )
-    )
-):
-
-    return get_note_by_id_service(
-        db=db,
-        note_id=note_id
-    )
-
-
-# ==========================================================
-# GET ALL NOTES
-# ==========================================================
-
-@router.get(
-    "",
-    response_model=List[NursingNoteResponse]
-)
-def get_all_notes(
-
-    page: int = Query(
-        1,
-        ge=1,
-        description="Page Number"
-    ),
-
-    page_size: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Records Per Page"
-    ),
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_notes:view"
-        )
-    )
-):
-
-    return get_all_notes_service(
-        db=db,
-        page=page,
-        page_size=page_size
+        note_data=note_data,
+        nurse_id=current_user.id,
     )
 
 
@@ -280,4 +203,82 @@ def search_notes(
 
         page=page,
         page_size=page_size
+    )
+
+
+# ==========================================================
+# GET ALL NOTES
+# ==========================================================
+
+@router.get(
+    "",
+    response_model=List[NursingNoteResponse]
+)
+def get_all_notes(
+
+    page: int = Query(
+        1,
+        ge=1,
+        description="Page Number"
+    ),
+
+    page_size: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description="Records Per Page"
+    ),
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:view"
+        )
+    )
+):
+
+    return get_all_notes_service(
+        db=db,
+        page=page,
+        page_size=page_size
+    )
+
+
+# ==========================================================
+# GET SINGLE NOTE
+# ==========================================================
+
+@router.get(
+    "/{note_id}",
+    response_model=NursingNoteResponse
+)
+def get_note(
+
+    note_id: int = Path(
+        ...,
+        ge=1,
+        description="Nursing Note ID"
+    ),
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_notes:view"
+        )
+    )
+):
+
+    return get_note_by_id_service(
+        db=db,
+        note_id=note_id
     )

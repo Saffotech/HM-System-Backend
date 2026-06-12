@@ -31,7 +31,7 @@ def _now():
 class QueueStatus(str, enum.Enum):
     WAITING = "waiting"
     VITALS_COMPLETED = "vitals_completed"
-    IN_CONSULTATION = "in_consultation"
+    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
