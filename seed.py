@@ -1,17 +1,9 @@
-"""
-Seed reference data: permissions, roles, departments, beds.
-
-Usage:
-  python seed.py          Safe sync — upsert only (safe on existing DB)
-  python seed.py --fresh  Wipe roles/permissions and reseed (empty DB only)
-"""
-import argparse
-import sys
-
 from database import SessionLocal
 from Models.department import Department
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
+import sys
+import argparse
 
 PERMISSIONS_LIST = [
     "patients:view",
