@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 
 from dependencies import (
-    get_current_user
+    get_current_user,
+    PermissionChecker,
 )
 
 from Models.user import User
@@ -38,7 +39,7 @@ def get_today_queue(
 
     status: str | None = Query(
         None,
-        description="waiting, vitals_completed, in_progress, completed"
+        description="waiting, vitals_completed, in_progress, completed, cancelled"
     ),
 
     doctor_id: int | None = Query(
@@ -65,7 +66,9 @@ def get_today_queue(
 
     current_user: User = Depends(
         get_current_user
-    )
+    ),
+
+    _: bool = Depends(PermissionChecker("opd:view")),
 ):
 
     return get_nurse_today_queue_service(

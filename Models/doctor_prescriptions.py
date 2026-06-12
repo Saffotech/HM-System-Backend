@@ -72,9 +72,14 @@ class Prescription(Base):
         Text,
         nullable=True
     )
-
+    status = Column(
+        String(50),
+        nullable=False,
+        default="pending",
+        index=True,
+    )
+    
     # Audit Fields
-
     created_by = Column(
         Integer,
         ForeignKey("users.id"),

@@ -107,85 +107,8 @@ def update_vital(
     return update_vital_service(
         db=db,
         vital_id=vital_id,
-        vital_data=vital_data
-    )
-
-
-# ==========================================================
-# GET SINGLE VITAL
-# ==========================================================
-
-@router.get(
-    "/{vital_id}",
-    response_model=VitalResponse
-)
-def get_vital(
-
-    vital_id: int = Path(
-        ...,
-        ge=1,
-        description="Vital Record ID"
-    ),
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_vitals:view"
-        )
-    )
-):
-
-    return get_vital_by_id_service(
-        db=db,
-        vital_id=vital_id
-    )
-
-
-# ==========================================================
-# GET ALL VITALS
-# ==========================================================
-
-@router.get(
-    "",
-    response_model=List[VitalResponse]
-)
-def get_all_vitals(
-
-    page: int = Query(
-        1,
-        ge=1,
-        description="Page Number"
-    ),
-
-    page_size: int = Query(
-        20,
-        ge=1,
-        le=100,
-        description="Records Per Page"
-    ),
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_vitals:view"
-        )
-    )
-):
-
-    return get_all_vitals_service(
-        db=db,
-        page=page,
-        page_size=page_size
+        vital_data=vital_data,
+        nurse_id=current_user.id,
     )
 
 
@@ -280,4 +203,82 @@ def search_vitals(
 
         page=page,
         page_size=page_size
+    )
+
+
+# ==========================================================
+# GET ALL VITALS
+# ==========================================================
+
+@router.get(
+    "",
+    response_model=List[VitalResponse]
+)
+def get_all_vitals(
+
+    page: int = Query(
+        1,
+        ge=1,
+        description="Page Number"
+    ),
+
+    page_size: int = Query(
+        20,
+        ge=1,
+        le=100,
+        description="Records Per Page"
+    ),
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:view"
+        )
+    )
+):
+
+    return get_all_vitals_service(
+        db=db,
+        page=page,
+        page_size=page_size
+    )
+
+
+# ==========================================================
+# GET SINGLE VITAL
+# ==========================================================
+
+@router.get(
+    "/{vital_id}",
+    response_model=VitalResponse
+)
+def get_vital(
+
+    vital_id: int = Path(
+        ...,
+        ge=1,
+        description="Vital Record ID"
+    ),
+
+    db: Session = Depends(get_db),
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_vitals:view"
+        )
+    )
+):
+
+    return get_vital_by_id_service(
+        db=db,
+        vital_id=vital_id
     )

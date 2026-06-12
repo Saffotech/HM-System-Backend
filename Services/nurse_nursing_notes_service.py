@@ -74,7 +74,8 @@ def create_note_service(
 def update_note_service(
     db: Session,
     note_id: int,
-    note_data: NursingNoteUpdate
+    note_data: NursingNoteUpdate,
+    nurse_id: int,
 ):
 
     note = (
@@ -89,6 +90,12 @@ def update_note_service(
         raise HTTPException(
             status_code=404,
             detail="Note not found"
+        )
+
+    if note.nurse_id != nurse_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only update notes you created",
         )
 
     try:

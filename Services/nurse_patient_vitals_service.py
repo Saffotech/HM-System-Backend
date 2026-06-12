@@ -107,7 +107,8 @@ def create_vital_service(
 def update_vital_service(
     db: Session,
     vital_id: int,
-    vital_data: VitalUpdate
+    vital_data: VitalUpdate,
+    nurse_id: int,
 ):
 
     vital = (
@@ -122,6 +123,12 @@ def update_vital_service(
         raise HTTPException(
             status_code=404,
             detail="Vital record not found"
+        )
+
+    if vital.recorded_by != nurse_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only update vitals you recorded",
         )
 
     try:

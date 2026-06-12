@@ -7,15 +7,16 @@ class PrescriptionItemCreate(BaseModel):
     medicine_name: str
     dosage: str
     frequency: str
-    duration: str
+    duration: int
     instructions: Optional[str] = None
 
-    @field_validator('duration', mode='before')
+    @field_validator("duration", mode="before")
     @classmethod
     def coerce_duration_input(cls, v):
-        if v is None:
-            return ''
-        return str(v).strip()
+        if isinstance(v, int):
+            return v
+        digits = "".join(c for c in str(v) if c.isdigit())
+        return int(digits) if digits else 0
 
 class PrescriptionCreate(BaseModel):
 
@@ -30,15 +31,8 @@ class PrescriptionItemResponse(BaseModel):
     medicine_name : str
     dosage : str
     frequency : str
-    duration : str
-    instructions : str
-
-    @field_validator('duration', mode='before')
-    @classmethod
-    def coerce_duration_output(cls, v):
-        if v is None:
-            return ''
-        return str(v)
+    duration: int
+    instructions: Optional[str] = None
 
     class Config:
         from_attributes = True
