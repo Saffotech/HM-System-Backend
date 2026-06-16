@@ -113,3 +113,9 @@ class LabTestOrder(Base):
         "User",
         foreign_keys=[doctor_id]
     )
+
+    lab_result = relationship(
+        "LabResult",
+        back_populates="lab_order",
+        uselist=False,
+    )

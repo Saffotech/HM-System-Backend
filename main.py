@@ -11,7 +11,8 @@ from Models.nurse_medication_administration import MedicationAdministration  # n
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
 from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
-from Models.pharmacy_dispensing import Dispensing  # noqa: F401
+from Models.pharmacy_dispensing import Dispensing # noqa: F401
+from Models.lab_result import LabResult,LabResultParameter
 from Routers import auth
 from Routers.doctor_appointment_router import router as appointments_router
 from Routers.doctor_lab_test_router import router as lab_test_router
@@ -64,6 +65,8 @@ app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 
 
+from Routers.lab_router import router as lab_router
+app.include_router(lab_router)
 @app.get("/")
 def home():
     return {"message": "Hospital api running.."}

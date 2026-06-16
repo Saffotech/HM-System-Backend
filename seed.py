@@ -24,15 +24,24 @@ permissions_list = [
     "users:activate",
     "roles:create",
     "roles:view",
+
     "billing:view",
     "billing:create",
     "billing:update",
     "billing:delete",
+
     "opd:create",
     "opd:view",
+
     "lab:view",
     "lab:create",
+    "lab:update",
+    "lab:upload_report",
+
+    "prescriptions:view",
     "prescriptions:create",
+    "prescriptions:dispense",
+
     "appointments:view",
     "appointments:create",
     "appointments:update",
@@ -142,7 +151,19 @@ roles_data = {
         "description": "Pharmacy staff",
         "permissions": [
             "prescriptions:create",
+            "prescriptions:view",
+            "prescriptions:dispense",
             "patients:view"
+        ]
+    },
+
+    "lab_technician": {
+        "description": "Laboratory staff",
+        "permissions": [
+            "patients:view",
+            "lab:view",
+            "lab:update",
+            "lab:upload_report",
         ]
     }
 }

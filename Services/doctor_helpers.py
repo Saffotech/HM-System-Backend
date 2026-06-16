@@ -42,7 +42,7 @@ def get_patient(db: Session, patient_id: int) -> Optional[Patient]:
         .filter(Patient.id == patient_id, Patient.is_active.is_(True))
         .first()
     )
-
+ 
 
 def appointment_to_dict(
     db: Session,

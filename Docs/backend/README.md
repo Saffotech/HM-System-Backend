@@ -17,7 +17,8 @@ Frontend API integration doc: [../frontend/API-REFERENCE.md](../frontend/API-REF
 | [doctor.md](./roles/doctor.md) | `doctor` | To build |
 | [nurse.md](./roles/nurse.md) | `nurse` | To build |
 | [pharmacist.md](./roles/pharmacist.md) | `pharmacist` | To build |
-| [lab-technician.md](./roles/lab-technician.md) | `lab_technician` | To build |
+| [lab-test.md](./roles/lab-test.md) | `doctor` + `lab_technician` | Doctor done, lab tech to build |
+| [lab-technician.md](./roles/lab-technician.md) | `lab_technician` | Summary → see lab-test.md |
 
 ## Test APIs
 

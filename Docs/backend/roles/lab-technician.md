@@ -2,28 +2,22 @@
 
 Lab staff receives test orders from doctors and uploads reports.
 
-**This role is NOT in seed yet.** Add it when you start this module.
+**Full API guide (start here):** [lab-test.md](./lab-test.md)
+
+**Word file:** Lab Technician Views 1–5 (`_extracted_fields_requirements.txt`)
+
+**Frontend flow:** [../../frontend/roles/lab-technician.md](../../frontend/roles/lab-technician.md)
 
 ---
 
-## Add to seed.py
+## Status
 
-**New role:** `lab_technician`
-
-**Permissions:**
-
-```
-lab:view
-lab:update
-lab:upload_report
-patients:view
-```
-
----
-
-## Register lab technician
-
-Same as other staff: **POST** `/auth/register` with `role_id` of `lab_technician`.
+| Area | Status |
+|------|--------|
+| Doctor orders (`/lab-tests`) | Done |
+| Lab technician APIs (`/lab/*`) | To build |
+| Role `lab_technician` in seed | To add |
+| Tables `lab_results`, `lab_result_parameters` | To create |
 
 ---
 
@@ -36,52 +30,45 @@ Doctor orders test  →  Lab tech sees pending list
                    →  Doctor & patient can view
 ```
 
-Uses tables from **doctor** module: `lab_orders`, `lab_results`, `lab_result_parameters`.
+Uses table `lab_test_orders` (exists) + `lab_results`, `lab_result_parameters` (to create).
+
+---
+
+## Permissions (add in seed.py)
+
+**New role:** `lab_technician`
+
+```
+lab:view
+lab:update
+lab:upload_report
+patients:view
+```
+
+See [lab-test.md](./lab-test.md) for full seed snippet.
 
 ---
 
 ## APIs to build
 
-| What | Method | URL |
-|------|--------|-----|
-| Pending tests | GET | `/lab/orders?status=pending` |
-| Order detail | GET | `/lab/orders/{id}` |
-| Sample collected | PATCH | `/lab/orders/{id}/sample-collected` |
-| Upload report | POST | `/lab/orders/{id}/report` |
-| Completed reports | GET | `/lab/reports` |
+| Step | What | Method | URL |
+|------|------|--------|-----|
+| 1 | Dashboard stats | GET | `/lab/dashboard` |
+| 2 | Pending / all orders | GET | `/lab/orders` |
+| 3 | Order detail | GET | `/lab/orders/{id}` |
+| 4 | Sample collected | PATCH | `/lab/orders/{id}/sample-collected` |
+| 5 | Processing | PATCH | `/lab/orders/{id}/processing` |
+| 6 | Upload report | POST | `/lab/orders/{id}/report` |
+| 7 | Completed reports | GET | `/lab/reports` |
+| 8 | Report detail | GET | `/lab/reports/{id}` |
+
+Full request/response specs → [lab-test.md](./lab-test.md) Part B.
 
 ---
 
-## Upload report (Word file View 3)
+## Register lab technician
 
-**POST** `/lab/orders/{id}/report`
-
-| Field | Required |
-|-------|----------|
-| sample_collected_at | No |
-| test_performed_at | No |
-| report_file | No — PDF/image path or URL |
-| remarks | No |
-| status | completed |
-
-**Parameters** (optional list for blood tests):
-
-| Field | Example |
-|-------|---------|
-| parameter_name | Hemoglobin |
-| value | 13.5 |
-| unit | g/dL |
-| normal_range | 12–16 |
-| flag | normal / low / high |
-
----
-
-## Build order
-
-1. Doctor lab orders must work first
-2. Lab tech pending list
-3. Upload report
-4. Completed list
+**POST** `/auth/register` with `role_id` of `lab_technician` from `GET /roles/`.
 
 ---
 

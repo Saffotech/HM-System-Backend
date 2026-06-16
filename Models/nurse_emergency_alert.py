@@ -160,7 +160,4 @@ class EmergencyAlert(Base):
         "PatientVitals"
     )
 
-    medication_administration = relationship(
-        "MedicationAdministration"
-    )
-
+    medication_administration = relationship("MedicationAdministration")
