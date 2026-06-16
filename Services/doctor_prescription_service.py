@@ -6,7 +6,6 @@ from Models.opd_billing import Appointment
 from Schemas.doctor_prescription_schema import PrescriptionCreate, PrescriptionItemCreate
 from Services import doctor_helpers as h
 
-
 def _pk(value: object) -> int:
     return int(value)
 

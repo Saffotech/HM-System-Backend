@@ -1,19 +1,20 @@
+"""
+Seed reference data: permissions, roles, departments, beds, demo users.
+
+Usage:
+  python seed.py          Safe sync — upsert only (safe on existing DB)
+  python seed.py --fresh  Wipe roles/permissions and reseed (empty DB only)
+"""
+import argparse
+import sys
+
 from database import SessionLocal
-from Models.user import User
-from Models.role import Role, Permission, RolePermission
-from Models.department import Department
 from hash import hash_password
+from Models.department import Department
+from Models.role import Permission, Role, RolePermission
+from Models.user import User
 
-db = SessionLocal()
-
-# ── Clear existing data ───────────────────────────────────────
-db.query(RolePermission).delete()
-db.query(Permission).delete()
-db.query(Role).delete()
-db.commit()
-
-# ── Create permissions ────────────────────────────────────────
-permissions_list = [
+PERMISSIONS_LIST = [
     "patients:view",
     "patients:create",
     "patients:update",
@@ -24,67 +25,47 @@ permissions_list = [
     "users:activate",
     "roles:create",
     "roles:view",
-
     "billing:view",
     "billing:create",
     "billing:update",
     "billing:delete",
-
     "opd:create",
     "opd:view",
-
     "lab:view",
     "lab:create",
-    "lab:update",
-    "lab:upload_report",
-
-    "prescriptions:view",
     "prescriptions:create",
+    "prescriptions:view",
+    "prescriptions:update",
+    "prescriptions:delete",
     "prescriptions:dispense",
-
     "appointments:view",
     "appointments:create",
     "appointments:update",
     "reports:view",
     "settings:manage",
-    
     "nurse_vitals:view",
     "nurse_vitals:create",
     "nurse_vitals:update",
-
     "nurse_notes:view",
     "nurse_notes:create",
     "nurse_notes:update",
-
     "nurse_medication:view",
     "nurse_medication:create",
     "nurse_medication:update",
-
     "nurse_handover:view",
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
-
     "emergency_alerts:view",
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
-    ]
+]
 
-perm_objects = {}
-for p in permissions_list:
-    perm = Permission(name=p)
-    db.add(perm)
-    db.flush()
-    perm_objects[p] = perm.id
-
-print("Permissions created:", len(perm_objects))
-
-# ── Create roles with permissions ─────────────────────────────
-roles_data = {
+ROLES_DATA = {
     "admin": {
         "description": "System administrator",
-        "permissions": list(perm_objects.keys())  # admin gets ALL permissions
+        "permissions": "__all__",
     },
     "doctor": {
         "description": "Clinical doctor",
@@ -92,12 +73,15 @@ roles_data = {
             "patients:view",
             "opd:view",
             "prescriptions:create",
+            "prescriptions:view",
+            "prescriptions:update",
+            "prescriptions:delete",
             "lab:create",
             "lab:view",
             "appointments:view",
             "appointments:create",
-            "appointments:update"
-        ]
+            "appointments:update",
+        ],
     },
     "nurse": {
         "description": "Nursing staff",
@@ -105,31 +89,26 @@ roles_data = {
             "patients:view",
             "opd:view",
             "lab:view",
-
             "nurse_vitals:view",
             "nurse_vitals:create",
             "nurse_vitals:update",
-
             "nurse_notes:view",
             "nurse_notes:create",
             "nurse_notes:update",
-
             "nurse_medication:view",
             "nurse_medication:create",
             "nurse_medication:update",
-
             "nurse_handover:view",
             "nurse_handover:create",
             "nurse_handover:update",
             "nurse_handover:submit",
-
             "emergency_alerts:view",
             "emergency_alerts:create",
             "emergency_alerts:update",
-            "emergency_alerts:escalate"
-        ]
+            "emergency_alerts:escalate",
+        ],
     },
-    "opd_billing": {               # ← renamed from receptionist
+    "opd_billing": {
         "description": "OPD and Billing staff",
         "permissions": [
             "patients:view",
@@ -145,83 +124,230 @@ roles_data = {
             "appointments:view",
             "appointments:create",
             "appointments:update",
-        ]
+        ],
     },
     "pharmacist": {
         "description": "Pharmacy staff",
         "permissions": [
-            "prescriptions:create",
+            "patients:view",
             "prescriptions:view",
             "prescriptions:dispense",
-            "patients:view"
-        ]
+        ],
     },
-
-    "lab_technician": {
-        "description": "Laboratory staff",
-        "permissions": [
-            "patients:view",
-            "lab:view",
-            "lab:update",
-            "lab:upload_report",
-        ]
-    }
 }
 
-role_ids = {}
-for role_name, role_data in roles_data.items():
-    role = Role(name=role_name, description=role_data["description"])
-    db.add(role)
-    db.flush()
-    role_ids[role_name] = role.id
-
-    for perm_name in role_data["permissions"]:
-        if perm_name in perm_objects:
-            db.add(RolePermission(
-                role_id=role.id,
-                permission_id=perm_objects[perm_name]
-            ))
-
-db.commit()
-print("Roles created:", list(role_ids.keys()))
-print(f"  admin       → id: {role_ids['admin']}      (ALL permissions)")
-print(f"  doctor      → id: {role_ids['doctor']}")
-print(f"  nurse       → id: {role_ids['nurse']}")
-print(f"  opd_billing → id: {role_ids['opd_billing']}")
-print(f"  pharmacist  → id: {role_ids['pharmacist']}")
-
-# ── Seed departments ──────────────────────────────────────────
-db.query(Department).delete()
-db.commit()
-
-departments = [
-    {"name": "General Medicine",  "code": "GEN"},
-    {"name": "Cardiology",        "code": "CARD"},
-    {"name": "Orthopedics",       "code": "ORTH"},
-    {"name": "Pediatrics",        "code": "PED"},
-    {"name": "Gynecology",        "code": "GYN"},
-    {"name": "Neurology",         "code": "NEURO"},
-    {"name": "Dermatology",       "code": "DERM"},
-    {"name": "ENT",               "code": "ENT"},
-    {"name": "Ophthalmology",     "code": "EYE"},
-    {"name": "Radiology",         "code": "RAD"},
+DEPARTMENTS = [
+    {"name": "General Medicine", "code": "GEN"},
+    {"name": "Cardiology", "code": "CARD"},
+    {"name": "Orthopedics", "code": "ORTH"},
+    {"name": "Pediatrics", "code": "PED"},
+    {"name": "Gynecology", "code": "GYN"},
+    {"name": "Neurology", "code": "NEURO"},
+    {"name": "Dermatology", "code": "DERM"},
+    {"name": "ENT", "code": "ENT"},
+    {"name": "Ophthalmology", "code": "EYE"},
+    {"name": "Radiology", "code": "RAD"},
 ]
 
-for d in departments:
-    dept = Department(name=d["name"], code=d["code"])
-    db.add(dept)
+DEMO_USERS = [
+    {
+        "first_name": "Admin",
+        "last_name": "User",
+        "email": "admin@hospital.com",
+        "password": "Password@123",
+        "role": "admin",
+        "department_code": None,
+    },
+    {
+        "first_name": "Amit",
+        "last_name": "Doctor",
+        "email": "doctor1@hospital.com",
+        "password": "Password@123",
+        "role": "doctor",
+        "department_code": "GEN",
+    },
+    {
+        "first_name": "Priya",
+        "last_name": "Nurse",
+        "email": "nurse1@hospital.com",
+        "password": "Password@123",
+        "role": "nurse",
+        "department_code": "GEN",
+    },
+    {
+        "first_name": "Reception",
+        "last_name": "Staff",
+        "email": "opd1@hospital.com",
+        "password": "Password@123",
+        "role": "opd_billing",
+        "department_code": None,
+    },
+    {
+        "first_name": "Ravi",
+        "last_name": "Pharma",
+        "email": "pharmacist1@hospital.com",
+        "password": "Password@123",
+        "role": "pharmacist",
+        "department_code": None,
+    },
+]
 
-db.commit()
-print("Departments created:", len(departments))
 
-from Services.bed_service import seed_default_beds
+def upsert_permissions(db) -> dict[str, int]:
+    perm_ids: dict[str, int] = {}
+    added = 0
+    for name in PERMISSIONS_LIST:
+        row = db.query(Permission).filter(Permission.name == name).first()
+        if not row:
+            row = Permission(name=name)
+            db.add(row)
+            db.flush()
+            added += 1
+        perm_ids[name] = row.id
+    db.commit()
+    print(f"Permissions synced: {len(perm_ids)} total ({added} new)")
+    return perm_ids
 
-seed_default_beds(db)
-print("Default beds seeded (if empty)")
- 
-print("\n✅ Seed completed successfully!")
-print("\nRole IDs to use in registration:")
-for name, rid in role_ids.items():
-    print(f"  role_id={rid} → {name}")
 
-db.close()
+def fresh_clear_roles(db) -> None:
+    user_count = db.query(User).count()
+    if user_count > 0:
+        print(
+            "ERROR: --fresh cannot delete roles while users exist.\n"
+            "  Use default sync mode: python seed.py\n"
+            "  Or drop/recreate the database for a full reset."
+        )
+        sys.exit(1)
+    db.query(RolePermission).delete()
+    db.query(Permission).delete()
+    db.query(Role).delete()
+    db.commit()
+    print("Fresh mode: cleared roles and permissions")
+
+
+def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
+    role_ids: dict[str, int] = {}
+    roles_added = 0
+    links_added = 0
+
+    for role_name, role_data in ROLES_DATA.items():
+        role = db.query(Role).filter(Role.name == role_name).first()
+        if not role:
+            role = Role(name=role_name, description=role_data["description"])
+            db.add(role)
+            db.flush()
+            roles_added += 1
+        elif role.description != role_data["description"]:
+            role.description = role_data["description"]
+
+        role_ids[role_name] = role.id
+
+        if role_data["permissions"] == "__all__":
+            target_perms = set(perm_ids.keys())
+        else:
+            target_perms = set(role_data["permissions"])
+
+        existing_perm_ids = {
+            rp.permission_id
+            for rp in db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
+        }
+        for perm_name in target_perms:
+            pid = perm_ids.get(perm_name)
+            if pid is None or pid in existing_perm_ids:
+                continue
+            db.add(RolePermission(role_id=role.id, permission_id=pid))
+            links_added += 1
+
+    db.commit()
+    print(f"Roles synced: {len(role_ids)} total ({roles_added} new, {links_added} permission links added)")
+    return role_ids
+
+
+def upsert_departments(db) -> dict[str, int]:
+    dept_ids: dict[str, int] = {}
+    added = 0
+    for item in DEPARTMENTS:
+        dept = db.query(Department).filter(Department.code == item["code"]).first()
+        if not dept:
+            dept = Department(name=item["name"], code=item["code"], is_active=True)
+            db.add(dept)
+            db.flush()
+            added += 1
+        else:
+            dept.name = item["name"]
+            dept.is_active = True
+        dept_ids[item["code"]] = dept.id
+    db.commit()
+    print(f"Departments synced: {len(dept_ids)} total ({added} new)")
+    return dept_ids
+
+
+def seed_demo_users(db, role_ids: dict[str, int], dept_ids: dict[str, int]) -> None:
+    created = 0
+    skipped = 0
+    for item in DEMO_USERS:
+        if db.query(User).filter(User.email == item["email"]).first():
+            skipped += 1
+            continue
+        role_id = role_ids.get(item["role"])
+        if not role_id:
+            print(f"  Skip demo user {item['email']}: role {item['role']!r} not found")
+            continue
+        department_id = None
+        if item["department_code"]:
+            department_id = dept_ids.get(item["department_code"])
+        db.add(
+            User(
+                first_name=item["first_name"],
+                last_name=item["last_name"],
+                email=item["email"],
+                password=hash_password(item["password"]),
+                role_id=role_id,
+                department_id=department_id,
+            )
+        )
+        created += 1
+    db.commit()
+    print(f"Demo users: {created} created, {skipped} already existed (skipped)")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Seed HMS reference data")
+    parser.add_argument(
+        "--fresh",
+        action="store_true",
+        help="Wipe roles/permissions and reseed (only when no users exist)",
+    )
+    args = parser.parse_args()
+
+    db = SessionLocal()
+    try:
+        print("HMS seed - mode:", "fresh" if args.fresh else "sync (safe)")
+        if args.fresh:
+            fresh_clear_roles(db)
+
+        perm_ids = upsert_permissions(db)
+        role_ids = upsert_roles(db, perm_ids)
+        dept_ids = upsert_departments(db)
+
+        from Services.bed_service import seed_default_beds
+
+        seed_default_beds(db)
+        print("Default beds seeded (if empty)")
+
+        seed_demo_users(db, role_ids, dept_ids)
+
+        print("\nSeed completed successfully!")
+        print("\nRole IDs:")
+        for name, rid in role_ids.items():
+            print(f"  role_id={rid} -> {name}")
+        print("\nDemo logins (password for all: Password@123):")
+        for item in DEMO_USERS:
+            print(f"  {item['email']} -> {item['role']}")
+        print("\nExisting staff must re-login after permission changes.")
+    finally:
+        db.close()
+
+
+if __name__ == "__main__":
+    main()
