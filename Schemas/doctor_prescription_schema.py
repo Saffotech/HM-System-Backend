@@ -44,7 +44,8 @@ class PrescriptionResponse(BaseModel):
     patient_id: int
     doctor_id: int
     diagnosis: str
-    notes: Optional[str]     
+    notes: Optional[str]
+    status: str
     created_at: datetime
     updated_at: datetime
     items: List[PrescriptionItemResponse]

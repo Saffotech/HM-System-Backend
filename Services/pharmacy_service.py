@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_prescriptions import Prescription
+from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401 — needed for SQLAlchemy to resolve PrescriptionItem.administrations relationship
 from Models.patient import Patient
 from Models.pharmacy_dispensing import Dispensing
 from Models.user import User
