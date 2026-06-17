@@ -11,7 +11,7 @@ from Models.nurse_medication_administration import MedicationAdministration  # n
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
 from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
-from Models.pharmacy_dispensing import Dispensing  # noqa: F401
+from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 from Routers import auth
 from Routers.doctor_appointment_router import router as appointments_router
 from Routers.doctor_lab_test_router import router as lab_test_router

@@ -1,5 +1,5 @@
 """
-Seed reference data: permissions, roles, departments, beds, demo users.
+Seed reference data: permissions, roles, departments, beds.
 
 Usage:
   python seed.py          Safe sync — upsert only (safe on existing DB)
@@ -9,7 +9,6 @@ import argparse
 import sys
 
 from database import SessionLocal
-from hash import hash_password
 from Models.department import Department
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
@@ -149,49 +148,6 @@ DEPARTMENTS = [
     {"name": "Radiology", "code": "RAD"},
 ]
 
-DEMO_USERS = [
-    {
-        "first_name": "Admin",
-        "last_name": "User",
-        "email": "admin@hospital.com",
-        "password": "Password@123",
-        "role": "admin",
-        "department_code": None,
-    },
-    {
-        "first_name": "Amit",
-        "last_name": "Doctor",
-        "email": "doctor1@hospital.com",
-        "password": "Password@123",
-        "role": "doctor",
-        "department_code": "GEN",
-    },
-    {
-        "first_name": "Priya",
-        "last_name": "Nurse",
-        "email": "nurse1@hospital.com",
-        "password": "Password@123",
-        "role": "nurse",
-        "department_code": "GEN",
-    },
-    {
-        "first_name": "Reception",
-        "last_name": "Staff",
-        "email": "opd1@hospital.com",
-        "password": "Password@123",
-        "role": "opd_billing",
-        "department_code": None,
-    },
-    {
-        "first_name": "Ravi",
-        "last_name": "Pharma",
-        "email": "pharmacist1@hospital.com",
-        "password": "Password@123",
-        "role": "pharmacist",
-        "department_code": None,
-    },
-]
-
 
 def upsert_permissions(db) -> dict[str, int]:
     perm_ids: dict[str, int] = {}
@@ -282,35 +238,6 @@ def upsert_departments(db) -> dict[str, int]:
     return dept_ids
 
 
-def seed_demo_users(db, role_ids: dict[str, int], dept_ids: dict[str, int]) -> None:
-    created = 0
-    skipped = 0
-    for item in DEMO_USERS:
-        if db.query(User).filter(User.email == item["email"]).first():
-            skipped += 1
-            continue
-        role_id = role_ids.get(item["role"])
-        if not role_id:
-            print(f"  Skip demo user {item['email']}: role {item['role']!r} not found")
-            continue
-        department_id = None
-        if item["department_code"]:
-            department_id = dept_ids.get(item["department_code"])
-        db.add(
-            User(
-                first_name=item["first_name"],
-                last_name=item["last_name"],
-                email=item["email"],
-                password=hash_password(item["password"]),
-                role_id=role_id,
-                department_id=department_id,
-            )
-        )
-        created += 1
-    db.commit()
-    print(f"Demo users: {created} created, {skipped} already existed (skipped)")
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed HMS reference data")
     parser.add_argument(
@@ -328,22 +255,17 @@ def main() -> None:
 
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
-        dept_ids = upsert_departments(db)
+        upsert_departments(db)
 
         from Services.bed_service import seed_default_beds
 
         seed_default_beds(db)
         print("Default beds seeded (if empty)")
 
-        seed_demo_users(db, role_ids, dept_ids)
-
         print("\nSeed completed successfully!")
         print("\nRole IDs:")
         for name, rid in role_ids.items():
             print(f"  role_id={rid} -> {name}")
-        print("\nDemo logins (password for all: Password@123):")
-        for item in DEMO_USERS:
-            print(f"  {item['email']} -> {item['role']}")
         print("\nExisting staff must re-login after permission changes.")
     finally:
         db.close()

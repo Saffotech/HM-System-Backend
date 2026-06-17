@@ -1,15 +1,16 @@
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
-from Models.doctor_prescriptions import Prescription
-from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401 — needed for SQLAlchemy to resolve PrescriptionItem.administrations relationship
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.patient import Patient
-from Models.pharmacy_dispensing import Dispensing
+from Models.pharmacy_dispensing import Dispensing, DispensingItem
 from Models.user import User
 from Schemas.pharmacy_schema import (
     DispenseHistoryItem,
+    DispenseItemResponse,
     DispenseRequest,
     PharmacyPrescriptionDetail,
     PharmacyPrescriptionItemOut,
@@ -18,6 +19,7 @@ from Schemas.pharmacy_schema import (
 from Services import opd_helpers as h
 
 PRESCRIPTION_STATUS_PENDING = "pending"
+PRESCRIPTION_STATUS_PARTIALLY = "partially_dispensed"
 PRESCRIPTION_STATUS_DISPENSED = "dispensed"
 
 
@@ -33,6 +35,66 @@ def _patient_display_name(rx: Prescription, patient: Optional[Patient]) -> str:
     if patient:
         return h.display_name(patient.first_name, patient.last_name)
     return ""
+
+
+def _quantity_prescribed(item: PrescriptionItem) -> int:
+    """Use duration as prescribed quantity until a dedicated quantity column exists."""
+    return max(int(item.duration or 0), 1)
+
+
+def _dispensed_totals(db: Session, prescription_item_ids: list[int]) -> dict[int, int]:
+    if not prescription_item_ids:
+        return {}
+    rows = (
+        db.query(
+            DispensingItem.prescription_item_id,
+            func.coalesce(func.sum(DispensingItem.quantity_dispensed), 0),
+        )
+        .filter(DispensingItem.prescription_item_id.in_(prescription_item_ids))
+        .group_by(DispensingItem.prescription_item_id)
+        .all()
+    )
+    return {int(item_id): int(total) for item_id, total in rows}
+
+
+def _item_out(item: PrescriptionItem, dispensed_so_far: int) -> PharmacyPrescriptionItemOut:
+    prescribed = _quantity_prescribed(item)
+    remaining = max(prescribed - dispensed_so_far, 0)
+    return PharmacyPrescriptionItemOut(
+        id=item.id,
+        medicine_name=item.medicine_name,
+        dosage=item.dosage,
+        frequency=item.frequency,
+        duration=item.duration,
+        instructions=item.instructions,
+        quantity_prescribed=prescribed,
+        quantity_dispensed=dispensed_so_far,
+        quantity_remaining=remaining,
+    )
+
+
+def _compute_prescription_status(
+    prescription_items: list[PrescriptionItem],
+    dispensed_map: dict[int, int],
+) -> str:
+    if not prescription_items:
+        return PRESCRIPTION_STATUS_PENDING
+
+    complete = 0
+    any_dispensed = False
+    for item in prescription_items:
+        prescribed = _quantity_prescribed(item)
+        dispensed = dispensed_map.get(int(item.id), 0)
+        if dispensed > 0:
+            any_dispensed = True
+        if dispensed >= prescribed:
+            complete += 1
+
+    if complete == len(prescription_items):
+        return PRESCRIPTION_STATUS_DISPENSED
+    if any_dispensed:
+        return PRESCRIPTION_STATUS_PARTIALLY
+    return PRESCRIPTION_STATUS_PENDING
 
 
 def list_prescriptions(
@@ -86,6 +148,8 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
 
     patient = db.query(Patient).filter(Patient.id == rx.patient_id).first()
     doctor = db.query(User).filter(User.id == rx.doctor_id).first()
+    item_ids = [int(i.id) for i in rx.items]
+    dispensed_map = _dispensed_totals(db, item_ids)
 
     return PharmacyPrescriptionDetail(
         id=rx.id,
@@ -98,7 +162,10 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
         notes=rx.notes,
         status=rx.status or PRESCRIPTION_STATUS_PENDING,
         created_at=rx.created_at,
-        items=[PharmacyPrescriptionItemOut.model_validate(i) for i in rx.items],
+        items=[
+            _item_out(item, dispensed_map.get(int(item.id), 0))
+            for item in rx.items
+        ],
     )
 
 
@@ -108,22 +175,93 @@ def dispense_prescription(
     data: DispenseRequest,
     pharmacist_id: int,
 ) -> dict:
-    rx = db.query(Prescription).filter(Prescription.id == prescription_id).first()
+    rx = (
+        db.query(Prescription)
+        .options(joinedload(Prescription.items))
+        .filter(Prescription.id == prescription_id)
+        .first()
+    )
     if not rx:
         raise HTTPException(status_code=404, detail="Prescription not found")
     if rx.status == PRESCRIPTION_STATUS_DISPENSED:
-        raise HTTPException(status_code=400, detail="Prescription already dispensed")
+        raise HTTPException(status_code=400, detail="Prescription already fully dispensed")
 
+    rx_items = {int(item.id): item for item in rx.items}
+    if not rx_items:
+        raise HTTPException(status_code=400, detail="Prescription has no medicine items")
+
+    seen_item_ids: set[int] = set()
+    dispensed_map = _dispensed_totals(db, list(rx_items.keys()))
+    response_items: list[DispenseItemResponse] = []
+    total_quantity = 0
+
+    for line in data.items:
+        item_id = int(line.prescription_item_id)
+        if item_id in seen_item_ids:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Duplicate prescription_item_id in request: {item_id}",
+            )
+        seen_item_ids.add(item_id)
+
+        item = rx_items.get(item_id)
+        if not item:
+            raise HTTPException(
+                status_code=400,
+                detail=f"prescription_item_id {item_id} does not belong to this prescription",
+            )
+
+        prescribed = _quantity_prescribed(item)
+        already = dispensed_map.get(item_id, 0)
+        remaining = prescribed - already
+        if remaining <= 0:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item {item_id} ({item.medicine_name}) is already fully dispensed",
+            )
+        if line.quantity_dispensed > remaining:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"quantity_dispensed exceeds remaining quantity for "
+                    f"{item.medicine_name} (remaining: {remaining})"
+                ),
+            )
+
+        total_quantity += line.quantity_dispensed
+        dispensed_map[item_id] = already + line.quantity_dispensed
+        response_items.append(
+            DispenseItemResponse(
+                prescription_item_id=item_id,
+                medicine_name=item.medicine_name,
+                quantity_dispensed=line.quantity_dispensed,
+                quantity_prescribed=prescribed,
+                quantity_remaining=max(prescribed - dispensed_map[item_id], 0),
+            )
+        )
+
+    new_status = _compute_prescription_status(list(rx_items.values()), dispensed_map)
     dispensing = Dispensing(
         prescription_id=rx.id,
         dispensed_by=pharmacist_id,
-        quantity_dispensed=data.quantity_dispensed,
+        quantity_dispensed=total_quantity,
         remarks=data.remarks,
         batch_number=data.batch_number,
-        status=PRESCRIPTION_STATUS_DISPENSED,
+        status=new_status,
     )
     db.add(dispensing)
-    rx.status = PRESCRIPTION_STATUS_DISPENSED
+    db.flush()
+
+    for line in data.items:
+        db.add(
+            DispensingItem(
+                dispensing_id=dispensing.id,
+                prescription_item_id=int(line.prescription_item_id),
+                quantity_dispensed=line.quantity_dispensed,
+            )
+        )
+
+    rx.status = new_status
     db.commit()
     db.refresh(dispensing)
 
@@ -132,19 +270,25 @@ def dispense_prescription(
         "dispensing_id": dispensing.id,
         "prescription_id": rx.id,
         "status": rx.status,
+        "items": response_items,
     }
 
 
 def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
-    q = db.query(Dispensing).order_by(Dispensing.dispensed_at.desc())
+    q = (
+        db.query(DispensingItem, Dispensing, PrescriptionItem)
+        .join(Dispensing, Dispensing.id == DispensingItem.dispensing_id)
+        .join(PrescriptionItem, PrescriptionItem.id == DispensingItem.prescription_item_id)
+        .order_by(Dispensing.dispensed_at.desc(), DispensingItem.id.desc())
+    )
     total = q.count()
     rows = q.offset((page - 1) * limit).limit(limit).all()
 
     if not rows:
         return {"total": total, "history": []}
 
-    rx_ids = {d.prescription_id for d in rows}
-    pharmacist_ids = {d.dispensed_by for d in rows}
+    rx_ids = {d.prescription_id for _, d, _ in rows}
+    pharmacist_ids = {d.dispensed_by for _, d, _ in rows}
 
     prescriptions = {
         p.id: p
@@ -157,8 +301,11 @@ def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
 
     history = [
         DispenseHistoryItem(
-            id=d.id,
+            id=line.id,
+            dispensing_id=d.id,
             prescription_id=d.prescription_id,
+            prescription_item_id=line.prescription_item_id,
+            medicine_name=rx_item.medicine_name,
             patient_name=prescriptions[d.prescription_id].patient_name or ""
             if d.prescription_id in prescriptions
             else "",
@@ -168,10 +315,10 @@ def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
             )
             if d.dispensed_by in pharmacists
             else "",
-            quantity_dispensed=d.quantity_dispensed,
+            quantity_dispensed=line.quantity_dispensed,
             status=d.status,
             dispensed_at=d.dispensed_at,
         )
-        for d in rows
+        for line, d, rx_item in rows
     ]
     return {"total": total, "history": history}
