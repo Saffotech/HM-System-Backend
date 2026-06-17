@@ -1,9 +1,17 @@
+"""
+Seed reference data: permissions, roles, departments, beds.
+
+Usage:
+  python seed.py          Safe sync — upsert only (safe on existing DB)
+  python seed.py --fresh  Wipe roles/permissions and reseed (empty DB only)
+"""
+import argparse
+import sys
+
 from database import SessionLocal
 from Models.department import Department
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
-import sys
-import argparse
 
 PERMISSIONS_LIST = [
     "patients:view",
@@ -51,22 +59,12 @@ PERMISSIONS_LIST = [
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
-    ]
+]
 
-perm_objects = {}
-for p in permissions_list:
-    perm = Permission(name=p)
-    db.add(perm)
-    db.flush()
-    perm_objects[p] = perm.id
-
-print("Permissions created:", len(perm_objects))
-
-# ── Create roles with permissions ─────────────────────────────
-roles_data = {
+ROLES_DATA = {
     "admin": {
         "description": "System administrator",
-        "permissions": list(perm_objects.keys())  # admin gets ALL permissions
+        "permissions": "__all__",
     },
     "doctor": {
         "description": "Clinical doctor",
@@ -90,11 +88,9 @@ roles_data = {
             "patients:view",
             "opd:view",
             "lab:view",
-
             "nurse_vitals:view",
             "nurse_vitals:create",
             "nurse_vitals:update",
-
             "nurse_notes:view",
             "nurse_notes:create",
             "nurse_notes:update",
