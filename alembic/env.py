@@ -5,14 +5,12 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# ── Import ALL models here ──────────────────────────────
 from database import Base
 from Models.role       import Role
 from Models.user       import User
 from Models.department import Department
 from Models.patient    import Patient, OpdVisit
 from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
-# ────────────────────────────────────────────────────────
 
 config = context.config
 if config.config_file_name is not None:
