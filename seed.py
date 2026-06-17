@@ -33,8 +33,6 @@ PERMISSIONS_LIST = [
     "opd:view",
     "lab:view",
     "lab:create",
-    "lab:update",
-    "lab:upload_report",
     "prescriptions:create",
     "prescriptions:view",
     "prescriptions:update",
@@ -62,12 +60,22 @@ PERMISSIONS_LIST = [
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
-]
+    ]
 
-ROLES_DATA = {
+perm_objects = {}
+for p in permissions_list:
+    perm = Permission(name=p)
+    db.add(perm)
+    db.flush()
+    perm_objects[p] = perm.id
+
+print("Permissions created:", len(perm_objects))
+
+# ── Create roles with permissions ─────────────────────────────
+roles_data = {
     "admin": {
         "description": "System administrator",
-        "permissions": "__all__",
+        "permissions": list(perm_objects.keys())  # admin gets ALL permissions
     },
     "doctor": {
         "description": "Clinical doctor",
@@ -91,9 +99,11 @@ ROLES_DATA = {
             "patients:view",
             "opd:view",
             "lab:view",
+
             "nurse_vitals:view",
             "nurse_vitals:create",
             "nurse_vitals:update",
+
             "nurse_notes:view",
             "nurse_notes:create",
             "nurse_notes:update",
@@ -135,16 +145,6 @@ ROLES_DATA = {
             "prescriptions:view",
             "prescriptions:dispense",
         ],
-    },
-
-    "lab_technician": {
-        "description": "Laboratory staff",
-        "permissions": [
-            "patients:view",
-            "lab:view",
-            "lab:update",
-            "lab:upload_report",
-        ]
     },
 }
 
