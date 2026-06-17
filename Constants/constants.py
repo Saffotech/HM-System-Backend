@@ -11,7 +11,7 @@ class Role(str, enum.Enum):
     DOCTOR       = "doctor"
     NURSE        = "nurse"
     RECEPTIONIST = "receptionist"
-    PHARMACIST   = "pharmacist"
+    PHARMACIST   = "pharmacist"    
 
 # Token expiry
 ACCESS_TOKEN_EXPIRE_MINUTES = 30
