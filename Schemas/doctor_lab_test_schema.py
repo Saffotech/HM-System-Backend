@@ -1,6 +1,8 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional
+from typing import List, Optional
+
+from Schemas.lab_schema import ReportSource
 
 
 # ==========================================
@@ -100,6 +102,7 @@ class LabTestListResponse(BaseModel):
 
     test_name: str
     category: str
+    priority: str
 
     status: str
 
@@ -107,3 +110,100 @@ class LabTestListResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+class LabTestReportSummary(BaseModel):
+    id: int
+    report_file: Optional[str] = None
+    remarks: Optional[str] = None
+    created_at: datetime
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    source: Optional[str] = None
+
+
+class LabTestDetailResponse(BaseModel):
+    id: int
+    appointment_id: int
+
+    patient_id: int
+    patient_name: str
+    patient_uhid: str
+
+    doctor_id: int
+
+    test_name: str
+    category: str
+    priority: str
+    clinical_notes: Optional[str] = None
+
+    status: str
+
+    created_at: datetime
+    updated_at: datetime
+
+    report_uploaded: bool = False
+    has_report: bool = False
+    report: Optional[LabTestReportSummary] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ==========================================
+# Doctor Lab Report History
+# ==========================================
+
+class DoctorLabReportListItem(BaseModel):
+    report_id: int
+    order_id: int
+    patient_id: int
+    patient_name: str
+    patient_uhid: str
+    test_name: str
+    category: str
+    status: str
+    source: str
+    has_file: bool
+    uploaded_at: datetime
+    uploaded_by_name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class DoctorLabReportListResponse(BaseModel):
+    total: int
+    page: int
+    page_size: int
+    items: List[DoctorLabReportListItem]
+
+
+class DoctorLabReportParameter(BaseModel):
+    id: int
+    parameter_name: str
+    value: Optional[str] = None
+    unit: Optional[str] = None
+    normal_range: Optional[str] = None
+    flag: Optional[str] = None
+
+
+class DoctorLabReportDetailResponse(BaseModel):
+    report_id: int
+    order_id: int
+    patient_id: int
+    patient_name: str
+    patient_uhid: str
+    test_name: str
+    category: str
+    priority: str
+    order_status: str
+    source: str
+    sample_collected_at: Optional[datetime] = None
+    test_performed_at: Optional[datetime] = None
+    remarks: Optional[str] = None
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    uploaded_by_name: str
+    uploaded_at: datetime
+    parameters: List[DoctorLabReportParameter] = Field(default_factory=list)

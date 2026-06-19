@@ -1,7 +1,18 @@
 from datetime import datetime
+from enum import Enum
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, ConfigDict
+
+
+# =====================================================
+# Enums
+# =====================================================
+
+class ReportSource(str, Enum):
+    PARAMETERS = "PARAMETERS"
+    PDF = "PDF"
+    BOTH = "BOTH"
 
 
 # =====================================================
@@ -27,6 +38,12 @@ class SampleCollectedRequest(BaseModel):
 
 class ProcessingRequest(BaseModel):
     test_performed_at: Optional[datetime] = None
+
+
+class StatusUpdateResponse(BaseModel):
+    message: str
+    order_id: int
+    status: str
 
 
 # =====================================================
@@ -117,6 +134,10 @@ class ReportSummary(BaseModel):
     report_file: Optional[str] = None
     remarks: Optional[str] = None
     created_at: datetime
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    source: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -147,7 +168,7 @@ class LabOrderDetailResponse(BaseModel):
     created_at: datetime
 
     report: Optional[ReportSummary] = None
-
+    report_uploaded: bool = False
     model_config = ConfigDict(from_attributes=True)
 
 
@@ -183,6 +204,7 @@ class LabReportListItem(BaseModel):
     uploaded_at: datetime
 
     status: str
+    source: str
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -197,6 +219,44 @@ class LabReportListResponse(BaseModel):
 # =====================================================
 # Single Report Detail
 # =====================================================
+
+class LabReportOrderSummary(BaseModel):
+    id: int
+    patient_id: int
+    patient_name: str
+    patient_uhid: str
+    doctor_id: int
+    test_name: str
+    category: str
+    priority: str
+    status: str
+
+
+class LabReportDetailResponse(BaseModel):
+    id: int
+
+    lab_test_order_id: int
+
+    uploaded_by: int
+    uploaded_by_name: str
+
+    sample_collected_at: Optional[datetime] = None
+    test_performed_at: Optional[datetime] = None
+
+    report_file: Optional[str] = None
+    remarks: Optional[str] = None
+
+    created_at: datetime
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    source: str
+
+    order: LabReportOrderSummary
+    parameters: List[LabParameterResponse] = Field(default_factory=list)
+
+    model_config = ConfigDict(from_attributes=True)
+
 
 class LabReportResponse(BaseModel):
     id: int
@@ -213,7 +273,26 @@ class LabReportResponse(BaseModel):
     remarks: Optional[str] = None
 
     created_at: datetime
+    file_name: Optional[str] = None
+    file_type: Optional[str] = None
+    file_size: Optional[int] = None
+    source: Optional[str] = None
 
     parameters: List[LabParameterResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class CompleteTestResponse(BaseModel):
+    message: str
+    order_id: int
+    status: str
+
+
+class UploadReportFileResponse(BaseModel):
+    message: str
+    report_id: int
+    order_id: int
+    file_name: str
+    file_type: Optional[str] = None
+    file_size: int

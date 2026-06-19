@@ -32,6 +32,8 @@ PERMISSIONS_LIST = [
     "opd:view",
     "lab:view",
     "lab:create",
+    "lab:update",
+    "lab:upload_report",
     "prescriptions:create",
     "prescriptions:view",
     "prescriptions:update",
@@ -131,6 +133,16 @@ ROLES_DATA = {
             "patients:view",
             "prescriptions:view",
             "prescriptions:dispense",
+        ],
+    },
+    "lab_technician": {
+        "description": "Laboratory technician",
+        "permissions": [
+                "patients:view",
+                "lab:view",
+                "lab:create",
+                "lab:update",
+                "lab:upload_report"
         ],
     },
 }

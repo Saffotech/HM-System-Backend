@@ -1,0 +1,327 @@
+from collections import defaultdict
+from datetime import date
+
+from sqlalchemy import and_, func, or_
+from sqlalchemy.orm import Session
+
+from Models.department import Department
+from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.nurse_medication_administration import (
+    MedicationAdministration,
+    MedicationStatus,
+)
+from Models.nurse_patient_vitals import PatientVitals
+from Models.opd_billing import Bed
+from Models.patient import Patient
+from Services import doctor_helpers as h
+
+
+def get_nurse_today_queue_service(
+    db: Session,
+    search: str | None = None,
+    status: str | None = None,
+    doctor_id: int | None = None,
+    priority: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
+    query = (
+        db.query(PatientQueue)
+        .filter(PatientQueue.queue_date == date.today())
+    )
+
+    if search:
+        search_filters = [
+            PatientQueue.patient_name.ilike(f"%{search}%"),
+            PatientQueue.patient_uhid.ilike(f"%{search}%"),
+            PatientQueue.patient_phone.ilike(f"%{search}%"),
+            PatientQueue.appointment_uid.ilike(f"%{search}%"),
+        ]
+        if search.isdigit():
+            search_filters.append(PatientQueue.token_number == int(search))
+            search_filters.append(PatientQueue.patient_id == int(search))
+        query = query.filter(or_(*search_filters))
+
+    if status:
+        query = query.filter(PatientQueue.status == status)
+
+    if doctor_id:
+        query = query.filter(PatientQueue.doctor_id == doctor_id)
+
+    if priority:
+        query = query.filter(PatientQueue.priority == priority)
+
+    total = query.count()
+
+    items = (
+        query
+        .order_by(
+            PatientQueue.priority.desc(),
+            PatientQueue.token_number.asc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }
+
+
+def _base_bed_patients_query(
+    db: Session,
+    search: str | None = None,
+    ward_name: str | None = None,
+    bed_number: str | None = None,
+    department_id: int | None = None,
+    patient_id: int | None = None,
+):
+    query = (
+        db.query(Bed, Patient, Department)
+        .join(Patient, Patient.id == Bed.patient_id)
+        .outerjoin(Department, Department.id == Bed.department_id)
+        .filter(
+            Bed.status == "occupied",
+            Bed.patient_id.isnot(None),
+            Patient.is_active.is_(True),
+        )
+    )
+
+    if ward_name:
+        query = query.filter(
+            Bed.ward_name.ilike(f"%{ward_name.strip()}%")
+        )
+
+    if bed_number:
+        query = query.filter(
+            Bed.bed_number.ilike(f"%{bed_number.strip()}%")
+        )
+
+    if department_id:
+        query = query.filter(Bed.department_id == department_id)
+
+    if patient_id:
+        query = query.filter(Patient.id == patient_id)
+
+    if search:
+        term = search.strip()
+        filters = [
+            Patient.first_name.ilike(f"%{term}%"),
+            Patient.last_name.ilike(f"%{term}%"),
+            Patient.patient_uid.ilike(f"%{term}%"),
+            Patient.phone.ilike(f"%{term}%"),
+            Bed.bed_number.ilike(f"%{term}%"),
+            Bed.ward_name.ilike(f"%{term}%"),
+        ]
+        if term.isdigit():
+            filters.append(Patient.id == int(term))
+        query = query.filter(or_(*filters))
+
+    return query
+
+
+def _latest_vitals_map(
+    db: Session,
+    patient_ids: list[int],
+) -> dict[int, PatientVitals]:
+    if not patient_ids:
+        return {}
+
+    latest = (
+        db.query(
+            PatientVitals.patient_id,
+            func.max(PatientVitals.recorded_at).label("latest_at"),
+        )
+        .filter(PatientVitals.patient_id.in_(patient_ids))
+        .group_by(PatientVitals.patient_id)
+        .subquery()
+    )
+
+    rows = (
+        db.query(PatientVitals)
+        .join(
+            latest,
+            and_(
+                PatientVitals.patient_id == latest.c.patient_id,
+                PatientVitals.recorded_at == latest.c.latest_at,
+            ),
+        )
+        .all()
+    )
+    return {row.patient_id: row for row in rows}
+
+
+def _pending_medication_counts(
+    db: Session,
+    patient_ids: list[int],
+) -> dict[int, int]:
+    if not patient_ids:
+        return {}
+
+    counts = {patient_id: 0 for patient_id in patient_ids}
+
+    prescriptions = (
+        db.query(Prescription)
+        .filter(Prescription.patient_id.in_(patient_ids))
+        .order_by(
+            Prescription.patient_id.asc(),
+            Prescription.created_at.desc(),
+        )
+        .all()
+    )
+
+    latest_rx_by_patient: dict[int, Prescription] = {}
+    for prescription in prescriptions:
+        if prescription.patient_id not in latest_rx_by_patient:
+            latest_rx_by_patient[prescription.patient_id] = prescription
+
+    if not latest_rx_by_patient:
+        return counts
+
+    prescription_ids = [
+        prescription.id for prescription in latest_rx_by_patient.values()
+    ]
+    items = (
+        db.query(PrescriptionItem)
+        .filter(PrescriptionItem.prescription_id.in_(prescription_ids))
+        .all()
+    )
+
+    if not items:
+        return counts
+
+    item_ids = [item.id for item in items]
+    given_rows = (
+        db.query(
+            MedicationAdministration.prescription_item_id,
+            func.count(MedicationAdministration.id),
+        )
+        .filter(
+            MedicationAdministration.prescription_item_id.in_(item_ids),
+            MedicationAdministration.status == MedicationStatus.GIVEN,
+        )
+        .group_by(MedicationAdministration.prescription_item_id)
+        .all()
+    )
+    given_map = {
+        prescription_item_id: total
+        for prescription_item_id, total in given_rows
+    }
+
+    items_by_prescription: dict[int, list[PrescriptionItem]] = defaultdict(list)
+    for item in items:
+        items_by_prescription[item.prescription_id].append(item)
+
+    for patient_id, prescription in latest_rx_by_patient.items():
+        pending = 0
+        for item in items_by_prescription.get(prescription.id, []):
+            if given_map.get(item.id, 0) == 0:
+                pending += 1
+        counts[patient_id] = pending
+
+    return counts
+
+
+def _vital_summary(vital: PatientVitals | None) -> dict | None:
+    if not vital:
+        return None
+    return {
+        "vital_id": vital.id,
+        "recorded_at": vital.recorded_at,
+        "temperature": vital.temperature,
+        "blood_pressure": vital.blood_pressure,
+        "heart_rate": vital.heart_rate,
+        "oxygen_saturation": vital.oxygen_saturation,
+        "status": vital.status.value if vital.status else None,
+    }
+
+
+def get_nurse_bed_patients_summary_service(
+    db: Session,
+    search: str | None = None,
+    ward_name: str | None = None,
+    bed_number: str | None = None,
+    department_id: int | None = None,
+    patient_id: int | None = None,
+):
+    query = _base_bed_patients_query(
+        db=db,
+        search=search,
+        ward_name=ward_name,
+        bed_number=bed_number,
+        department_id=department_id,
+        patient_id=patient_id,
+    )
+    return {"occupied_count": query.count()}
+
+
+def get_nurse_bed_patients_service(
+    db: Session,
+    search: str | None = None,
+    ward_name: str | None = None,
+    bed_number: str | None = None,
+    department_id: int | None = None,
+    patient_id: int | None = None,
+    page: int = 1,
+    page_size: int = 20,
+):
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
+    query = _base_bed_patients_query(
+        db=db,
+        search=search,
+        ward_name=ward_name,
+        bed_number=bed_number,
+        department_id=department_id,
+        patient_id=patient_id,
+    )
+
+    total = query.count()
+
+    rows = (
+        query
+        .order_by(Bed.ward_name.asc(), Bed.bed_number.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    patient_ids = [patient.id for _, patient, _ in rows]
+    vitals_map = _latest_vitals_map(db, patient_ids)
+    pending_map = _pending_medication_counts(db, patient_ids)
+
+    items = []
+    for bed, patient, department in rows:
+        items.append({
+            "patient_id": patient.id,
+            "patient_name": h.display_name(
+                patient.first_name,
+                patient.last_name,
+            ),
+            "patient_uhid": patient.patient_uid,
+            "patient_phone": patient.phone,
+            "bed_id": bed.id,
+            "bed_number": bed.bed_number,
+            "ward_name": bed.ward_name,
+            "department_id": bed.department_id,
+            "department_name": department.name if department else None,
+            "admitted_at": bed.admitted_at,
+            "last_vitals": _vital_summary(vitals_map.get(patient.id)),
+            "pending_medication_count": pending_map.get(patient.id, 0),
+        })
+
+    return {
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }

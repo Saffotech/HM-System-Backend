@@ -1,0 +1,99 @@
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+
+from database import get_db
+from dependencies import get_current_user, PermissionChecker
+from Models.user import User
+from Schemas.nurse_dashboard_schema import (
+    NurseDashboardQueueResponse,
+    NurseDashboardBedPatientListResponse,
+    NurseDashboardBedPatientSummaryResponse,
+)
+from Services.nurse_dashboard_service import (
+    get_nurse_today_queue_service,
+    get_nurse_bed_patients_service,
+    get_nurse_bed_patients_summary_service,
+)
+
+router = APIRouter(
+    prefix="/nurse",
+    tags=["Nurse Dashboard"],
+)
+
+
+def _bed_patient_filters(
+    search: str | None = Query(
+        None,
+        description="Search by patient name, UHID, phone, bed number, or ward",
+    ),
+    ward_name: str | None = Query(None, description="Filter by ward name"),
+    bed_number: str | None = Query(None, description="Filter by bed number"),
+    department_id: int | None = Query(None, ge=1, description="Filter by department"),
+    patient_id: int | None = Query(None, ge=1),
+):
+    return {
+        "search": search,
+        "ward_name": ward_name,
+        "bed_number": bed_number,
+        "department_id": department_id,
+        "patient_id": patient_id,
+    }
+
+
+@router.get("/queue/today", response_model=NurseDashboardQueueResponse)
+def get_today_queue(
+    search: str | None = Query(
+        None,
+        description="Search by name, UHID, phone, appointment UID, patient ID, or token",
+    ),
+    status: str | None = Query(
+        None,
+        description="waiting, vitals_completed, in_progress, completed, cancelled",
+    ),
+    doctor_id: int | None = Query(None, ge=1),
+    priority: str | None = Query(None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    return get_nurse_today_queue_service(
+        db=db,
+        search=search,
+        status=status,
+        doctor_id=doctor_id,
+        priority=priority,
+        page=page,
+        page_size=page_size,
+    )
+
+
+@router.get(
+    "/beds/patients/summary",
+    response_model=NurseDashboardBedPatientSummaryResponse,
+)
+def get_bed_assigned_patients_summary(
+    filters: dict = Depends(_bed_patient_filters),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    return get_nurse_bed_patients_summary_service(db=db, **filters)
+
+
+@router.get("/beds/patients", response_model=NurseDashboardBedPatientListResponse)
+def get_bed_assigned_patients(
+    filters: dict = Depends(_bed_patient_filters),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    return get_nurse_bed_patients_service(
+        db=db,
+        page=page,
+        page_size=page_size,
+        **filters,
+    )

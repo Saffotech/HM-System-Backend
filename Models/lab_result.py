@@ -76,10 +76,26 @@ class LabResult(Base):
         nullable=True
     )
 
+    file_name = Column(
+        String(255),
+        nullable=True
+    )
+
+    file_type = Column(
+        String(100),
+        nullable=True
+    )
+
+    file_size = Column(
+        Integer,
+        nullable=True
+    )
+
     created_at = Column(
         DateTime(timezone=True),
         default=lambda: datetime.now(IST),
-        nullable=False
+        nullable=False,
+        index=True,
     )
 
     updated_at = Column(
