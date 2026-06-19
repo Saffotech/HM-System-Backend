@@ -63,7 +63,6 @@ app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 
-
 @app.get("/")
 def home():
     return {"message": "Hospital api running.."}

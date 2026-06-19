@@ -111,9 +111,21 @@ def list_prescriptions(
         q = q.filter(Prescription.status == status)
     if search:
         term = f"%{search.strip()}%"
-        q = q.filter(Prescription.patient_name.ilike(term))
+        q = (
+            q.join(Patient, Patient.id == Prescription.patient_id)
+            .filter(
+                Prescription.patient_name.ilike(term)
+                | Patient.patient_uid.ilike(term)
+            )
+        )
 
     rows = q.all()
+    patient_ids = {rx.patient_id for rx in rows}
+    patients = {
+        p.id: p
+        for p in db.query(Patient).filter(Patient.id.in_(patient_ids)).all()
+    } if patient_ids else {}
+    
     doctor_ids = {rx.doctor_id for rx in rows}
     doctors = {
         u.id: u
@@ -124,6 +136,9 @@ def list_prescriptions(
         PharmacyPrescriptionListItem(
             id=rx.id,
             patient_id=rx.patient_id,
+            patient_uid=patients[rx.patient_id].patient_uid
+            if rx.patient_id in patients
+            else "",
             patient_name=rx.patient_name or "",
             doctor_name=_doctor_name(doctors.get(rx.doctor_id)),
             diagnosis=rx.diagnosis,
@@ -154,6 +169,7 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
     return PharmacyPrescriptionDetail(
         id=rx.id,
         patient_id=rx.patient_id,
+        patient_uid=patient.patient_uid if patient else "",
         patient_name=_patient_display_name(rx, patient),
         patient_phone=patient.phone if patient else None,
         allergies=patient.allergies if patient else None,
@@ -298,11 +314,20 @@ def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
         u.id: u
         for u in db.query(User).filter(User.id.in_(pharmacist_ids)).all()
     }
+    patient_ids = {p.patient_id for p in prescriptions.values()}
+    patients = {
+        p.id: p
+        for p in db.query(Patient).filter(Patient.id.in_(patient_ids)).all()
+    } if patient_ids else {}
 
     history = [
         DispenseHistoryItem(
             id=line.id,
             dispensing_id=d.id,
+            patient_uid=patients[prescriptions[d.prescription_id].patient_id].patient_uid
+            if d.prescription_id in prescriptions
+            and prescriptions[d.prescription_id].patient_id in patients
+            else None,
             prescription_id=d.prescription_id,
             prescription_item_id=line.prescription_item_id,
             medicine_name=rx_item.medicine_name,
