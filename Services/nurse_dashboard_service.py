@@ -20,6 +20,8 @@ from Services import doctor_helpers as h
 def get_nurse_today_queue_service(
     db: Session,
     search: str | None = None,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
     status: str | None = None,
     doctor_id: int | None = None,
     priority: str | None = None,
@@ -33,6 +35,16 @@ def get_nurse_today_queue_service(
         db.query(PatientQueue)
         .filter(PatientQueue.queue_date == date.today())
     )
+
+    if patient_id:
+        query = query.filter(PatientQueue.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.filter(
+            PatientQueue.patient_uhid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
+        )
 
     if search:
         search_filters = [
@@ -57,7 +69,8 @@ def get_nurse_today_queue_service(
 
     total = query.count()
 
-    items = (
+    items = []
+    for row in (
         query
         .order_by(
             PatientQueue.priority.desc(),
@@ -66,7 +79,27 @@ def get_nurse_today_queue_service(
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
-    )
+    ):
+        items.append({
+            "id": row.id,
+            "appointment_id": row.appointment_id,
+            "patient_id": row.patient_id,
+            "patient_name": row.patient_name,
+            "patient_uhid": row.patient_uhid,
+            "patient_uid": row.patient_uhid,
+            "patient_phone": row.patient_phone,
+            "appointment_uid": row.appointment_uid,
+            "doctor_id": row.doctor_id,
+            "token_number": row.token_number,
+            "queue_date": row.queue_date,
+            "status": row.status.value if hasattr(row.status, "value") else row.status,
+            "priority": row.priority.value if hasattr(row.priority, "value") else row.priority,
+            "is_current": row.is_current,
+            "queue_entered_at": row.queue_entered_at,
+            "consultation_started_at": row.consultation_started_at,
+            "consultation_completed_at": row.consultation_completed_at,
+            "created_at": row.created_at,
+        })
 
     return {
         "total": total,
@@ -83,6 +116,7 @@ def _base_bed_patients_query(
     bed_number: str | None = None,
     department_id: int | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
 ):
     query = (
         db.query(Bed, Patient, Department)
@@ -110,6 +144,11 @@ def _base_bed_patients_query(
 
     if patient_id:
         query = query.filter(Patient.id == patient_id)
+
+    if patient_uid:
+        query = query.filter(
+            Patient.patient_uid.ilike(f"%{patient_uid.strip()}%")
+        )
 
     if search:
         term = search.strip()
@@ -251,6 +290,7 @@ def get_nurse_bed_patients_summary_service(
     bed_number: str | None = None,
     department_id: int | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
 ):
     query = _base_bed_patients_query(
         db=db,
@@ -259,6 +299,7 @@ def get_nurse_bed_patients_summary_service(
         bed_number=bed_number,
         department_id=department_id,
         patient_id=patient_id,
+        patient_uid=patient_uid,
     )
     return {"occupied_count": query.count()}
 
@@ -270,6 +311,7 @@ def get_nurse_bed_patients_service(
     bed_number: str | None = None,
     department_id: int | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ):
@@ -283,6 +325,7 @@ def get_nurse_bed_patients_service(
         bed_number=bed_number,
         department_id=department_id,
         patient_id=patient_id,
+        patient_uid=patient_uid,
     )
 
     total = query.count()
@@ -308,6 +351,7 @@ def get_nurse_bed_patients_service(
                 patient.last_name,
             ),
             "patient_uhid": patient.patient_uid,
+            "patient_uid": patient.patient_uid,
             "patient_phone": patient.phone,
             "bed_id": bed.id,
             "bed_number": bed.bed_number,

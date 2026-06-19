@@ -2,7 +2,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from Models.department import Department
 from Models.patient import Patient
 from Models.user import User
@@ -684,6 +684,7 @@ def get_handover_list_service(
     handover_uid: str | None = None,
 
     patient_id: int | None = None,
+    patient_uid: str | None = None,
 
     patient_name: str | None = None,
 
@@ -748,6 +749,13 @@ def get_handover_list_service(
         query = query.filter(
             ShiftHandoverPatient.patient_id
             == patient_id
+        )
+
+    if patient_uid:
+        query = query.filter(
+            Patient.patient_uid.ilike(
+                f"%{patient_uid}%"
+            )
         )
 
     if patient_name:
@@ -931,6 +939,9 @@ def get_handover_detail_service(
         db.query(
             ShiftHandoverPatient
         )
+        .options(
+            joinedload(ShiftHandoverPatient.patient)
+        )
         .filter(
             ShiftHandoverPatient.handover_id
             == handover.id
@@ -952,6 +963,10 @@ def get_handover_detail_service(
 
             "patient_id":
                 patient.patient_id,
+
+            "patient_uid":
+                patient.patient.patient_uid
+                if patient.patient else None,
 
             "patient_name":
                 patient.patient_name,

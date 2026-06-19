@@ -30,6 +30,7 @@ def _bed_patient_filters(
     bed_number: str | None = Query(None, description="Filter by bed number"),
     department_id: int | None = Query(None, ge=1, description="Filter by department"),
     patient_id: int | None = Query(None, ge=1),
+    patient_uid: str | None = Query(None),
 ):
     return {
         "search": search,
@@ -37,6 +38,7 @@ def _bed_patient_filters(
         "bed_number": bed_number,
         "department_id": department_id,
         "patient_id": patient_id,
+        "patient_uid": patient_uid,
     }
 
 
@@ -51,6 +53,8 @@ def get_today_queue(
         description="waiting, vitals_completed, in_progress, completed, cancelled",
     ),
     doctor_id: int | None = Query(None, ge=1),
+    patient_id: int | None = Query(None, ge=1),
+    patient_uid: str | None = Query(None),
     priority: str | None = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -63,6 +67,8 @@ def get_today_queue(
         search=search,
         status=status,
         doctor_id=doctor_id,
+        patient_id=patient_id,
+        patient_uid=patient_uid,
         priority=priority,
         page=page,
         page_size=page_size,

@@ -8,7 +8,12 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult
 from Models.opd_billing import Appointment
-from Schemas.doctor_lab_test_schema import LabTestCreate, LabTestUpdate
+from Schemas.doctor_lab_test_schema import (
+    LabTestCreate,
+    LabTestUpdate,
+    LabTestListResponse,
+    LabTestResponse,
+)
 from Schemas.lab_schema import ReportSource
 from Services import doctor_helpers as h
 from Services.lab_service import (
@@ -16,10 +21,23 @@ from Services.lab_service import (
     _apply_report_source_filter,
     _end_of_day,
     _has_report_file,
+    _order_patient_fields,
     _parse_lab_status,
     _report_source,
     _resolve_report_path,
 )
+
+
+def _serialize_lab_test(order: LabTestOrder) -> LabTestListResponse:
+    return LabTestListResponse.model_validate(order).model_copy(
+        update={"patient_uid": order.patient_uhid}
+    )
+
+
+def _serialize_lab_test_response(order: LabTestOrder) -> LabTestResponse:
+    return LabTestResponse.model_validate(order).model_copy(
+        update={"patient_uid": order.patient_uhid}
+    )
 
 
 def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int):
@@ -71,18 +89,30 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
     db.add(lab_test)
     db.commit()
     db.refresh(lab_test)
-    return lab_test
+    return _serialize_lab_test_response(lab_test)
 
 
 def get_lab_tests_service(
     db: Session,
     doctor_id: int,
     search: str | None = None,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 20,
 ):
     query = db.query(LabTestOrder).filter(LabTestOrder.doctor_id == doctor_id)
+
+    if patient_id:
+        query = query.filter(LabTestOrder.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.filter(
+            LabTestOrder.patient_uhid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
+        )
 
     if status:
         query = query.filter(
@@ -106,13 +136,16 @@ def get_lab_tests_service(
     limit = min(max(limit, 1), 100)
     skip = max(skip, 0)
 
-    return (
-        query
-        .order_by(LabTestOrder.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
-    )
+    return [
+        _serialize_lab_test(order)
+        for order in (
+            query
+            .order_by(LabTestOrder.created_at.desc())
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+    ]
 
 
 def get_lab_test_by_id_service(
@@ -157,9 +190,8 @@ def get_lab_test_by_id_service(
     return {
         "id": order.id,
         "appointment_id": order.appointment_id,
-        "patient_id": order.patient_id,
         "patient_name": order.patient_name,
-        "patient_uhid": order.patient_uhid,
+        **_order_patient_fields(order),
         "doctor_id": order.doctor_id,
         "test_name": order.test_name,
         "category": order.category,
@@ -199,7 +231,7 @@ def update_lab_test_service(
 
     db.commit()
     db.refresh(test)
-    return test
+    return _serialize_lab_test_response(test)
 
 
 def cancel_lab_test_service(db: Session, test_id: int, doctor_id: int):
@@ -243,6 +275,7 @@ def get_doctor_lab_reports_service(
     search: str | None = None,
     patient_id: int | None = None,
     patient_uhid: str | None = None,
+    patient_uid: str | None = None,
     patient_name: str | None = None,
     test_name: str | None = None,
     status: str | None = None,
@@ -278,10 +311,13 @@ def get_doctor_lab_reports_service(
     if patient_id:
         query = query.filter(LabTestOrder.patient_id == patient_id)
 
-    if patient_uhid:
+    if patient_uhid and not patient_uid:
+        patient_uid = patient_uhid
+
+    if patient_uid:
         query = query.filter(
             LabTestOrder.patient_uhid.ilike(
-                f"%{patient_uhid.strip()}%"
+                f"%{patient_uid.strip()}%"
             )
         )
 
@@ -344,9 +380,8 @@ def get_doctor_lab_reports_service(
         items.append({
             "report_id": report.id,
             "order_id": order.id,
-            "patient_id": order.patient_id,
             "patient_name": order.patient_name,
-            "patient_uhid": order.patient_uhid,
+            **_order_patient_fields(order),
             "test_name": order.test_name,
             "category": order.category,
             "status": order.status.value,
@@ -411,9 +446,8 @@ def get_doctor_lab_report_by_test_service(
     return {
         "report_id": report.id,
         "order_id": order.id,
-        "patient_id": order.patient_id,
         "patient_name": order.patient_name,
-        "patient_uhid": order.patient_uhid,
+        **_order_patient_fields(order),
         "test_name": order.test_name,
         "category": order.category,
         "priority": order.priority,

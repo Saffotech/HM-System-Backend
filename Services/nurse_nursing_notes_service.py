@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.opd_billing import Appointment
 from Models.patient import Patient
@@ -11,10 +11,27 @@ from Models.nurse_nursing_notes import NursingNote
 
 from Schemas.nurse_schema import (
     NursingNoteCreate,
-    NursingNoteUpdate
+    NursingNoteUpdate,
+    NursingNoteResponse,
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _serialize_note(note: NursingNote) -> NursingNoteResponse:
+    return NursingNoteResponse.model_validate(note).model_copy(
+        update={
+            "patient_uid": (
+                note.patient.patient_uid if note.patient else None
+            )
+        }
+    )
+
+
+def _note_query(db: Session):
+    return db.query(NursingNote).options(
+        joinedload(NursingNote.patient)
+    )
 
 
 # ==========================================================
@@ -59,8 +76,13 @@ def create_note_service(
 
         db.commit()
         db.refresh(note)
+        note = (
+            _note_query(db)
+            .filter(NursingNote.id == note.id)
+            .first()
+        )
 
-        return note
+        return _serialize_note(note)
 
     except Exception:
         db.rollback()
@@ -114,8 +136,13 @@ def update_note_service(
 
         db.commit()
         db.refresh(note)
+        note = (
+            _note_query(db)
+            .filter(NursingNote.id == note.id)
+            .first()
+        )
 
-        return note
+        return _serialize_note(note)
 
     except Exception:
         db.rollback()
@@ -132,7 +159,7 @@ def get_note_by_id_service(
 ):
 
     note = (
-        db.query(NursingNote)
+        _note_query(db)
         .filter(
             NursingNote.id == note_id
         )
@@ -145,7 +172,7 @@ def get_note_by_id_service(
             detail="Note not found"
         )
 
-    return note
+    return _serialize_note(note)
 
 
 # ==========================================================
@@ -158,8 +185,8 @@ def get_all_notes_service(
     page_size: int = 20
 ):
 
-    return (
-        db.query(NursingNote)
+    notes = (
+        _note_query(db)
         .order_by(
             NursingNote.created_at.desc()
         )
@@ -172,6 +199,8 @@ def get_all_notes_service(
         .all()
     )
 
+    return [_serialize_note(note) for note in notes]
+
 
 # ==========================================================
 # SEARCH / FILTER NOTES
@@ -181,6 +210,7 @@ def search_notes_service(
     db: Session,
 
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     appointment_id: int | None = None,
 
     name: str | None = None,
@@ -198,7 +228,7 @@ def search_notes_service(
 ):
 
     query = (
-        db.query(NursingNote)
+        _note_query(db)
         .join(
             Patient,
             Patient.id == NursingNote.patient_id
@@ -234,10 +264,13 @@ def search_notes_service(
             )
         )
 
-    if uhid:
+    if uhid and not patient_uid:
+        patient_uid = uhid
+
+    if patient_uid:
         query = query.filter(
             Patient.patient_uid.ilike(
-                f"%{uhid}%"
+                f"%{patient_uid}%"
             )
         )
 
@@ -262,7 +295,7 @@ def search_notes_service(
             (to_date + timedelta(days=1))
         )
 
-    return (
+    notes = (
         query
         .order_by(
             NursingNote.created_at.desc()
@@ -275,3 +308,5 @@ def search_notes_service(
         )
         .all()
     )
+
+    return [_serialize_note(note) for note in notes]

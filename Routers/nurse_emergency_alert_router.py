@@ -74,6 +74,10 @@ def get_alerts(
         default=None
     ),
 
+    patient_uid: str | None = Query(
+        default=None
+    ),
+
     assigned_nurse_id: int | None = Query(
         default=None
     ),
@@ -117,6 +121,7 @@ def get_alerts(
         alert_type=alert_type,
         ward_name=ward_name,
         patient_id=patient_id,
+        patient_uid=patient_uid,
         assigned_nurse_id=assigned_nurse_id,
         from_date=from_date,
         to_date=to_date,

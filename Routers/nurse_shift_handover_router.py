@@ -266,6 +266,10 @@ def get_handovers(
         ge=1
     ),
 
+    patient_uid: str | None = Query(
+        None
+    ),
+
     patient_name: str | None = None,
 
     status: str | None = None,
@@ -309,6 +313,8 @@ def get_handovers(
         handover_uid=handover_uid,
 
         patient_id=patient_id,
+
+        patient_uid=patient_uid,
 
         patient_name=patient_name,
 

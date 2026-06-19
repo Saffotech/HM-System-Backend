@@ -97,6 +97,17 @@ def _compute_prescription_status(
     return PRESCRIPTION_STATUS_PENDING
 
 
+def _patient_uid_map(db: Session, patient_ids: set[int]) -> dict[int, str]:
+    if not patient_ids:
+        return {}
+    rows = (
+        db.query(Patient.id, Patient.patient_uid)
+        .filter(Patient.id.in_(patient_ids))
+        .all()
+    )
+    return {int(row.id): row.patient_uid for row in rows}
+
+
 def list_prescriptions(
     db: Session,
     status: str = PRESCRIPTION_STATUS_PENDING,
@@ -119,11 +130,13 @@ def list_prescriptions(
         u.id: u
         for u in db.query(User).filter(User.id.in_(doctor_ids)).all()
     } if doctor_ids else {}
+    uid_map = _patient_uid_map(db, {int(rx.patient_id) for rx in rows})
 
     prescriptions = [
         PharmacyPrescriptionListItem(
             id=rx.id,
             patient_id=rx.patient_id,
+            patient_uid=uid_map.get(int(rx.patient_id)),
             patient_name=rx.patient_name or "",
             doctor_name=_doctor_name(doctors.get(rx.doctor_id)),
             diagnosis=rx.diagnosis,
@@ -154,6 +167,7 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
     return PharmacyPrescriptionDetail(
         id=rx.id,
         patient_id=rx.patient_id,
+        patient_uid=patient.patient_uid if patient else None,
         patient_name=_patient_display_name(rx, patient),
         patient_phone=patient.phone if patient else None,
         allergies=patient.allergies if patient else None,
@@ -293,6 +307,10 @@ def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
         p.id: p
         for p in db.query(Prescription).filter(Prescription.id.in_(rx_ids)).all()
     }
+    uid_map = _patient_uid_map(
+        db,
+        {int(p.patient_id) for p in prescriptions.values()},
+    )
     pharmacists = {
         u.id: u
         for u in db.query(User).filter(User.id.in_(pharmacist_ids)).all()
@@ -304,6 +322,14 @@ def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
             dispensing_id=d.id,
             prescription_id=d.prescription_id,
             prescription_item_id=line.prescription_item_id,
+            patient_id=prescriptions[d.prescription_id].patient_id
+            if d.prescription_id in prescriptions
+            else 0,
+            patient_uid=uid_map.get(
+                int(prescriptions[d.prescription_id].patient_id)
+            )
+            if d.prescription_id in prescriptions
+            else None,
             medicine_name=rx_item.medicine_name,
             patient_name=prescriptions[d.prescription_id].patient_name or ""
             if d.prescription_id in prescriptions

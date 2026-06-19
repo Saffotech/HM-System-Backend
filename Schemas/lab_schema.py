@@ -101,6 +101,7 @@ class LabOrderListItem(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
 
     doctor_id: int
     doctor_name: str
@@ -153,6 +154,7 @@ class LabOrderDetailResponse(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
 
     doctor_id: int
     doctor_name: str
@@ -191,8 +193,10 @@ class LabReportListItem(BaseModel):
     report_id: int
     order_id: int
 
+    patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
 
     test_name: str
 
@@ -225,6 +229,7 @@ class LabReportOrderSummary(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
     doctor_id: int
     test_name: str
     category: str

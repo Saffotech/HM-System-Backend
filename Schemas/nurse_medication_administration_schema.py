@@ -34,6 +34,7 @@ class MedicationAdministrationResponse(BaseModel):
 
     prescription_item_id: int
     patient_id: int
+    patient_uid: Optional[str] = None
 
     medicine_name: str
 
@@ -77,6 +78,7 @@ class PatientMedicationItem(BaseModel):
 class PatientMedicationResponse(BaseModel):
 
     patient_id: int
+    patient_uid: Optional[str] = None
     patient_name: str
 
     bed_number: Optional[str] = None

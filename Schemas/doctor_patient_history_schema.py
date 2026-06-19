@@ -11,6 +11,7 @@ class PatientHistoryItem(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
     patient_phone: str
     doctor_id: int
     department_id: int

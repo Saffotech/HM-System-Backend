@@ -2,15 +2,37 @@ from datetime import datetime,date,time
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from Models.patient import Patient
 from Models.opd_billing import Bed
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
 from Models.nurse_medication_administration import MedicationAdministration
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
-    MedicationAdministrationUpdate
+    MedicationAdministrationUpdate,
+    MedicationAdministrationResponse,
 )
+
+def _serialize_administration(
+    administration: MedicationAdministration,
+) -> MedicationAdministrationResponse:
+    return MedicationAdministrationResponse.model_validate(
+        administration
+    ).model_copy(
+        update={
+            "patient_uid": (
+                administration.patient.patient_uid
+                if administration.patient else None
+            )
+        }
+    )
+
+
+def _administration_query(db: Session):
+    return db.query(MedicationAdministration).options(
+        joinedload(MedicationAdministration.patient)
+    )
+
 
 def get_medication_patients_service(
     db: Session,
@@ -195,6 +217,7 @@ def get_patient_medications_service(
     )
     return {
         "patient_id": patient.id,
+        "patient_uid": patient.patient_uid,
 
         "patient_name":
             f"{patient.first_name} "
@@ -295,12 +318,19 @@ def administer_medication_service(
         db.add(administration)
         db.commit()
         db.refresh(administration)
+        administration = (
+            _administration_query(db)
+            .filter(
+                MedicationAdministration.id == administration.id
+            )
+            .first()
+        )
 
     except Exception:
         db.rollback()
         raise
 
-    return administration
+    return _serialize_administration(administration)
 
 
 def update_medication_administration_service(
@@ -349,12 +379,19 @@ def update_medication_administration_service(
         db.add(administration)
         db.commit()
         db.refresh(administration)
+        administration = (
+            _administration_query(db)
+            .filter(
+                MedicationAdministration.id == administration.id
+            )
+            .first()
+        )
 
     except Exception:
         db.rollback()
         raise
 
-    return administration
+    return _serialize_administration(administration)
 
 def get_patient_medication_history_service(
     db: Session,
@@ -390,9 +427,7 @@ def get_patient_medication_history_service(
         )
 
     history = (
-        db.query(
-            MedicationAdministration
-        )
+        _administration_query(db)
         .filter(
             MedicationAdministration.patient_id == patient_id,
             MedicationAdministration.is_active == True
@@ -409,7 +444,10 @@ def get_patient_medication_history_service(
         .all()
     )
 
-    return history
+    return [
+        _serialize_administration(record)
+        for record in history
+    ]
 
 
 def get_medication_history_service(
@@ -446,7 +484,7 @@ def get_medication_history_service(
     # get_medication_history_service()
 
     query = (
-        db.query(MedicationAdministration)
+        _administration_query(db)
         .join(
             Patient,
             Patient.id == MedicationAdministration.patient_id
@@ -510,7 +548,7 @@ def get_medication_history_service(
             )
         )
 
-    return (
+    records = (
         query
         .order_by(
             MedicationAdministration
@@ -524,3 +562,8 @@ def get_medication_history_service(
         )
         .all()
     )
+
+    return [
+        _serialize_administration(record)
+        for record in records
+    ]

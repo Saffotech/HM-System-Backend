@@ -55,6 +55,7 @@ class VitalResponse(BaseModel):
 
     appointment_id: int
     patient_id: int
+    patient_uid: Optional[str] = None
     recorded_by: int
 
     temperature: Optional[float]
@@ -112,6 +113,7 @@ class NursingNoteResponse(BaseModel):
 
     appointment_id: int
     patient_id: int
+    patient_uid: Optional[str] = None
     nurse_id: int
 
     symptoms: Optional[str]

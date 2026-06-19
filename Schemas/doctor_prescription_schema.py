@@ -42,6 +42,7 @@ class PrescriptionResponse(BaseModel):
     id: int
     appointment_id: int
     patient_id: int
+    patient_uid: Optional[str] = None
     doctor_id: int
     diagnosis: str
     notes: Optional[str]

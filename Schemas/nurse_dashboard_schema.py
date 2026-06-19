@@ -14,6 +14,7 @@ class NurseDashboardQueueItem(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
     patient_phone: Optional[str] = None
     appointment_uid: Optional[str] = None
     doctor_id: int
@@ -55,6 +56,7 @@ class NurseDashboardBedPatientItem(BaseModel):
     patient_id: int
     patient_name: str
     patient_uhid: str
+    patient_uid: Optional[str] = None
     patient_phone: Optional[str] = None
 
     bed_id: int

@@ -30,6 +30,15 @@ EXTENSION_MEDIA_TYPES = {
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
+def _order_patient_fields(order: LabTestOrder) -> dict:
+    """Lab orders snapshot UHID; expose patient_uid alias for API consistency."""
+    return {
+        "patient_id": order.patient_id,
+        "patient_uhid": order.patient_uhid,
+        "patient_uid": order.patient_uhid,
+    }
+
+
 def _get_upload_dir() -> Path:
     upload_dir = Path(
         os.getenv("LAB_UPLOAD_DIR", "uploads/lab_reports")
@@ -148,6 +157,7 @@ def get_orders(
     search: str | None = None,
     doctor_id: int | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
     page: int = 1,
@@ -177,6 +187,13 @@ def get_orders(
 
     if patient_id:
         query = query.filter(LabTestOrder.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.filter(
+            LabTestOrder.patient_uhid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
+        )
 
     if from_date:
         query = query.filter(LabTestOrder.created_at >= from_date)
@@ -219,9 +236,8 @@ def get_orders(
         items.append({
             "id": order.id,
             "appointment_id": order.appointment_id,
-            "patient_id": order.patient_id,
             "patient_name": order.patient_name,
-            "patient_uhid": order.patient_uhid,
+            **_order_patient_fields(order),
             "doctor_id": doctor.id,
             "doctor_name": doctor_name,
             "test_name": order.test_name,
@@ -279,9 +295,8 @@ def get_order_detail(db: Session, order_id: int):
     return {
         "id": order.id,
         "appointment_id": order.appointment_id,
-        "patient_id": order.patient_id,
         "patient_name": order.patient_name,
-        "patient_uhid": order.patient_uhid,
+        **_order_patient_fields(order),
         "doctor_id": order.doctor_id,
         "doctor_name": doctor_name,
         "test_name": order.test_name,
@@ -549,6 +564,7 @@ def get_reports(
     db: Session,
     search: str | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     patient_name: str | None = None,
     test_name: str | None = None,
     source: ReportSource | None = None,
@@ -571,6 +587,7 @@ def get_reports(
 
     needs_order_join = any([
         patient_id,
+        patient_uid,
         search,
         patient_name,
         test_name,
@@ -589,6 +606,13 @@ def get_reports(
 
     if patient_id:
         query = query.filter(LabTestOrder.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.filter(
+            LabTestOrder.patient_uhid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
+        )
 
     if patient_name:
         query = query.filter(
@@ -644,7 +668,7 @@ def get_reports(
             "report_id": report.id,
             "order_id": report.lab_test_order_id,
             "patient_name": report.lab_order.patient_name,
-            "patient_uhid": report.lab_order.patient_uhid,
+            **_order_patient_fields(report.lab_order),
             "test_name": report.lab_order.test_name,
             "uploaded_by": report.uploaded_by,
             "uploaded_by_name": uploader_name,
@@ -715,9 +739,8 @@ def get_report_detail(db: Session, report_id: int):
         "source": _report_source(report),
         "order": {
             "id": report.lab_order.id,
-            "patient_id": report.lab_order.patient_id,
             "patient_name": report.lab_order.patient_name,
-            "patient_uhid": report.lab_order.patient_uhid,
+            **_order_patient_fields(report.lab_order),
             "doctor_id": report.lab_order.doctor_id,
             "test_name": report.lab_order.test_name,
             "category": report.lab_order.category,

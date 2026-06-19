@@ -76,6 +76,8 @@ def create_lab_test(
 )
 def get_lab_tests(
     search: str | None = None,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
     status: str | None = None,
     skip: int = 0,
     limit: int = 20,
@@ -87,6 +89,8 @@ def get_lab_tests(
         db=db,
         doctor_id=current_user.id,
         search=search,
+        patient_id=patient_id,
+        patient_uid=patient_uid,
         status=status,
         skip=skip,
         limit=limit,
@@ -105,6 +109,7 @@ def get_doctor_lab_reports(
     search: str | None = None,
     patient_id: int | None = None,
     patient_uhid: str | None = None,
+    patient_uid: str | None = None,
     patient_name: str | None = None,
     test_name: str | None = None,
     status: str | None = None,
@@ -123,6 +128,7 @@ def get_doctor_lab_reports(
         search=search,
         patient_id=patient_id,
         patient_uhid=patient_uhid,
+        patient_uid=patient_uid,
         patient_name=patient_name,
         test_name=test_name,
         status=status,

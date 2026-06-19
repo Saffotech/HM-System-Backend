@@ -62,6 +62,7 @@ def appointment_to_dict(
         "patient_age": patient_age(patient.date_of_birth) if patient else None,
         "patient_gender": patient.gender if patient else None,
         "patient_uhid": patient.patient_uid if patient else "",
+        "patient_uid": patient.patient_uid if patient else None,
         "doctor_id": apt.doctor_id,
         "department_id": apt.department_id,
         "scheduled_at": scheduled.isoformat() if scheduled else None,
