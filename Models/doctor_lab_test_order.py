@@ -36,6 +36,7 @@ class LabTestOrder(Base):
 
     patient_id = Column(
         Integer,
+        ForeignKey("patients.id"),
         nullable=False,
         index=True
     )

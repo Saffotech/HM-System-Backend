@@ -144,10 +144,6 @@ def search_notes(
         None
     ),
 
-    uhid: str | None = Query(
-        None
-    ),
-
     status: str | None = Query(
         None
     ),
@@ -198,7 +194,6 @@ def search_notes(
 
         name=name,
         phone=phone,
-        uhid=uhid,
 
         status=status,
         nurse_id=nurse_id,

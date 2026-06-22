@@ -247,7 +247,6 @@ def search_vitals_service(
 
     name: str | None = None,
     phone: str | None = None,
-    uhid: str | None = None,
 
     status: str | None = None,
     recorded_by: int | None = None,
@@ -295,9 +294,6 @@ def search_vitals_service(
                 f"%{phone}%"
             )
         )
-
-    if uhid and not patient_uid:
-        patient_uid = uhid
 
     if patient_uid:
         query = query.filter(

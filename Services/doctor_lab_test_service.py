@@ -29,15 +29,11 @@ from Services.lab_service import (
 
 
 def _serialize_lab_test(order: LabTestOrder) -> LabTestListResponse:
-    return LabTestListResponse.model_validate(order).model_copy(
-        update={"patient_uid": order.patient_uhid}
-    )
+    return LabTestListResponse.model_validate(order)
 
 
 def _serialize_lab_test_response(order: LabTestOrder) -> LabTestResponse:
-    return LabTestResponse.model_validate(order).model_copy(
-        update={"patient_uid": order.patient_uhid}
-    )
+    return LabTestResponse.model_validate(order)
 
 
 def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int):
@@ -99,8 +95,8 @@ def get_lab_tests_service(
     patient_id: int | None = None,
     patient_uid: str | None = None,
     status: str | None = None,
-    skip: int = 0,
-    limit: int = 20,
+    page: int = 1,
+    page_size: int = 20,
 ):
     query = db.query(LabTestOrder).filter(LabTestOrder.doctor_id == doctor_id)
 
@@ -133,19 +129,29 @@ def get_lab_tests_service(
             ])
         query = query.filter(or_(*filters))
 
-    limit = min(max(limit, 1), 100)
-    skip = max(skip, 0)
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
 
-    return [
+    total = query.count()
+
+    items = [
         _serialize_lab_test(order)
         for order in (
             query
             .order_by(LabTestOrder.created_at.desc())
-            .offset(skip)
-            .limit(limit)
+            .offset((page - 1) * page_size)
+            .limit(page_size)
             .all()
         )
     ]
+
+    return {
+        "success": True,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }
 
 
 def get_lab_test_by_id_service(
@@ -274,7 +280,6 @@ def get_doctor_lab_reports_service(
     doctor_id: int,
     search: str | None = None,
     patient_id: int | None = None,
-    patient_uhid: str | None = None,
     patient_uid: str | None = None,
     patient_name: str | None = None,
     test_name: str | None = None,
@@ -310,9 +315,6 @@ def get_doctor_lab_reports_service(
 
     if patient_id:
         query = query.filter(LabTestOrder.patient_id == patient_id)
-
-    if patient_uhid and not patient_uid:
-        patient_uid = patient_uhid
 
     if patient_uid:
         query = query.filter(
@@ -392,6 +394,7 @@ def get_doctor_lab_reports_service(
         })
 
     return {
+        "success": True,
         "total": total,
         "page": page,
         "page_size": page_size,

@@ -85,7 +85,6 @@ def get_nurse_today_queue_service(
             "appointment_id": row.appointment_id,
             "patient_id": row.patient_id,
             "patient_name": row.patient_name,
-            "patient_uhid": row.patient_uhid,
             "patient_uid": row.patient_uhid,
             "patient_phone": row.patient_phone,
             "appointment_uid": row.appointment_uid,
@@ -102,6 +101,7 @@ def get_nurse_today_queue_service(
         })
 
     return {
+        "success": True,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -301,7 +301,7 @@ def get_nurse_bed_patients_summary_service(
         patient_id=patient_id,
         patient_uid=patient_uid,
     )
-    return {"occupied_count": query.count()}
+    return {"success": True, "occupied_count": query.count()}
 
 
 def get_nurse_bed_patients_service(
@@ -350,7 +350,6 @@ def get_nurse_bed_patients_service(
                 patient.first_name,
                 patient.last_name,
             ),
-            "patient_uhid": patient.patient_uid,
             "patient_uid": patient.patient_uid,
             "patient_phone": patient.phone,
             "bed_id": bed.id,
@@ -364,6 +363,7 @@ def get_nurse_bed_patients_service(
         })
 
     return {
+        "success": True,
         "total": total,
         "page": page,
         "page_size": page_size,

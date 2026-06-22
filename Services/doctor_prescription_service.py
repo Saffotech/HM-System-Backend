@@ -146,7 +146,7 @@ def get_patient_prescriptions_service(
     )
     return [_serialize_prescription(rx) for rx in prescriptions]
 
-
+  
 def update_prescription_service(
     db: Session, prescription_id: int, prescription_data: PrescriptionCreate, doctor_id: int
 ):

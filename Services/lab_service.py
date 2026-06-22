@@ -31,10 +31,9 @@ MAX_FILE_SIZE = 10 * 1024 * 1024
 
 
 def _order_patient_fields(order: LabTestOrder) -> dict:
-    """Lab orders snapshot UHID; expose patient_uid alias for API consistency."""
+    """Lab orders snapshot patient UID on the order row."""
     return {
         "patient_id": order.patient_id,
-        "patient_uhid": order.patient_uhid,
         "patient_uid": order.patient_uhid,
     }
 
@@ -116,7 +115,7 @@ def _report_source(report: LabResult) -> str:
     if has_file:
         return ReportSource.PDF.value
     return "NONE"
-
+ 
 
 def _apply_report_source_filter(query, source: ReportSource):
     has_parameters = exists().where(
@@ -249,6 +248,7 @@ def get_orders(
         })
 
     return {
+        "success": True,
         "total": total,
         "page": page,
         "page_size": page_size,
@@ -679,6 +679,7 @@ def get_reports(
         })
 
     return {
+        "success": True,
         "total": total,
         "page": page,
         "page_size": page_size,

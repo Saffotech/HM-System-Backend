@@ -2,7 +2,9 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
+
+from Schemas.common_schema import PaginatedResponse
 
 
 # =====================================================
@@ -100,8 +102,7 @@ class LabOrderListItem(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
 
     doctor_id: int
     doctor_name: str
@@ -116,14 +117,11 @@ class LabOrderListItem(BaseModel):
 
     created_at: datetime
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-class LabOrderListResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[LabOrderListItem]
+class LabOrderListResponse(PaginatedResponse[LabOrderListItem]):
+    pass
 
 
 # =====================================================
@@ -153,8 +151,7 @@ class LabOrderDetailResponse(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
 
     doctor_id: int
     doctor_name: str
@@ -171,7 +168,7 @@ class LabOrderDetailResponse(BaseModel):
 
     report: Optional[ReportSummary] = None
     report_uploaded: bool = False
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # =====================================================
@@ -195,8 +192,7 @@ class LabReportListItem(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
 
     test_name: str
 
@@ -213,11 +209,8 @@ class LabReportListItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class LabReportListResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[LabReportListItem]
+class LabReportListResponse(PaginatedResponse[LabReportListItem]):
+    pass
 
 
 # =====================================================
@@ -228,8 +221,7 @@ class LabReportOrderSummary(BaseModel):
     id: int
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
     doctor_id: int
     test_name: str
     category: str

@@ -16,7 +16,7 @@ from Schemas.doctor_lab_test_schema import (
     LabTestCreate,
     LabTestUpdate,
     LabTestResponse,
-    LabTestListResponse,
+    LabTestListPaginatedResponse,
     LabTestDetailResponse,
     DoctorLabReportListResponse,
     DoctorLabReportDetailResponse,
@@ -72,15 +72,15 @@ def create_lab_test(
 
 @router.get(
     "",
-    response_model=list[LabTestListResponse],
+    response_model=LabTestListPaginatedResponse,
 )
 def get_lab_tests(
     search: str | None = None,
     patient_id: int | None = None,
     patient_uid: str | None = None,
     status: str | None = None,
-    skip: int = 0,
-    limit: int = 20,
+    page: int = 1,
+    page_size: int = 20,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:view")),
@@ -92,8 +92,8 @@ def get_lab_tests(
         patient_id=patient_id,
         patient_uid=patient_uid,
         status=status,
-        skip=skip,
-        limit=limit,
+        page=page,
+        page_size=page_size,
     )
 
 
@@ -108,7 +108,6 @@ def get_lab_tests(
 def get_doctor_lab_reports(
     search: str | None = None,
     patient_id: int | None = None,
-    patient_uhid: str | None = None,
     patient_uid: str | None = None,
     patient_name: str | None = None,
     test_name: str | None = None,
@@ -127,7 +126,6 @@ def get_doctor_lab_reports(
         doctor_id=current_user.id,
         search=search,
         patient_id=patient_id,
-        patient_uhid=patient_uhid,
         patient_uid=patient_uid,
         patient_name=patient_name,
         test_name=test_name,

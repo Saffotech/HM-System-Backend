@@ -215,7 +215,6 @@ def search_notes_service(
 
     name: str | None = None,
     phone: str | None = None,
-    uhid: str | None = None,
 
     status: str | None = None,
     nurse_id: int | None = None,
@@ -263,9 +262,6 @@ def search_notes_service(
                 f"%{phone}%"
             )
         )
-
-    if uhid and not patient_uid:
-        patient_uid = uhid
 
     if patient_uid:
         query = query.filter(

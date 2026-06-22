@@ -144,10 +144,6 @@ def search_vitals(
         None
     ),
 
-    uhid: str | None = Query(
-        None
-    ),
-
     status: str | None = Query(
         None
     ),
@@ -198,7 +194,6 @@ def search_vitals(
 
         name=name,
         phone=phone,
-        uhid=uhid,
 
         status=status,
         recorded_by=recorded_by,

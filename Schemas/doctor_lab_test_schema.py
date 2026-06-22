@@ -1,7 +1,8 @@
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 from datetime import datetime
 from typing import List, Optional
 
+from Schemas.common_schema import PaginatedResponse
 from Schemas.lab_schema import ReportSource
 
 
@@ -71,8 +72,9 @@ class LabTestResponse(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str = Field(
+        validation_alias=AliasChoices("patient_uid", "patient_uhid")
+    )
 
     doctor_id: int
 
@@ -86,8 +88,7 @@ class LabTestResponse(BaseModel):
     created_at: datetime
     updated_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # ==========================================
@@ -99,8 +100,9 @@ class LabTestListResponse(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str = Field(
+        validation_alias=AliasChoices("patient_uid", "patient_uhid")
+    )
 
     test_name: str
     category: str
@@ -110,8 +112,11 @@ class LabTestListResponse(BaseModel):
 
     created_at: datetime
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+
+class LabTestListPaginatedResponse(PaginatedResponse[LabTestListResponse]):
+    pass
 
 
 class LabTestReportSummary(BaseModel):
@@ -131,8 +136,9 @@ class LabTestDetailResponse(BaseModel):
 
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str = Field(
+        validation_alias=AliasChoices("patient_uid", "patient_uhid")
+    )
 
     doctor_id: int
 
@@ -150,7 +156,7 @@ class LabTestDetailResponse(BaseModel):
     has_report: bool = False
     report: Optional[LabTestReportSummary] = None
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
 # ==========================================
@@ -162,8 +168,7 @@ class DoctorLabReportListItem(BaseModel):
     order_id: int
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
     test_name: str
     category: str
     status: str
@@ -172,14 +177,11 @@ class DoctorLabReportListItem(BaseModel):
     uploaded_at: datetime
     uploaded_by_name: str
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
 
 
-class DoctorLabReportListResponse(BaseModel):
-    total: int
-    page: int
-    page_size: int
-    items: List[DoctorLabReportListItem]
+class DoctorLabReportListResponse(PaginatedResponse[DoctorLabReportListItem]):
+    pass
 
 
 class DoctorLabReportParameter(BaseModel):
@@ -196,8 +198,7 @@ class DoctorLabReportDetailResponse(BaseModel):
     order_id: int
     patient_id: int
     patient_name: str
-    patient_uhid: str
-    patient_uid: Optional[str] = None
+    patient_uid: str
     test_name: str
     category: str
     priority: str
