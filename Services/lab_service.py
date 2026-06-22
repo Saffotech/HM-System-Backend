@@ -29,6 +29,17 @@ EXTENSION_MEDIA_TYPES = {
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024
 
+def format_file_size(size_in_bytes: int) -> str:
+    if not size_in_bytes:
+        return "0 B"
+
+    if size_in_bytes < 1024:
+        return f"{size_in_bytes} B"
+
+    if size_in_bytes < 1024 * 1024:
+        return f"{size_in_bytes / 1024:.1f} KB"
+
+    return f"{size_in_bytes / (1024 * 1024):.1f} MB"
 
 def _order_patient_fields(order: LabTestOrder) -> dict:
     """Lab orders snapshot patient UID on the order row."""
@@ -557,6 +568,7 @@ def upload_report_file(
         "file_name": report.file_name,
         "file_type": report.file_type,
         "file_size": report.file_size,
+        "file_size_display": format_file_size(report.file_size),
     }
 
 
@@ -737,6 +749,7 @@ def get_report_detail(db: Session, report_id: int):
         "file_name": report.file_name,
         "file_type": report.file_type,
         "file_size": report.file_size,
+        "file_size_display": format_file_size(report.file_size),
         "source": _report_source(report),
         "order": {
             "id": report.lab_order.id,

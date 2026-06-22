@@ -247,6 +247,7 @@ class LabReportDetailResponse(BaseModel):
     file_name: Optional[str] = None
     file_type: Optional[str] = None
     file_size: Optional[int] = None
+    file_size_display: Optional[str] = None
     source: str
 
     order: LabReportOrderSummary
@@ -273,6 +274,7 @@ class LabReportResponse(BaseModel):
     file_name: Optional[str] = None
     file_type: Optional[str] = None
     file_size: Optional[int] = None
+    file_size_display: Optional[str] = None
     source: Optional[str] = None
 
     parameters: List[LabParameterResponse] = Field(default_factory=list)
