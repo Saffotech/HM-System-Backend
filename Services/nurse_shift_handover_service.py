@@ -16,6 +16,9 @@ from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverUpdate,
     ShiftHandoverPatientUpdate,
     ShiftHandoverPatientsBulkCreate)
+from Services.nurse_emergency_alert_triggers import (
+    get_active_alerts_text_for_patient,
+)
 
 # ==========================================================
 # HELPERS
@@ -198,6 +201,13 @@ def bulk_add_handover_patients_service(
             f"{patient.last_name or ''}"
         ).strip()
 
+        critical_alerts = item.critical_alerts
+        if not critical_alerts:
+            critical_alerts = get_active_alerts_text_for_patient(
+                db,
+                patient.id,
+            )
+
         handover_patient = (
             ShiftHandoverPatient(
 
@@ -210,7 +220,7 @@ def bulk_add_handover_patients_service(
 
                 patient_summary=item.patient_summary,
                 pending_tasks=item.pending_tasks,
-                critical_alerts=item.critical_alerts,
+                critical_alerts=critical_alerts,
                 medication_pending=item.medication_pending,
                 doctor_instructions=item.doctor_instructions,
 

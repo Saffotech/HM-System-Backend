@@ -108,7 +108,7 @@ def get_nurse_today_queue_service(
         "items": items,
     }
 
-
+ 
 def _base_bed_patients_query(
     db: Session,
     search: str | None = None,

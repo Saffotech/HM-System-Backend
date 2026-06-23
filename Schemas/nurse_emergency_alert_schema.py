@@ -48,6 +48,11 @@ class EmergencyAlertEscalate(BaseModel):
     escalation_notes: Optional[str] = None
 
 
+class AlertTimelineItem(BaseModel):
+    event: str
+    timestamp: datetime
+
+
 # ==========================================================
 # ALERT RESPONSE (LIST API)
 # ==========================================================
@@ -225,8 +230,3 @@ class EmergencyAlertFilters(BaseModel):
     page: int = 1
 
     limit: int = 20
-
-
-class AlertTimelineItem(BaseModel):
-    event: str
-    timestamp: datetime

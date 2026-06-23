@@ -15,6 +15,7 @@ from Schemas.nurse_schema import (
     VitalUpdate,
     VitalResponse,
 )
+from Services.nurse_emergency_alert_triggers import process_vital_alerts
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -115,6 +116,13 @@ def create_vital_service(
             .first()
         )
 
+        process_vital_alerts(
+            db=db,
+            vital=vital,
+            nurse_id=nurse_id,
+            mark_critical=bool(vital_data.mark_critical),
+        )
+
         return _serialize_vital(vital)
 
     except Exception:
@@ -161,6 +169,10 @@ def update_vital_service(
             )
         )
 
+        mark_critical = bool(
+            update_data.pop("mark_critical", False)
+        )
+
         for field, value in update_data.items():
             setattr(vital, field, value)
 
@@ -172,6 +184,13 @@ def update_vital_service(
             _vital_query(db)
             .filter(PatientVitals.id == vital.id)
             .first()
+        )
+
+        process_vital_alerts(
+            db=db,
+            vital=vital,
+            nurse_id=nurse_id,
+            mark_critical=mark_critical,
         )
 
         return _serialize_vital(vital)
