@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 class PharmacyPrescriptionListItem(BaseModel):
     id: int
     patient_id: int
+    patient_uid: str
     patient_name: str
     doctor_name: str
     diagnosis: str
@@ -38,6 +39,7 @@ class PharmacyPrescriptionItemOut(BaseModel):
 class PharmacyPrescriptionDetail(BaseModel):
     id: int
     patient_id: int
+    patient_uid: str
     patient_name: str
     patient_phone: Optional[str] = None
     allergies: Optional[str] = None
@@ -79,6 +81,7 @@ class DispenseResponse(BaseModel):
 class DispenseHistoryItem(BaseModel):
     id: int
     dispensing_id: int
+    patient_uid: Optional[str] = None
     prescription_id: int
     prescription_item_id: int
     medicine_name: str

@@ -13,6 +13,8 @@ from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 from Routers import auth
+from Routers.admin_router import router as admin_router
+from Routers.admin_users_router import router as admin_users_router
 from Routers.doctor_appointment_router import router as appointments_router
 from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_patient_history_router import router as patient_router
@@ -48,6 +50,8 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(admin_router)
+app.include_router(admin_users_router)
 app.include_router(roles_router)
 app.include_router(opd_router)
 app.include_router(appointments_router)

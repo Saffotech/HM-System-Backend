@@ -13,7 +13,8 @@ Frontend API integration doc: [../frontend/API-REFERENCE.md](../frontend/API-REF
 
 | File | Database role | Status |
 |------|---------------|--------|
-| [admin.md](./roles/admin.md) | `admin` | Phase 1 partly ready |
+| [admin.md](./roles/admin.md) | `admin` | Phase 1 ready |
+| [super-admin.md](./roles/super-admin.md) | `super_admin` | Not started (plan) |
 | [opd-billing.md](./roles/opd-billing.md) | `opd_billing` | Partly built |
 | [doctor.md](./roles/doctor.md) | `doctor` | To build |
 | [nurse.md](./roles/nurse.md) | `nurse` | To build |

@@ -1,6 +1,6 @@
 # Admin (`admin`)
 
-**What admin does:** Manage hospital staff and roles.  
+**What admin does:** Manage hospital staff and roles for **one hospital**.  
 Admin does **not** run OPD counter, nurse station, or doctor consultation — those are other roles.
 
 **Login role name from API:** `admin`  
@@ -14,14 +14,12 @@ Admin does **not** run OPD counter, nurse station, or doctor consultation — th
 |--------|------------------|--------------|
 | Dashboard | `/admin/dashboard` | Overview numbers |
 | Staff list | `/admin/staff` | See all staff |
-| Register staff | `/admin/staff/new` | Add new doctor, nurse, OPD, etc. |
+| Register staff | `/admin/staff/new` | Add doctor, nurse, OPD, etc. |
 | Roles list | `/admin/roles` | See roles and permissions |
 
 ---
 
 ## ✅ What we HAVE (ready now)
-
-Backend APIs already exist. You can build these screens today.
 
 | # | Feature | API | Status |
 |---|---------|-----|--------|
@@ -29,9 +27,15 @@ Backend APIs already exist. You can build these screens today.
 | 2 | **Login** | `POST /auth/login` | ✅ Ready |
 | 3 | **My profile** | `GET /auth/me` | ✅ Ready |
 | 4 | **List roles** | `GET /roles/` | ✅ Ready |
-| 5 | **Create role** | `POST /roles/` | ✅ Ready (needs `roles:create` token) |
-| 6 | **Assign permissions to role** | `POST /roles/{role_id}/permissions` | ✅ Ready |
-| 7 | **Load departments** (for register form) | `GET /opd/departments` | ✅ Ready |
+| 5 | **Create role** | `POST /roles/` | ✅ Ready |
+| 6 | **Assign permissions** | `POST /roles/{role_id}/permissions` | ✅ Ready |
+| 7 | **Load departments** | `GET /opd/departments` | ✅ Ready |
+| 8 | **Staff list** | `GET /users/` | ✅ Ready |
+| 9 | **Staff detail** | `GET /users/{id}` | ✅ Ready |
+| 10 | **Activate / deactivate** | `PATCH /users/{id}/activate` | ✅ Ready |
+| 11 | **Update staff** | `PATCH /users/{id}` | ✅ Ready |
+| 12 | **Delete staff** | `DELETE /users/{id}` | ✅ Ready |
+| 13 | **Dashboard** | `GET /admin/dashboard` | ✅ Ready |
 
 ### Register staff — fields
 
@@ -44,7 +48,7 @@ Backend APIs already exist. You can build these screens today.
 | password | Yes (min 8 chars) |
 | role_id | Yes — get from `GET /roles/` |
 | last_name | No |
-| department_id | Yes for doctor/nurse, optional for others |
+| department_id | For doctor/nurse, optional for others |
 
 ### Register staff — steps
 
@@ -54,76 +58,35 @@ Backend APIs already exist. You can build these screens today.
 3. POST /auth/register   → create user
 ```
 
----
-
-## ❌ What we NEED to build
-
-These are **not built yet**. Do them in this order.
-
-### Step 1 — Staff list (do this first)
-
-| API to build | Permission | Purpose |
-|--------------|------------|---------|
-| `GET /users` | `users:list` | Show all staff in a table |
-| `GET /users/{id}` | `users:list` | View one staff member |
-
-**Staff table columns:** name, email, role, department, active yes/no, last login
+**Tip:** Use trailing slash on `GET /users/`.
 
 ---
 
-### Step 2 — Manage staff
-
-| API to build | Permission | Purpose |
-|--------------|------------|---------|
-| `PATCH /users/{id}/activate` | `users:activate` | Turn account on / off |
-| `PATCH /users/{id}` | `users:create` | Change role or department |
-| `DELETE /users/{id}` | `users:delete` | Remove staff (soft delete) |
-
----
-
-### Step 3 — Admin dashboard
-
-| API to build | Purpose |
-|--------------|---------|
-| `GET /admin/dashboard` | Counts: total staff, staff per role, departments |
-
-Can be one simple endpoint that returns JSON counts.
-
----
-
-### Step 4 — Later (not urgent)
+## ❌ What we NEED to build (later)
 
 | Feature | API | Notes |
 |---------|-----|-------|
-| Add / edit departments | `POST /departments`, `PATCH /departments/{id}` | Today only `GET /opd/departments` exists |
+| Department CRUD | `POST/PATCH /departments` | Only `GET /opd/departments` today |
 | Hospital settings | `GET/PATCH /settings` | Fees, GST, hospital name |
 | Reports | `GET /reports/...` | Revenue, visits |
 | Audit log | `GET /audit-log` | Who changed what |
+| Protect register | `POST /auth/register` | Admin-only in production |
 
 ---
 
-## 🚀 Where to start
-
-**Backend work order:**
-
-1. `GET /users` — staff list  
-2. `PATCH /users/{id}/activate` — activate / deactivate  
-3. `GET /admin/dashboard` — simple counts  
-
-**Frontend work order (can start in parallel):**
-
-1. Register staff page — uses existing `POST /auth/register`  
-2. Roles list page — uses existing `GET /roles/`  
-3. Staff list page — wait for `GET /users`  
-
----
-
-## Quick reference — existing APIs
+## Quick reference
 
 ```
 POST   /auth/register
 POST   /auth/login
 GET    /auth/me
+
+GET    /admin/dashboard
+GET    /users/
+GET    /users/{id}
+PATCH  /users/{id}/activate
+PATCH  /users/{id}
+DELETE /users/{id}
 
 GET    /roles/
 POST   /roles/
@@ -136,12 +99,13 @@ GET    /opd/departments
 
 ## Notes
 
-- After you change someone's role or permissions, they must **login again** to get a new token.
-- `POST /auth/register` is open to anyone today — later protect it with admin login only.
-- Permissions like `users:list` exist in `seed.py` but **no API uses them yet** — that is Step 1 above.
+- Staff must **re-login** after role or permission changes.
+- `POST /auth/register` is open to anyone today — lock down later.
+- Cannot deactivate or delete your own account.
 
 ---
 
 ## Related
 
 - Frontend guide: [../../frontend/roles/admin.md](../../frontend/roles/admin.md)
+- Super Admin (separate, not built): [super-admin.md](./super-admin.md)
