@@ -1,7 +1,7 @@
 """OPD billing extensions: payments ledger, bill line items, appointments, beds."""
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
 from zoneinfo import ZoneInfo
 
 from database import Base
@@ -45,6 +45,8 @@ class Appointment(Base):
     scheduled_at = Column(DateTime(timezone=True), nullable=False)
     reason = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
+    diagnosis = Column(Text, nullable=True)
+    follow_up_date = Column(Date, nullable=True)
     appointment_type = Column(String, default="opd")  # opd / follow-up
     status = Column(String, default="scheduled")  # scheduled / waiting / in_progress / completed / cancelled
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)

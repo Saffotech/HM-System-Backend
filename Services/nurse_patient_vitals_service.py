@@ -5,7 +5,7 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from Models.opd_billing import Appointment
+from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_patient_vitals import PatientVitals
 from Models.doctor_patient_queue import PatientQueue
@@ -16,6 +16,103 @@ from Schemas.nurse_schema import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _user_display_name(user: User | None) -> str | None:
+    if not user:
+        return None
+    return f"{user.first_name} {user.last_name or ''}".strip()
+
+
+def _patient_display_name(patient: Patient | None) -> str | None:
+    if not patient:
+        return None
+    return f"{patient.first_name} {patient.last_name or ''}".strip()
+
+
+def _enrich_vital(db: Session, vital: PatientVitals) -> PatientVitals:
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == vital.patient_id)
+        .first()
+    )
+    if patient:
+        vital.patient_uid = patient.patient_uid
+        vital.patient_name = _patient_display_name(patient)
+
+    bed = (
+        db.query(Bed)
+        .filter(
+            Bed.patient_id == vital.patient_id,
+            Bed.status == "occupied",
+        )
+        .order_by(Bed.admitted_at.desc())
+        .first()
+    )
+    if bed:
+        vital.bed_number = bed.bed_number
+
+    nurse = (
+        db.query(User)
+        .filter(User.id == vital.recorded_by)
+        .first()
+    )
+    if nurse:
+        vital.recorded_by_name = _user_display_name(nurse)
+
+    return vital
+
+
+def _enrich_vitals_batch(
+    db: Session,
+    vitals: list[PatientVitals],
+) -> list[PatientVitals]:
+    if not vitals:
+        return vitals
+
+    patient_ids = {v.patient_id for v in vitals}
+    nurse_ids = {v.recorded_by for v in vitals}
+
+    patients = {
+        p.id: p
+        for p in db.query(Patient)
+        .filter(Patient.id.in_(patient_ids))
+        .all()
+    }
+    nurses = {
+        u.id: u
+        for u in db.query(User)
+        .filter(User.id.in_(nurse_ids))
+        .all()
+    }
+    beds = {}
+    for bed in (
+        db.query(Bed)
+        .filter(
+            Bed.patient_id.in_(patient_ids),
+            Bed.status == "occupied",
+        )
+        .order_by(Bed.admitted_at.desc())
+        .all()
+    ):
+        if bed.patient_id not in beds:
+            beds[bed.patient_id] = bed
+
+    for vital in vitals:
+        patient = patients.get(vital.patient_id)
+        if patient:
+            vital.patient_uid = patient.patient_uid
+            vital.patient_name = _patient_display_name(patient)
+
+        bed = beds.get(vital.patient_id)
+        if bed:
+            vital.bed_number = bed.bed_number
+
+        nurse = nurses.get(vital.recorded_by)
+        if nurse:
+            vital.recorded_by_name = _user_display_name(nurse)
+
+    return vitals
 
 
 # ==========================================================

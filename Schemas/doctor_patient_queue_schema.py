@@ -6,6 +6,13 @@ class AddPatientQueueSchema(BaseModel):
     appointment_id: int
 
 
+class CompleteConsultationSchema(BaseModel):
+    symptoms: Optional[str] = None
+    diagnosis: Optional[str] = None
+    notes: Optional[str] = None
+    follow_up_date: Optional[date] = None
+
+
 class QueueStatusUpdateSchema(BaseModel):
     status: str
 
