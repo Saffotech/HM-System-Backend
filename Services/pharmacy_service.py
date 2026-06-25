@@ -125,7 +125,7 @@ def list_prescriptions(
         p.id: p
         for p in db.query(Patient).filter(Patient.id.in_(patient_ids)).all()
     } if patient_ids else {}
-    
+
     doctor_ids = {rx.doctor_id for rx in rows}
     doctors = {
         u.id: u

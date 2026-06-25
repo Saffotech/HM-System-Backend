@@ -143,7 +143,8 @@ class BillPreviewResponse(BaseModel):
 
 class RegisterSuccessResponse(BaseModel):
     message: str
-    patient_id: str
+    patient_id: int
+    patient_uid: str
     bill_number: str
     token_number: str
     visit_id: int
@@ -151,7 +152,8 @@ class RegisterSuccessResponse(BaseModel):
 
 class VisitSuccessResponse(BaseModel):
     message: str
-    patient_id: str
+    patient_id: int
+    patient_uid: str
     bill_number: str
     token_number: str
     visit_id: int
@@ -164,8 +166,9 @@ class QueueVisitItem(BaseModel):
     token_number: str
     bill_number: str
     visit_date: Optional[str]
-    patient_id: Optional[str]
-    patient_name: Optional[str]
+    patient_id: Optional[int] = None
+    patient_uid: Optional[str] = None
+    patient_name: Optional[str] = None
     doctor_name: Optional[str]
     department: Optional[str]
     status: str
@@ -183,6 +186,7 @@ class BillListItem(BaseModel):
     visit_id: int
     bill_number: str
     token_number: str
+    patient_id: int
     patient_uid: str
     patient_name: str
     grand_total: float

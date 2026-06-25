@@ -27,7 +27,7 @@ class AppointmentResponse(BaseModel):
     patient_phone: str
     patient_age: Optional[int] = None
     patient_gender: Optional[str] = None
-    patient_uhid: str
+    patient_uid: str
     doctor_id: int
     department_id: int
     scheduled_at: Optional[str] = None
@@ -40,6 +40,8 @@ class AppointmentResponse(BaseModel):
     created_at: Optional[str] = None
 
 
-class PaginationSchema(BaseModel):
-    page: int = Field(default=1, ge=1)
-    limit: int = Field(default=10, ge=1, le=100)
+from Schemas.common_schema import PaginationParams
+
+
+class PaginationSchema(PaginationParams):
+    pass

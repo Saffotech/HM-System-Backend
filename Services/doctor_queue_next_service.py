@@ -30,7 +30,7 @@ def _request_to_dict(db: Session, req: DoctorQueueNextRequest) -> dict:
         "appointment_id": req.appointment_id,
         "patient_id": req.patient_id,
         "patient_name": h.display_name(patient.first_name, patient.last_name) if patient else None,
-        "patient_uhid": patient.patient_uid if patient else None,
+        "patient_uid": patient.patient_uid if patient else None,
         "appointment_time": scheduled.strftime("%H:%M:%S") if scheduled else None,
         "status": req.status,
         "requested_at": req.requested_at,

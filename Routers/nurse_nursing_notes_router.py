@@ -127,6 +127,10 @@ def search_notes(
         ge=1
     ),
 
+    patient_uid: str | None = Query(
+        None
+    ),
+
     appointment_id: int | None = Query(
         None,
         ge=1
@@ -137,10 +141,6 @@ def search_notes(
     ),
 
     phone: str | None = Query(
-        None
-    ),
-
-    uhid: str | None = Query(
         None
     ),
 
@@ -189,11 +189,11 @@ def search_notes(
         db=db,
 
         patient_id=patient_id,
+        patient_uid=patient_uid,
         appointment_id=appointment_id,
 
         name=name,
         phone=phone,
-        uhid=uhid,
 
         status=status,
         nurse_id=nurse_id,

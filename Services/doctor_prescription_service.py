@@ -1,13 +1,36 @@
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.opd_billing import Appointment
-from Schemas.doctor_prescription_schema import PrescriptionCreate, PrescriptionItemCreate
+from Models.patient import Patient
+from Schemas.doctor_prescription_schema import (
+    PrescriptionCreate,
+    PrescriptionItemCreate,
+    PrescriptionResponse,
+)
 from Services import doctor_helpers as h
+
 
 def _pk(value: object) -> int:
     return int(value)
+
+
+def _serialize_prescription(rx: Prescription) -> PrescriptionResponse:
+    return PrescriptionResponse.model_validate(rx).model_copy(
+        update={
+            "patient_uid": (
+                rx.patient.patient_uid if rx.patient else None
+            )
+        }
+    )
+
+
+def _prescription_query(db: Session):
+    return db.query(Prescription).options(
+        joinedload(Prescription.patient),
+        joinedload(Prescription.items),
+    )
 
 
 def _item(rx_id: int, item: PrescriptionItemCreate) -> PrescriptionItem:
@@ -28,7 +51,7 @@ def _add_items(db: Session, rx_id: int, items: list[PrescriptionItemCreate]) -> 
 
 def _get_prescription(db: Session, prescription_id: int, doctor_id: int) -> Prescription:
     rx = (
-        db.query(Prescription)
+        _prescription_query(db)
         .filter(Prescription.id == prescription_id, Prescription.doctor_id == doctor_id)
         .first()
     )
@@ -72,23 +95,58 @@ def create_prescription_service(db: Session, prescription_data: PrescriptionCrea
     db.flush()
     _add_items(db, _pk(rx.id), prescription_data.items)
     db.commit()
-    db.refresh(rx)
-    return rx
+    rx = (
+        _prescription_query(db)
+        .filter(Prescription.id == _pk(rx.id))
+        .first()
+    )
+    return _serialize_prescription(rx)
 
 
 def get_prescription_by_id_service(db: Session, prescription_id: int, doctor_id: int):
-    return _get_prescription(db, prescription_id, doctor_id)
-
-
-def get_patient_prescriptions_service(db: Session, patient_id: int, doctor_id: int):
-    return (
-        db.query(Prescription)
-        .filter(Prescription.patient_id == patient_id, Prescription.doctor_id == doctor_id)
-        .order_by(Prescription.created_at.desc())
-        .all()
+    return _serialize_prescription(
+        _get_prescription(db, prescription_id, doctor_id)
     )
 
 
+def get_patient_prescriptions_service(
+    db: Session,
+    doctor_id: int,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
+):
+    if not patient_id and not patient_uid:
+        raise HTTPException(
+            status_code=400,
+            detail="patient_id or patient_uid is required",
+        )
+
+    query = (
+        _prescription_query(db)
+        .filter(Prescription.doctor_id == doctor_id)
+    )
+
+    if patient_id:
+        query = query.filter(Prescription.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.join(
+            Patient,
+            Patient.id == Prescription.patient_id,
+        ).filter(
+            Patient.patient_uid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
+        )
+
+    prescriptions = (
+        query
+        .order_by(Prescription.created_at.desc())
+        .all()
+    )
+    return [_serialize_prescription(rx) for rx in prescriptions]
+
+  
 def update_prescription_service(
     db: Session, prescription_id: int, prescription_data: PrescriptionCreate, doctor_id: int
 ):
@@ -100,8 +158,12 @@ def update_prescription_service(
     db.query(PrescriptionItem).filter(PrescriptionItem.prescription_id == rx_id).delete()
     _add_items(db, rx_id, prescription_data.items)
     db.commit()
-    db.refresh(rx)
-    return rx
+    rx = (
+        _prescription_query(db)
+        .filter(Prescription.id == rx_id)
+        .first()
+    )
+    return _serialize_prescription(rx)
 
 
 def delete_prescription_service(db: Session, prescription_id: int, doctor_id: int):

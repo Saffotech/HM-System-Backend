@@ -1,18 +1,11 @@
 from datetime import datetime, date
 from typing import Optional, List
-
-from pydantic import (
-    BaseModel,
-    ConfigDict,
-    Field
-)
-
+from pydantic import BaseModel,ConfigDict
 from Models.nurse_emergency_alert import (
     AlertType,
     AlertSeverity,
     AlertStatus
 )
-
 
 # ==========================================================
 # CREATE ALERT
@@ -21,13 +14,9 @@ from Models.nurse_emergency_alert import (
 class EmergencyAlertCreate(BaseModel):
 
     patient_id: int
-
     alert_type: AlertType
-
     severity: AlertSeverity
-
     title: Optional[str] = None
-
     description: Optional[str] = None
 
 # ==========================================================
@@ -59,15 +48,18 @@ class EmergencyAlertEscalate(BaseModel):
     escalation_notes: Optional[str] = None
 
 
+class AlertTimelineItem(BaseModel):
+    event: str
+    timestamp: datetime
+
+
 # ==========================================================
 # ALERT RESPONSE (LIST API)
 # ==========================================================
 
 class EmergencyAlertResponse(BaseModel):
 
-    model_config = ConfigDict(
-        from_attributes=True
-    )
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
 
@@ -238,8 +230,3 @@ class EmergencyAlertFilters(BaseModel):
     page: int = 1
 
     limit: int = 20
-
-
-class AlertTimelineItem(BaseModel):
-    event: str
-    timestamp: datetime

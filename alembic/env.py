@@ -5,14 +5,25 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-# ── Import ALL models here ──────────────────────────────
 from database import Base
-from Models.role       import Role
-from Models.user       import User
+
+
+from Models.role import Role, Permission, RolePermission
+from Models.user import User
 from Models.department import Department
-from Models.patient    import Patient, OpdVisit
+from Models.patient import Patient, OpdVisit
 from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
-# ────────────────────────────────────────────────────────
+from Models.doctor_lab_test_order import LabTestOrder
+from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.doctor_queue_next_request import DoctorQueueNextRequest
+from Models.nurse_emergency_alert import EmergencyAlert
+from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_nursing_notes import NursingNote
+from Models.nurse_patient_vitals import PatientVitals
+from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient
+from Models.pharmacy_dispensing import Dispensing, DispensingItem
+from Models.lab_result import LabResult, LabResultParameter
 
 config = context.config
 if config.config_file_name is not None:

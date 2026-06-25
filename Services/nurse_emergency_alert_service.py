@@ -19,6 +19,9 @@ from Schemas.nurse_emergency_alert_schema import (
 )
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_medication_administration import (
+    MedicationAdministration
+)
 from Models.opd_billing import Appointment
 
 from Schemas.nurse_emergency_alert_schema import (
@@ -27,9 +30,6 @@ from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertEscalate
 )
 
-# ==========================================================
-# HELPERS
-# ==========================================================
 
 def _now():
     return datetime.now(
@@ -1049,6 +1049,7 @@ def get_alerts_service(
     alert_type: str | None = None,
     ward_name: str | None = None,
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     assigned_nurse_id: int | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
@@ -1122,6 +1123,14 @@ def get_alerts_service(
 
         query = query.filter(
             EmergencyAlert.patient_id == patient_id
+        )
+
+    if patient_uid:
+
+        query = query.filter(
+            Patient.patient_uid.ilike(
+                f"%{patient_uid.strip()}%"
+            )
         )
 
     if assigned_nurse_id:

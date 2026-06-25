@@ -36,6 +36,7 @@ class LabTestOrder(Base):
 
     patient_id = Column(
         Integer,
+        ForeignKey("patients.id"),
         nullable=False,
         index=True
     )
@@ -112,4 +113,10 @@ class LabTestOrder(Base):
     doctor = relationship(
         "User",
         foreign_keys=[doctor_id]
+    )
+
+    lab_result = relationship(
+        "LabResult",
+        back_populates="lab_order",
+        uselist=False,
     )

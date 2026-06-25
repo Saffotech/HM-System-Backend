@@ -175,7 +175,8 @@ def register_new_patient(
 
     return RegisterSuccessResponse(
         message="Patient registered successfully",
-        patient_id=patient.patient_uid,
+        patient_id=patient.id,
+        patient_uid=patient.patient_uid,
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
@@ -206,7 +207,8 @@ def create_visit_for_existing_patient(
 
     return VisitSuccessResponse(
         message="OPD visit created successfully",
-        patient_id=patient.patient_uid,
+        patient_id=patient.id,
+        patient_uid=patient.patient_uid,
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
@@ -240,7 +242,8 @@ def generate_bill(
 
     return VisitSuccessResponse(
         message="Bill generated successfully",
-        patient_id=patient.patient_uid,
+        patient_id=patient.id,
+        patient_uid=patient.patient_uid,
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
@@ -375,7 +378,8 @@ def build_invoice(db: Session, visit_id: int) -> dict:
         "visit_date": visit.visit_date.strftime("%d %b %Y") if visit.visit_date else "",
         "patient": {
             "name": h.display_name(patient.first_name, patient.last_name),
-            "patient_id": patient.patient_uid,
+            "patient_id": patient.id,
+            "patient_uid": patient.patient_uid,
             "phone": patient.phone,
             "address": patient.address,
         },
@@ -448,6 +452,7 @@ def list_bills(
             visit_id=visit.id,
             bill_number=visit.bill_number,
             token_number=visit.token_number,
+            patient_id=patient.id,
             patient_uid=patient.patient_uid,
             patient_name=h.display_name(patient.first_name, patient.last_name),
             grand_total=visit.grand_total,
@@ -488,7 +493,8 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
     return {
         "message": "Payment recorded",
         "bill_number": visit.bill_number,
-        "patient_id": patient.patient_uid,
+        "patient_id": patient.id,
+        "patient_uid": patient.patient_uid,
         "amount_paid": data.paid_amount,
         "total_paid": visit.paid_amount,
         "balance_due": visit.balance_due,
@@ -571,6 +577,7 @@ def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
         "message": "Bill updated successfully",
         "visit_id": visit.id,
         "bill_number": visit.bill_number,
+        "patient_id": patient.id,
         "patient_uid": patient.patient_uid,
         "grand_total": visit.grand_total,
         "balance_due": visit.balance_due,
@@ -643,6 +650,7 @@ def list_payment_history(
         "payments": [
             {
                 "id": t.id,
+                "patient_id": p.id,
                 "patient_name": h.display_name(p.first_name, p.last_name),
                 "patient_uid": p.patient_uid,
                 "bill_number": v.bill_number,
@@ -701,7 +709,8 @@ def fetch_today_queue(db: Session) -> QueueResponse:
             token_number=v.token_number,
             bill_number=v.bill_number,
             visit_date=v.visit_date.isoformat() if v.visit_date else None,
-            patient_id=p.patient_uid,
+            patient_id=p.id,
+            patient_uid=p.patient_uid,
             patient_name=h.display_name(p.first_name, p.last_name),
             doctor_name=h.display_name(d.first_name, d.last_name, prefix="Dr. ") if d else None,
             department=dept.name if dept else None,

@@ -12,7 +12,7 @@ class MedicationAdministrationCreate(BaseModel):
     prescription_item_id: int
     status: str
     remarks: Optional[str] = None
-
+    status: MedicationStatus
     scheduled_time: Optional[datetime] = None
 
 
@@ -21,9 +21,8 @@ class MedicationAdministrationCreate(BaseModel):
 # ==========================================================
 
 class MedicationAdministrationUpdate(BaseModel):
-    status: str
+    status: MedicationStatus
     remarks: Optional[str] = None
-
 
 # ==========================================================
 # RESPONSE
@@ -35,6 +34,7 @@ class MedicationAdministrationResponse(BaseModel):
 
     prescription_item_id: int
     patient_id: int
+    patient_uid: Optional[str] = None
 
     medicine_name: str
 
@@ -78,6 +78,7 @@ class PatientMedicationItem(BaseModel):
 class PatientMedicationResponse(BaseModel):
 
     patient_id: int
+    patient_uid: Optional[str] = None
     patient_name: str
 
     bed_number: Optional[str] = None
@@ -111,10 +112,3 @@ class MedicationHistoryResponse(BaseModel):
     administered_at: datetime
 
 
-
-class MedicationAdministrationCreate(BaseModel):
-    prescription_item_id: int
-    status: MedicationStatus
-
-class MedicationAdministrationUpdate(BaseModel):
-    status: MedicationStatus

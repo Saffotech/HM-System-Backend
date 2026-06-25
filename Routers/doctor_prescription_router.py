@@ -1,4 +1,4 @@
-from fastapi import APIRouter,Depends,status
+from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
@@ -79,9 +79,28 @@ def get_prescription_by_id(
 # ==========================================================
 
 @router.get(
+    "/patient/history",
+    response_model=list[PrescriptionResponse],
+    status_code=status.HTTP_200_OK,
+)
+def get_patient_prescriptions_by_filters(
+    patient_id: int | None = Query(None, ge=1),
+    patient_uid: str | None = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return get_patient_prescriptions_service(
+        db=db,
+        doctor_id=current_user.id,
+        patient_id=patient_id,
+        patient_uid=patient_uid,
+    )
+
+
+@router.get(
     "/patient/{patient_id}",
     response_model=list[PrescriptionResponse],
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_patient_prescriptions(
 

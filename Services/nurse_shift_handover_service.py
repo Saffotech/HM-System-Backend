@@ -2,7 +2,7 @@ from datetime import datetime, date
 from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from Models.department import Department
 from Models.patient import Patient
 from Models.user import User
@@ -16,6 +16,9 @@ from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverUpdate,
     ShiftHandoverPatientUpdate,
     ShiftHandoverPatientsBulkCreate)
+from Services.nurse_emergency_alert_triggers import (
+    get_active_alerts_text_for_patient,
+)
 
 # ==========================================================
 # HELPERS
@@ -198,6 +201,13 @@ def bulk_add_handover_patients_service(
             f"{patient.last_name or ''}"
         ).strip()
 
+        critical_alerts = item.critical_alerts
+        if not critical_alerts:
+            critical_alerts = get_active_alerts_text_for_patient(
+                db,
+                patient.id,
+            )
+
         handover_patient = (
             ShiftHandoverPatient(
 
@@ -210,7 +220,7 @@ def bulk_add_handover_patients_service(
 
                 patient_summary=item.patient_summary,
                 pending_tasks=item.pending_tasks,
-                critical_alerts=item.critical_alerts,
+                critical_alerts=critical_alerts,
                 medication_pending=item.medication_pending,
                 doctor_instructions=item.doctor_instructions,
 
@@ -684,6 +694,7 @@ def get_handover_list_service(
     handover_uid: str | None = None,
 
     patient_id: int | None = None,
+    patient_uid: str | None = None,
 
     patient_name: str | None = None,
 
@@ -748,6 +759,13 @@ def get_handover_list_service(
         query = query.filter(
             ShiftHandoverPatient.patient_id
             == patient_id
+        )
+
+    if patient_uid:
+        query = query.filter(
+            Patient.patient_uid.ilike(
+                f"%{patient_uid}%"
+            )
         )
 
     if patient_name:
@@ -931,6 +949,9 @@ def get_handover_detail_service(
         db.query(
             ShiftHandoverPatient
         )
+        .options(
+            joinedload(ShiftHandoverPatient.patient)
+        )
         .filter(
             ShiftHandoverPatient.handover_id
             == handover.id
@@ -952,6 +973,10 @@ def get_handover_detail_service(
 
             "patient_id":
                 patient.patient_id,
+
+            "patient_uid":
+                patient.patient.patient_uid
+                if patient.patient else None,
 
             "patient_name":
                 patient.patient_name,

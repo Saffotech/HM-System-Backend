@@ -12,7 +12,7 @@ def get_patients_service(
     db: Session,
     doctor_id: int,
     page: int,
-    limit: int,
+    page_size: int,
     filter_date: date = None,
     month: int = None,
     year: int = None,
@@ -52,25 +52,26 @@ def get_patients_service(
     total_patients = query.count()
     rows = (
         query.order_by(Appointment.scheduled_at.desc())
-        .offset((page - 1) * limit)
-        .limit(limit)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
 
     return {
-        "total_patients": total_patients,
+        "success": True,
+        "total": total_patients,
         "page": page,
-        "limit": limit,
-        "patients": [h.appointment_to_dict(db, apt, patient) for apt, patient in rows],
+        "page_size": page_size,
+        "items": [h.appointment_to_dict(db, apt, patient) for apt, patient in rows],
     }
 
 
-def get_patient_details_service(db: Session, doctor_id: int, patient_uhid: str) -> list[dict]:
+def get_patient_details_service(db: Session, doctor_id: int, patient_uid: str) -> list[dict]:
     rows = (
         db.query(Appointment, Patient)
         .join(Patient, Appointment.patient_id == Patient.id)
         .filter(
-            Patient.patient_uid == patient_uhid,
+            Patient.patient_uid == patient_uid,
             Appointment.doctor_id == doctor_id,
             Appointment.status == "completed",
             Patient.is_active.is_(True),

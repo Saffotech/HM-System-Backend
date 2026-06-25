@@ -19,7 +19,7 @@ class NextPatientRequestOut(BaseModel):
     appointment_id: int
     patient_id: int
     patient_name: Optional[str] = None
-    patient_uhid: Optional[str] = None
+    patient_uid: Optional[str] = None
     appointment_time: Optional[str] = None
     status: str
     requested_at: datetime

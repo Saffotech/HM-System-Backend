@@ -3,7 +3,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.opd_billing import Appointment
 from Models.patient import Patient
@@ -12,10 +12,28 @@ from Models.doctor_patient_queue import PatientQueue
 
 from Schemas.nurse_schema import (
     VitalCreate,
-    VitalUpdate
+    VitalUpdate,
+    VitalResponse,
 )
+from Services.nurse_emergency_alert_triggers import process_vital_alerts
 
 IST = ZoneInfo("Asia/Kolkata")
+
+
+def _serialize_vital(vital: PatientVitals) -> VitalResponse:
+    return VitalResponse.model_validate(vital).model_copy(
+        update={
+            "patient_uid": (
+                vital.patient.patient_uid if vital.patient else None
+            )
+        }
+    )
+
+
+def _vital_query(db: Session):
+    return db.query(PatientVitals).options(
+        joinedload(PatientVitals.patient)
+    )
 
 
 # ==========================================================
@@ -92,8 +110,20 @@ def create_vital_service(
 
         db.commit()
         db.refresh(vital)
+        vital = (
+            _vital_query(db)
+            .filter(PatientVitals.id == vital.id)
+            .first()
+        )
 
-        return vital
+        process_vital_alerts(
+            db=db,
+            vital=vital,
+            nurse_id=nurse_id,
+            mark_critical=bool(vital_data.mark_critical),
+        )
+
+        return _serialize_vital(vital)
 
     except Exception:
         db.rollback()
@@ -139,6 +169,10 @@ def update_vital_service(
             )
         )
 
+        mark_critical = bool(
+            update_data.pop("mark_critical", False)
+        )
+
         for field, value in update_data.items():
             setattr(vital, field, value)
 
@@ -146,8 +180,20 @@ def update_vital_service(
 
         db.commit()
         db.refresh(vital)
+        vital = (
+            _vital_query(db)
+            .filter(PatientVitals.id == vital.id)
+            .first()
+        )
 
-        return vital
+        process_vital_alerts(
+            db=db,
+            vital=vital,
+            nurse_id=nurse_id,
+            mark_critical=mark_critical,
+        )
+
+        return _serialize_vital(vital)
 
     except Exception:
         db.rollback()
@@ -164,7 +210,7 @@ def get_vital_by_id_service(
 ):
 
     vital = (
-        db.query(PatientVitals)
+        _vital_query(db)
         .filter(
             PatientVitals.id == vital_id
         )
@@ -177,7 +223,7 @@ def get_vital_by_id_service(
             detail="Vital record not found"
         )
 
-    return vital
+    return _serialize_vital(vital)
 
 
 # ==========================================================
@@ -190,8 +236,8 @@ def get_all_vitals_service(
     page_size: int = 20
 ):
 
-    return (
-        db.query(PatientVitals)
+    vitals = (
+        _vital_query(db)
         .order_by(
             PatientVitals.recorded_at.desc()
         )
@@ -204,6 +250,8 @@ def get_all_vitals_service(
         .all()
     )
 
+    return [_serialize_vital(vital) for vital in vitals]
+
 
 # ==========================================================
 # SEARCH / FILTER VITALS
@@ -213,11 +261,11 @@ def search_vitals_service(
     db: Session,
 
     patient_id: int | None = None,
+    patient_uid: str | None = None,
     appointment_id: int | None = None,
 
     name: str | None = None,
     phone: str | None = None,
-    uhid: str | None = None,
 
     status: str | None = None,
     recorded_by: int | None = None,
@@ -230,7 +278,7 @@ def search_vitals_service(
 ):
 
     query = (
-        db.query(PatientVitals)
+        _vital_query(db)
         .join(
             Patient,
             Patient.id == PatientVitals.patient_id
@@ -266,10 +314,10 @@ def search_vitals_service(
             )
         )
 
-    if uhid:
+    if patient_uid:
         query = query.filter(
             Patient.patient_uid.ilike(
-                f"%{uhid}%"
+                f"%{patient_uid}%"
             )
         )
 
@@ -294,7 +342,7 @@ def search_vitals_service(
             (to_date + timedelta(days=1))
         )
 
-    return (
+    vitals = (
         query
         .order_by(
             PatientVitals.recorded_at.desc()
@@ -307,3 +355,5 @@ def search_vitals_service(
         )
         .all()
     )
+
+    return [_serialize_vital(vital) for vital in vitals]

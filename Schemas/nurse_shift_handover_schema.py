@@ -112,6 +112,8 @@ class ShiftHandoverPatientResponse(BaseModel):
 
     patient_id: int
 
+    patient_uid: Optional[str] = None
+
     patient_name: str
 
     bed_number: Optional[str]
