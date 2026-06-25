@@ -1,63 +1,57 @@
 # Admin — Frontend Flow
 
-**Role name from API:** `admin`  
-**Folder:** `src/pages/admin/`  
-**URL prefix:** `/admin/`
-
-Admin can access everything. Start with **staff management** only.
+**Source of truth:** [../../HMS_Role_Permission_Proposal.docx](../../HMS_Role_Permission_Proposal.docx)  
+**Backend:** [../../backend/roles/admin.md](../../backend/roles/admin.md)  
+**Super Admin panel (separate):** [../../backend/roles/super-admin.md](../../backend/roles/super-admin.md)
 
 ---
 
-## Screens (Phase 1)
+## Two panels — do not mix
 
-| # | Screen | Route | Backend |
-|---|--------|-------|---------|
-| 1 | Dashboard | `/admin/dashboard` | — |
-| 2 | Staff list | `/admin/staff` | Wait |
-| 3 | Register staff | `/admin/staff/new` | Yes (`POST /auth/register`) |
-| 4 | Roles list | `/admin/roles` | Yes (`GET /roles/`) |
+| Panel | Route | Your work |
+|-------|-------|-----------|
+| **Admin** | `/admin/` | Staff + dashboard + roles **view only** |
+| **Super Admin** | `/super-admin/` | Everything admin has **plus** create role, settings, audit |
+
+We started with one admin panel. Per proposal, **remove** create-role and assign-permission from `/admin/` — those go to `/super-admin/` later.
 
 ---
 
-## Flow 1 — Register new staff
+## Admin screens — build these
+
+| Screen | Route | Backend |
+|--------|-------|---------|
+| Dashboard | `/admin/dashboard` | `GET /admin/dashboard` ✅ |
+| Staff list | `/admin/staff` | `GET /users/` ✅ |
+| Staff detail | `/admin/staff/:id` | `GET /users/{id}` ✅ |
+| Register staff | `/admin/staff/new` | `POST /auth/register` ✅ |
+| Roles list | `/admin/roles` | `GET /roles/` ✅ read-only |
+
+**Do not put on admin:** Create role, assign permissions, settings, audit.
+
+---
+
+## Register staff flow
 
 ```
 /admin/staff/new
-    → Load roles: GET /roles/
-    → Load departments: GET /opd/departments
-    → Form: name, email, password, role, department
-    → POST /auth/register
-    → Success → back to staff list
+  → GET /roles/           (hide admin, super_admin)
+  → GET /opd/departments
+  → POST /auth/register
 ```
 
-Reuse same fields as public `/register` page but inside admin layout.
+Allowed roles: `doctor`, `nurse`, `opd_billing`, `pharmacist`.
 
 ---
 
-## Flow 2 — View roles & permissions
-
-**Route:** `/admin/roles`
-
-**API:** `GET /roles/`
-
-Show table: role name + permission list (read-only for now)
-
----
-
-## Sidebar menu
+## Sidebar (admin only)
 
 ```
 Dashboard
 Staff
-Roles
+Roles        ← view only, no Create button
 Sign out
 ```
-
----
-
-## Note
-
-HR module (payroll, attendance) is **separate** — do not build under admin until clinical modules are done.
 
 ---
 
@@ -68,6 +62,9 @@ pages/admin/
 ├── AdminRoutes.tsx
 ├── Dashboard.tsx
 ├── StaffList.tsx
+├── StaffDetail.tsx
 ├── StaffRegister.tsx
-└── RolesList.tsx
+└── RolesList.tsx      ← read-only
 ```
+
+Create role / settings → `pages/super-admin/` later.

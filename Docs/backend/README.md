@@ -13,8 +13,8 @@ Frontend API integration doc: [../frontend/API-REFERENCE.md](../frontend/API-REF
 
 | File | Database role | Status |
 |------|---------------|--------|
-| [admin.md](./roles/admin.md) | `admin` | Phase 1 ready |
-| [super-admin.md](./roles/super-admin.md) | `super_admin` | Not started (plan) |
+| [admin.md](./roles/admin.md) | `admin` | Staff APIs built — see doc for admin vs super admin split |
+| [super-admin.md](./roles/super-admin.md) | `super_admin` | Documented per [proposal](../HMS_Role_Permission_Proposal.docx) — panel not started |
 | [opd-billing.md](./roles/opd-billing.md) | `opd_billing` | Partly built |
 | [doctor.md](./roles/doctor.md) | `doctor` | To build |
 | [nurse.md](./roles/nurse.md) | `nurse` | To build |
