@@ -11,7 +11,10 @@ from Models.patient import Patient
 from Models.user import User
 from Services import doctor_helpers as h
 from Services.opd_helpers import display_name as opd_display_name
-from Services.doctor_patient_queue_service import add_patient_to_queue_service
+from Services.doctor_patient_queue_service import (
+    add_patient_to_queue_service,
+    reactivate_queue_for_appointment_service,
+)
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -105,16 +108,22 @@ def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -
     existing_queue = (
         db.query(PatientQueue).filter(PatientQueue.appointment_id == appointment_id).first()
     )
-    if existing_queue and existing_queue.status in ("in_progress", "completed"):
+    if existing_queue and existing_queue.status in ("in_progress",):
         raise HTTPException(
             status_code=400,
-            detail="Patient consultation already in progress or completed",
+            detail="Patient consultation already in progress",
         )
 
     if existing_queue and existing_queue.status == "waiting":
         queue = existing_queue
-        if apt.status != "waiting":
-            apt.status = "waiting"
+        queue.queue_entered_at = now
+    elif existing_queue and existing_queue.status in ("completed", "cancelled"):
+        queue = reactivate_queue_for_appointment_service(
+            db,
+            existing_queue,
+            apt,
+            set_appointment_waiting=False,
+        )
     else:
         queue = add_patient_to_queue_service(db, appointment_id)
 

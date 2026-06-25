@@ -1,9 +1,9 @@
-from fastapi import APIRouter,Depends,status
+from fastapi import APIRouter,Depends,status, Body
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
 from Models.user import User
-from Schemas.doctor_patient_queue_schema import AddPatientQueueSchema
+from Schemas.doctor_patient_queue_schema import AddPatientQueueSchema, CompleteConsultationSchema
 from Schemas.doctor_queue_next_request_schema import RequestNextPatientSchema
 from Services.doctor_patient_queue_service import (
 
@@ -117,6 +117,7 @@ def start_consultation(
 def complete_consultation(
 
     queue_id: int,
+    clinical: CompleteConsultationSchema | None = Body(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update"))
@@ -126,7 +127,8 @@ def complete_consultation(
 
         db=db,
         queue_id=queue_id,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
+        clinical=clinical,
     )
 
     return {

@@ -71,6 +71,12 @@ def appointment_to_dict(
         "status": apt.status,
         "reason": apt.reason,
         "notes": apt.notes,
+        "diagnosis": getattr(apt, "diagnosis", None),
+        "follow_up": (
+            apt.follow_up_date.isoformat()
+            if getattr(apt, "follow_up_date", None)
+            else None
+        ),
         "created_at": apt.created_at.isoformat() if apt.created_at else None,
     }
 

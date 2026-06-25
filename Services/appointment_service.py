@@ -94,7 +94,11 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    for key, value in data.model_dump(exclude_unset=True).items():
+    updates = data.model_dump(exclude_unset=True)
+    if updates.get("scheduled_at") is not None and apt.status == "completed":
+        apt.status = "scheduled"
+
+    for key, value in updates.items():
         setattr(apt, key, value)
 
     db.commit()

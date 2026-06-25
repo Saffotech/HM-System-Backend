@@ -1,15 +1,44 @@
 from datetime import date, datetime
+from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
-from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_patient_queue import PatientQueue, QueueStatus
 from Models.opd_billing import Appointment
+from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Services import doctor_helpers as h
 
 IST = ZoneInfo("Asia/Kolkata")
+
+_ACTIVE_QUEUE_STATUSES = (
+    QueueStatus.WAITING,
+    QueueStatus.VITALS_COMPLETED,
+)
+
+
+def reactivate_queue_for_appointment_service(
+    db: Session,
+    queue: PatientQueue,
+    appointment: Appointment,
+    *,
+    set_appointment_waiting: bool,
+) -> PatientQueue:
+    """Allow the same appointment to re-enter the queue after completion or reschedule."""
+    queue.status = QueueStatus.WAITING
+    queue.queue_date = date.today()
+    queue.queue_entered_at = datetime.now(IST)
+    queue.consultation_started_at = None
+    queue.consultation_completed_at = None
+    queue.is_current = False
+    queue.token_number = generate_token_number_service(db, appointment.doctor_id)
+    if set_appointment_waiting:
+        appointment.status = "waiting"
+    db.commit()
+    db.refresh(queue)
+    return queue
 
 
 def generate_token_number_service(db: Session, doctor_id: int) -> int:
@@ -29,7 +58,27 @@ def add_patient_to_queue_service(db: Session, appointment_id: int) -> PatientQue
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
-    if db.query(PatientQueue).filter(PatientQueue.appointment_id == appointment_id).first():
+    existing = (
+        db.query(PatientQueue)
+        .filter(PatientQueue.appointment_id == appointment_id)
+        .first()
+    )
+    if existing:
+        if existing.status in _ACTIVE_QUEUE_STATUSES:
+            if set_appointment_waiting and appointment.status == "scheduled":
+                appointment.status = "waiting"
+                db.commit()
+            db.refresh(existing)
+            return existing
+        if existing.status == QueueStatus.IN_PROGRESS:
+            return existing
+        if existing.status in (QueueStatus.COMPLETED, QueueStatus.CANCELLED):
+            return reactivate_queue_for_appointment_service(
+                db,
+                existing,
+                appointment,
+                set_appointment_waiting=set_appointment_waiting,
+            )
         raise HTTPException(status_code=400, detail="Patient already exists in queue")
 
     patient = h.get_patient(db, appointment.patient_id)
@@ -91,7 +140,28 @@ def start_consultation_service(db: Session, queue_id: int, doctor_id: int) -> di
     return {"queue": queue, "waiting_minutes": waiting_minutes}
 
 
-def complete_consultation_service(db: Session, queue_id: int, doctor_id: int) -> dict:
+def _apply_clinical_to_appointment(
+    appointment: Appointment,
+    clinical: Optional[CompleteConsultationSchema],
+) -> None:
+    if not appointment or not clinical:
+        return
+    if clinical.symptoms and clinical.symptoms.strip():
+        appointment.reason = clinical.symptoms.strip()
+    if clinical.diagnosis and clinical.diagnosis.strip():
+        appointment.diagnosis = clinical.diagnosis.strip()
+    if clinical.notes and clinical.notes.strip():
+        appointment.notes = clinical.notes.strip()
+    if clinical.follow_up_date:
+        appointment.follow_up_date = clinical.follow_up_date
+
+
+def complete_consultation_service(
+    db: Session,
+    queue_id: int,
+    doctor_id: int,
+    clinical: Optional[CompleteConsultationSchema] = None,
+) -> dict:
     queue = (
         db.query(PatientQueue)
         .filter(PatientQueue.id == queue_id, PatientQueue.doctor_id == doctor_id)
@@ -112,6 +182,7 @@ def complete_consultation_service(db: Session, queue_id: int, doctor_id: int) ->
 
     appointment = db.query(Appointment).filter(Appointment.id == queue.appointment_id).first()
     if appointment:
+        _apply_clinical_to_appointment(appointment, clinical)
         appointment.status = "completed"
 
     db.commit()

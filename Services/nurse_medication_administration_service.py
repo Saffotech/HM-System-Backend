@@ -226,13 +226,25 @@ def get_patient_medications_service(
             f"{patient.first_name} "
             f"{patient.last_name or ''}".strip(),
 
+        "patient_uid": patient.patient_uid,
+
         "bed_number":
             bed.bed_number if bed else None,
 
         "ward_name":
             bed.ward_name if bed else None,
 
-        "medications": medications
+        "medications": [
+            {
+                "prescription_item_id": item.id,
+                "medicine_name": item.medicine_name,
+                "dosage": item.dosage,
+                "frequency": item.frequency,
+                "duration": item.duration,
+                "instructions": item.instructions,
+            }
+            for item in medications
+        ],
     }
 
 def administer_medication_service(

@@ -80,6 +80,7 @@ class PatientMedicationResponse(BaseModel):
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: str
+    patient_uid: Optional[str] = None
 
     bed_number: Optional[str] = None
     ward_name: Optional[str] = None
