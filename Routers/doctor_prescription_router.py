@@ -17,7 +17,7 @@ from Services.doctor_prescription_service import (
 
 router = APIRouter(
     prefix="/prescriptions",
-    tags=["Prescriptions"]
+    tags=["Doctor Prescriptions"]
 )
 
 

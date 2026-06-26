@@ -4,6 +4,8 @@
 **Folder:** `src/pages/doctor/`  
 **URL prefix:** `/doctor/`
 
+**Full workflow:** [Receptionist Module](../../flows/receptionist-module.md) (doctor requests next → reception calls patient)
+
 ---
 
 ## Screens to build
@@ -43,7 +45,9 @@ Login (role = doctor)
     → Load today's queue + stats
 ```
 
-**API (now):** `GET /opd/queue/today` — filter visits for **logged-in doctor** (frontend filter by `doctor_id === user_id` until backend adds `/doctor/queue`)
+**API (now):** `GET /queue/today` — doctor's **clinical queue** (`patient_queue` for logged-in doctor).
+
+> Do **not** use `GET /opd/queue/today` or `GET /opd/visits/today` — those are **billing visits** for OPD staff. See [Queue endpoints guide](../../flows/queue-endpoints-guide.md).
 
 **Dashboard cards:**
 

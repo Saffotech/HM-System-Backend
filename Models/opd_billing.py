@@ -1,7 +1,8 @@
 """OPD billing extensions: payments ledger, bill line items, appointments, beds."""
+import enum
 from datetime import datetime
 
-from sqlalchemy import Column, Date, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from zoneinfo import ZoneInfo
 
 from database import Base
@@ -9,6 +10,14 @@ from database import Base
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
+
+
+class AppointmentStatus(str, enum.Enum):
+    scheduled = "scheduled"
+    waiting = "waiting"
+    in_progress = "in_progress"
+    completed = "completed"
+    cancelled = "cancelled"
 
 
 class BillItem(Base):
@@ -48,7 +57,11 @@ class Appointment(Base):
     diagnosis = Column(Text, nullable=True)
     follow_up_date = Column(Date, nullable=True)
     appointment_type = Column(String, default="opd")  # opd / follow-up
-    status = Column(String, default="scheduled")  # scheduled / waiting / in_progress / completed / cancelled
+    status = Column(
+        Enum(AppointmentStatus, name="appointmentstatus"),
+        nullable=False,
+        default=AppointmentStatus.scheduled,
+    )
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now)
 

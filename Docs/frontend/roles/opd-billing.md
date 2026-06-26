@@ -4,7 +4,9 @@
 **Folder:** `src/pages/opd-billing/`  
 **URL prefix:** `/opd-billing/`
 
-Front desk staff: register patients, take payment, see queue.
+Front desk staff: register patients, take payment, book appointments.
+
+Queue / check-in is the **[Receptionist module](../../flows/receptionist-module.md)** (separate role).
 
 ---
 
@@ -156,7 +158,9 @@ Button: **Print** → `window.print()` or PDF later
 
 | | |
 |---|---|
-| **API** | `GET /opd/queue/today` |
+| **API** | `GET /opd/visits/today` |
+
+> **Not** `/receptionist/*` — this screen is **billing visits** only. See [Queue endpoints guide](../../flows/queue-endpoints-guide.md).
 
 **Table columns:**
 
@@ -179,7 +183,7 @@ Button: **Print** → `window.print()` or PDF later
 
 | Card / section | API | Notes |
 |----------------|-----|-------|
-| Today's queue count | `GET /opd/queue/today` | Use `total` |
+| Today's queue count | `GET /opd/visits/today` | Use `total` (billing visits, not clinical queue) |
 | Quick actions | Links only | Register, Queue, Search |
 
 **Later when backend ready:** pending bills count, appointments

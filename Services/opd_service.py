@@ -22,12 +22,13 @@ from Schemas.opd_schema import (
     PatientRegisterRequest,
     QueueResponse,
     QueueVisitItem,
+    BillingVisitsTodayResponse,
     RegisterSuccessResponse,
     VisitBillingFields,
     VisitSuccessResponse,
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
-from Services import opd_helpers as h
+from Services import appointment_service, opd_helpers as h
 
 # Re-export helpers used by router
 get_patient = h.get_patient
@@ -170,6 +171,13 @@ def register_new_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
+    apt = appointment_service.create_walk_in_appointment(
+        db,
+        patient_id=patient.id,
+        doctor_id=data.doctor_id,
+        department_id=data.department_id,
+        created_by=registered_by,
+    )
     db.commit()
     db.refresh(visit)
 
@@ -180,6 +188,8 @@ def register_new_patient(
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
+        appointment_id=apt.id,
+        appointment_uid=apt.appointment_uid,
     )
 
 
@@ -202,6 +212,13 @@ def create_visit_for_existing_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
+    apt = appointment_service.create_walk_in_appointment(
+        db,
+        patient_id=patient.id,
+        doctor_id=billing.doctor_id,
+        department_id=billing.department_id,
+        created_by=registered_by,
+    )
     db.commit()
     db.refresh(visit)
 
@@ -214,6 +231,8 @@ def create_visit_for_existing_patient(
         visit_id=visit.id,
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
+        appointment_id=apt.id,
+        appointment_uid=apt.appointment_uid,
     )
 
 def generate_bill(
@@ -693,7 +712,8 @@ def get_dashboard(db: Session) -> dict:
     }
 
 
-def fetch_today_queue(db: Session) -> QueueResponse:
+def fetch_today_billing_visits(db: Session) -> BillingVisitsTodayResponse:
+    """Today's OPD visits (billing counter list). Not patient_queue / receptionist queue."""
     rows = (
         db.query(OpdVisit, Patient, User, Department)
         .join(Patient, OpdVisit.patient_id == Patient.id)
@@ -721,7 +741,13 @@ def fetch_today_queue(db: Session) -> QueueResponse:
         )
         for v, p, d, dept in rows
     ]
-    return QueueResponse(total=len(visits), visits=visits)
+    return BillingVisitsTodayResponse(total=len(visits), visits=visits)
+
+
+def fetch_today_queue(db: Session) -> QueueResponse:
+    """Backward-compatible alias — prefer fetch_today_billing_visits()."""
+    payload = fetch_today_billing_visits(db)
+    return QueueResponse(total=payload.total, visits=payload.visits)
 
 
 def search_patient_by_phone(db: Session, phone: str) -> dict:

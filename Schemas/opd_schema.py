@@ -148,6 +148,8 @@ class RegisterSuccessResponse(BaseModel):
     bill_number: str
     token_number: str
     visit_id: int
+    appointment_id: Optional[int] = None
+    appointment_uid: Optional[str] = None
 
 
 class VisitSuccessResponse(BaseModel):
@@ -159,6 +161,8 @@ class VisitSuccessResponse(BaseModel):
     visit_id: int
     grand_total: float
     payment_status: str
+    appointment_id: Optional[int] = None
+    appointment_uid: Optional[str] = None
 
 
 class QueueVisitItem(BaseModel):
@@ -178,6 +182,19 @@ class QueueVisitItem(BaseModel):
 
 
 class QueueResponse(BaseModel):
+    total: int
+    visits: List[QueueVisitItem]
+
+
+class BillingVisitsTodayResponse(BaseModel):
+    """Today's OPD billing visits — not the clinical doctor queue."""
+
+    source: str = "opd_visits"
+    description: str = (
+        "Registered OPD visits and bills for today. "
+        "This is NOT the clinical waiting-room queue. "
+        "For check-in, doctor queue, and pending calls use /receptionist/*."
+    )
     total: int
     visits: List[QueueVisitItem]
 

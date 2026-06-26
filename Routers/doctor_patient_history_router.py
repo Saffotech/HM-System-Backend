@@ -17,7 +17,7 @@ from Services.doctor_patient_history_service import (
 
 router = APIRouter(
     prefix="/patients",
-    tags=["Patients History"]
+    tags=["Doctor Patients History"]
 )
 
 # ==========================================================

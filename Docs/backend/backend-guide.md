@@ -89,7 +89,8 @@ If the user does not have `patients:create` → **403 Forbidden**.
 | POST | `/opd/patient/preview-bill` | Calculate bill |
 | POST | `/opd/patient/register` | New patient + pay + visit |
 | GET | `/opd/visit/{id}/invoice` | Invoice data |
-| GET | `/opd/queue/today` | Today's OPD queue |
+| GET | `/opd/visits/today` | Today's OPD **billing** visits (`opd_visits`) |
+| GET | `/opd/queue/today` | **Deprecated** — use `/opd/visits/today` |
 
 ### Tables that exist
 - `users`, `roles`, `permissions`, `role_permissions`

@@ -1,4 +1,5 @@
-from fastapi import APIRouter,Depends,status, Body
+from fastapi import APIRouter, Body, Depends, Response, status
+
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
@@ -15,38 +16,73 @@ from Services.doctor_patient_queue_service import (
 )
 from Services.doctor_queue_next_service import request_next_patient_service
 
+from Services.receptionist_service import check_in_patient
+
+from Utils.deprecation import mark_deprecated
+
+
+
 router = APIRouter(
     prefix="/queue",
-    tags=["Patient Queue"]
-)
-
+    tags=["Doctor Patient Queue"])
 
 # ==========================================================
-# Add Patient To Queue
+
+# Add Patient To Queue (deprecated — use receptionist check-in)
+
 # ==========================================================
 
-@router.post("/add",
-    status_code=status.HTTP_201_CREATED
-)
+
+
+@router.post("/add",status_code=status.HTTP_201_CREATED,deprecated=True,
+    summary="[Deprecated] Use POST /receptionist/check-in/{appointment_id}",)
+
 def add_patient_to_queue(
 
     queue_data: AddPatientQueueSchema,
+
+    response: Response,
+
     db: Session = Depends(get_db),
+
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update"))
+
+    _: bool = Depends(PermissionChecker("appointments:update")),
+
 ):
 
-    queue = add_patient_to_queue_service(
-        db=db,
-        appointment_id=queue_data.appointment_id
+    mark_deprecated(
+
+        response,
+
+        f"/receptionist/check-in/{queue_data.appointment_id}",
+
+    )
+
+    queue = check_in_patient(
+
+        db,
+
+        queue_data.appointment_id,
+
+        handled_by=current_user.id,
+
     )
 
     return {
+
         "success": True,
+
         "message": (
-            "Patient added to queue successfully"
+
+            "Patient added to queue successfully. "
+
+            "This endpoint is deprecated — use POST /receptionist/check-in/{appointment_id}."
+
         ),
-    "queue": queue
+
+        "queue": queue,
+
     }
 
 # ==========================================================
@@ -127,6 +163,9 @@ def complete_consultation(
 
         db=db,
         queue_id=queue_id,
+
+        doctor_id=current_user.id
+
         doctor_id=current_user.id,
         clinical=clinical,
     )
@@ -176,7 +215,9 @@ def get_current_consultation(
     status_code=status.HTTP_201_CREATED,
 )
 def request_next_patient(
-    body: RequestNextPatientSchema,
+
+    body: RequestNextPatientSchema = Body(default_factory=RequestNextPatientSchema),
+
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),

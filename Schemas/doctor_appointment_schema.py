@@ -4,13 +4,7 @@ from typing import Optional
 
 from pydantic import BaseModel, Field
 
-
-class AppointmentStatus(str, Enum):
-    scheduled = "scheduled"
-    waiting = "waiting"
-    in_progress = "in_progress"
-    completed = "completed"
-    cancelled = "cancelled"
+from Models.opd_billing import AppointmentStatus
 
 
 class AppointmentStatusUpdate(BaseModel):
