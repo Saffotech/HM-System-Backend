@@ -31,6 +31,7 @@ from Routers.opd import router as opd_router
 from Routers.pharmacy import router as pharmacy_router
 from Routers.roles import router as roles_router
 from Routers.lab_router import router as lab_router
+from Routers.receptionist_router import router as receptionist_router
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Hospital Management API")
@@ -64,6 +65,7 @@ app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 app.include_router(lab_router)
+app.include_router(receptionist_router)
 
 @app.get("/")
 def home():

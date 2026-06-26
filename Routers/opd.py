@@ -2,7 +2,7 @@
 from datetime import datetime
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -22,7 +22,7 @@ from Schemas.opd_schema import (
     OpdVisitCreate,
     PatientCreate,
     PatientRegisterRequest,
-    QueueResponse,
+    BillingVisitsTodayResponse,
     RegisterSuccessResponse,
     VisitSuccessResponse,
 )
@@ -34,6 +34,7 @@ from Services.doctor_queue_next_service import (
     send_in_patient_service,
 )
 from Schemas.doctor_queue_next_request_schema import SendInPatientSchema
+from Utils.deprecation import mark_deprecated
 
 router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
 
@@ -310,41 +311,86 @@ def payment_history(
     return opd_service.list_payment_history(db, search, payment_mode, page, limit)
 
 
-@router.get("/queue/today", response_model=QueueResponse)
+@router.get(
+    "/visits/today",
+    response_model=BillingVisitsTodayResponse,
+    summary="Today's OPD billing visits (not clinical queue)",
+)
+def today_billing_visits(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    """
+    Lists today's **registered OPD visits** (bills, payment status, billing tokens).
+
+    **Not** the doctor waiting-room queue. For check-in and live queue use:
+    - `GET /receptionist/arrivals`
+    - `GET /receptionist/doctor-queue/{doctor_id}`
+    """
+    return opd_service.fetch_today_billing_visits(db)
+
+
+@router.get(
+    "/queue/today",
+    response_model=BillingVisitsTodayResponse,
+)
 def today_queue(
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
-    return opd_service.fetch_today_queue(db)
+    mark_deprecated(response, "/opd/visits/today")
+    return opd_service.fetch_today_billing_visits(db)
 
 
-@router.get("/queue/next-requests")
+@router.get(
+    "/queue/next-requests",
+    deprecated=True,
+    summary="[Deprecated] Use GET /receptionist/pending-calls",
+)
 def doctor_next_patient_requests(
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
-    requests = list_pending_next_requests_service(db)
+    mark_deprecated(response, "/receptionist/pending-calls")
+    result = list_pending_next_requests_service(db)
     return {
         "success": True,
-        "total": len(requests),
-        "requests": requests,
+        "total": len(result),
+        "pending_calls": result,
+        "requests": result,
+        "message": "Deprecated — use GET /receptionist/pending-calls",
     }
 
 
-@router.post("/queue/send-in", status_code=201)
+@router.post(
+    "/queue/send-in",
+    status_code=201,
+    deprecated=True,
+    summary="[Deprecated] Use POST /receptionist/call-patient/{queue_id}",
+)
 def send_in_patient(
     body: SendInPatientSchema,
+    response: Response,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    return send_in_patient_service(
+    mark_deprecated(response, "/receptionist/call-patient/{queue_id}")
+    payload = send_in_patient_service(
         db=db,
         appointment_id=body.appointment_id,
         handled_by=current_user.id,
     )
+    payload["message"] = (
+        f"{payload['message']} "
+        "(deprecated — use POST /receptionist/call-patient/{{queue_id}})"
+    )
+    return payload
 
 
 # ── Appointments ──────────────────────────────────────────────

@@ -26,6 +26,11 @@ def today_start_ist() -> datetime:
     return now_ist().replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def today_ist_date():
+    """Calendar date in Asia/Kolkata (use for queue_date and daily filters)."""
+    return now_ist().date()
+
+
 def display_name(first: str, last: Optional[str] = None, prefix: str = "") -> str:
     return f"{prefix}{first} {last or ''}".strip()
 

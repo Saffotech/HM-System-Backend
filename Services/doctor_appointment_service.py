@@ -3,8 +3,7 @@ from datetime import date
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from Models.opd_billing import Appointment
-from Schemas.doctor_appointment_schema import AppointmentStatus
+from Models.opd_billing import Appointment, AppointmentStatus
 from Services import doctor_helpers as h
 
 VALID_TRANSITIONS = {
@@ -72,7 +71,7 @@ def update_appointment_status_service(
 def get_appointment_history_service(db: Session, doctor_id: int) -> list[dict]:
     rows = (
         _doctor_appointments_query(db, doctor_id)
-        .filter(Appointment.status == AppointmentStatus.completed.value)
+        .filter(Appointment.status == AppointmentStatus.completed)
         .order_by(Appointment.scheduled_at.desc())
         .all()
     )

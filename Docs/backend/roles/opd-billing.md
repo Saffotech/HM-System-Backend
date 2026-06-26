@@ -2,7 +2,11 @@
 
 **Word file name:** Billing Counter / OPD Front Desk
 
-Staff at the front desk: register patients, take payment, manage OPD queue.
+Staff at the front desk: register patients, take payment, book appointments.
+
+Queue management is the **[Receptionist](../flows/receptionist-module.md)** module (separate from billing).
+
+**Do not confuse:** `GET /opd/visits/today` (billing visits) vs `GET /receptionist/doctor-queue/{doctor_id}` (clinical queue). See [Queue endpoints guide](../flows/queue-endpoints-guide.md).
 
 ---
 
@@ -78,7 +82,12 @@ Optional: last_name, gender, blood_group, date_of_birth, address, state, aadhaar
 
 ### 5. Today's queue
 
-**GET** `/opd/queue/today`
+**GET** `/opd/visits/today` — today's **billing visits** (`opd_visits`: bills, payment status).
+
+> **Not** the clinical waiting-room queue. Reception uses `/receptionist/*`.  
+> See [Queue endpoints guide](../flows/queue-endpoints-guide.md).
+
+**GET** `/opd/queue/today` — **deprecated** alias of `/opd/visits/today`.
 
 ### 6. Departments & doctors
 

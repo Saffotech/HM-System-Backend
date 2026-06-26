@@ -13,8 +13,9 @@ Same for every staff member until they reach **their role dashboard**.
     │
     └─ Has token? ──► read role from storage
                           │
-                          ├─ opd_billing ──► /opd-billing/dashboard
-                          ├─ doctor       ──► /doctor/dashboard
+                          ├─ opd_billing   ──► /opd-billing/dashboard
+                          ├─ receptionist  ──► /receptionist/dashboard
+                          ├─ doctor        ──► /doctor/dashboard
                           ├─ nurse        ──► /nurse/dashboard
                           ├─ pharmacist   ──► /pharmacy/dashboard
                           ├─ admin        ──► /admin/dashboard

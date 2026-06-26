@@ -5,11 +5,12 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from Models.department import Department
-from Models.opd_billing import Appointment
+from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import Patient
 from Models.user import User
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
+from Services.queue_helpers import appointment_status_value
 
 
 def _appointment_out(db: Session, apt: Appointment) -> AppointmentOut:
@@ -30,7 +31,7 @@ def _appointment_out(db: Session, apt: Appointment) -> AppointmentOut:
         reason=apt.reason,
         notes=apt.notes,
         appointment_type=apt.appointment_type,
-        status=apt.status,
+        status=appointment_status_value(apt.status),
     )
 
 
@@ -48,13 +49,43 @@ def create_appointment(db: Session, data: AppointmentCreate, created_by: int) ->
         reason=data.reason,
         notes=data.notes,
         appointment_type=data.appointment_type,
-        status="scheduled",
+        status=AppointmentStatus.scheduled,
         created_by=created_by,
     )
     db.add(apt)
     db.commit()
     db.refresh(apt)
     return _appointment_out(db, apt)
+
+
+def create_walk_in_appointment(
+    db: Session,
+    *,
+    patient_id: int,
+    doctor_id: int,
+    department_id: int,
+    created_by: int,
+    reason: str = "OPD walk-in",
+) -> Appointment:
+    """Create today's scheduled appointment so reception can check the patient in."""
+    h.get_patient(db, patient_id)
+    h.get_department(db, department_id)
+    h.get_doctor_in_department(db, doctor_id, department_id)
+
+    apt = Appointment(
+        appointment_uid=h.next_appointment_uid(db),
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        scheduled_at=h.now_ist(),
+        reason=reason,
+        appointment_type="opd",
+        status=AppointmentStatus.scheduled,
+        created_by=created_by,
+    )
+    db.add(apt)
+    db.flush()
+    return apt
 
 
 def list_appointments(

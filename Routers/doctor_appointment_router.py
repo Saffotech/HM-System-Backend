@@ -27,7 +27,7 @@ from Services.doctor_appointment_service import (
 
 router = APIRouter(
     prefix="/appointments",
-    tags=["Appointments"]
+    tags=["Doctor Appointments"]
 )
 
 

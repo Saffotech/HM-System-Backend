@@ -145,6 +145,15 @@ ROLES_DATA = {
                 "lab:upload_report"
         ],
     },
+    "receptionist": {
+        "description": "Reception / front desk queue management",
+        "permissions": [
+            "patients:view",
+            "opd:view",
+            "appointments:view",
+            "appointments:update",
+        ],
+    },
 }
 
 DEPARTMENTS = [

@@ -40,7 +40,7 @@ from dependencies import get_current_user, PermissionChecker
 
 router = APIRouter(
     prefix="/lab-tests",
-    tags=["Lab Tests"],
+    tags=["Doctor Lab Tests Orders"],
 )
 
 

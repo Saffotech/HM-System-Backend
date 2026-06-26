@@ -1,11 +1,13 @@
 from datetime import datetime
 from typing import Optional
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 
 class RequestNextPatientSchema(BaseModel):
-    appointment_id: int
+    appointment_id: Optional[int] = None
 
 
 class SendInPatientSchema(BaseModel):
