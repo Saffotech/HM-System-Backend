@@ -19,6 +19,7 @@ from Routers.admin_router import router as admin_router
 from Routers.admin_users_router import router as admin_users_router
 from Routers.departments_router import router as departments_router
 from Routers.doctor_appointment_router import router as appointments_router
+from Routers.doctor_consultation_router import router as consultation_router
 from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_patient_history_router import router as patient_router
 from Routers.doctor_patient_queue_router import router as patient_queue_router
@@ -36,6 +37,7 @@ from Routers.pharmacy import router as pharmacy_router
 from Routers.roles import router as roles_router
 from Routers.lab_router import router as lab_router
 from Routers.receptionist_router import router as receptionist_router
+
 Base.metadata.create_all(bind=engine)
 
 app = FastAPI(title="Hospital Management API")
@@ -61,6 +63,7 @@ app.include_router(departments_router)
 app.include_router(roles_router)
 app.include_router(opd_router)
 app.include_router(appointments_router)
+app.include_router(consultation_router)
 app.include_router(patient_queue_router)
 app.include_router(patient_router)
 app.include_router(prescription_router)

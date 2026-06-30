@@ -12,7 +12,7 @@ from dependencies import (
 )
 from Models.user import User
 from Schemas.doctor_appointment_schema import (
-    AppointmentStatusUpdate
+    AppointmentStatusUpdate,
 )
 
 from Services.doctor_appointment_service import (

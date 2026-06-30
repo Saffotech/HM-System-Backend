@@ -2,7 +2,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Date,Enum, Float, ForeignKey, Integer, String, Text
 from zoneinfo import ZoneInfo
 
 from database import Base
@@ -53,6 +53,7 @@ class Appointment(Base):
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
     scheduled_at = Column(DateTime(timezone=True), nullable=False)
     reason = Column(Text, nullable=True)
+    symptoms = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)
     diagnosis = Column(Text, nullable=True)
     follow_up_date = Column(Date, nullable=True)
