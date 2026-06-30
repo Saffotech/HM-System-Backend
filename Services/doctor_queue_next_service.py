@@ -300,6 +300,7 @@ def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -
         )
         .first()
     )
+    # if existing_queue and existing_queue.status in ("in_progress",):
     if existing_queue and status_value(existing_queue.status) in (
         QueueStatus.CALLED.value,
         QueueStatus.IN_PROGRESS.value,

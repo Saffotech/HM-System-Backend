@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 from typing import Optional
 
@@ -9,6 +9,25 @@ from Models.opd_billing import AppointmentStatus
 
 class AppointmentStatusUpdate(BaseModel):
     status: AppointmentStatus
+
+
+class AppointmentConsultationUpdate(BaseModel):
+    """Clinical payload for PATCH /appointments/{id}/consultation (queue optional)."""
+
+    symptoms: Optional[str] = None
+    diagnosis: Optional[str] = None
+    notes: Optional[str] = None
+    follow_up_date: Optional[date] = None
+
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "symptoms": "Fever, cough",
+                "diagnosis": "Viral URI",
+                "notes": "Rest and fluids",
+                "follow_up_date": "2026-07-15",
+            }
+        }
 
 
 class AppointmentResponse(BaseModel):

@@ -70,6 +70,7 @@ def appointment_to_dict(
         "appointment_type": apt.appointment_type,
         "status": apt.status,
         "reason": apt.reason,
+        "symptoms": getattr(apt, "symptoms", None),
         "notes": apt.notes,
         "diagnosis": getattr(apt, "diagnosis", None),
         "follow_up": (
