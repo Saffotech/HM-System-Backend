@@ -2,9 +2,8 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, Date, DateTime, Enum, Float, ForeignKey, Integer, String, Text
 from zoneinfo import ZoneInfo
-
 from database import Base
 
 

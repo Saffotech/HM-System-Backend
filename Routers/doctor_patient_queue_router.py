@@ -160,12 +160,8 @@ def complete_consultation(
 ):
 
     result = complete_consultation_service(
-
         db=db,
         queue_id=queue_id,
-
-        doctor_id=current_user.id
-
         doctor_id=current_user.id,
         clinical=clinical,
     )
