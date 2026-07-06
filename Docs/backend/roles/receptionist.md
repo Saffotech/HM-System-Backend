@@ -7,6 +7,15 @@ Front desk **queue management**: check-in, today's queue (all doctors), doctor q
 
 ---
 
+## Phases
+
+| Phase | Scope |
+|-------|--------|
+| **Phase 1** | Receptionist APIs — check-in, queues, call patient, history (backend done) |
+| **Phase 2** | Frontend screens + polish — end of file |
+
+---
+
 ## Workflow (why this module exists)
 
 Reception does **not** decide when the doctor is ready (consultation length varies).  
@@ -167,4 +176,36 @@ Standard response: `{ success, total, page, limit, ... }`
 | Queue history CSV export | Done |
 | Duplicate check-in 409 | Done |
 | `receptionist` role in seed | Done |
-| Frontend screens | To build |
+| Frontend screens | Phase 2 — to build |
+
+---
+
+## Phase 2 — Planned
+
+Phase 1 backend (table above) is **done**. Phase 2 is primarily **frontend**.
+
+### Frontend — Phase 2
+
+| # | Screen | API |
+|---|--------|-----|
+| 1 | Reception dashboard | `GET /receptionist/dashboard` |
+| 2 | Today queue (all doctors) | `GET /receptionist/today-queue` |
+| 3 | Doctor queue view | `GET /receptionist/doctor-queue/{doctor_id}` |
+| 4 | Pending calls | `GET /receptionist/pending-calls` |
+| 5 | Check-in patient | `POST /receptionist/check-in/{appointment_id}` |
+| 6 | Call patient | `POST /receptionist/call-patient/{queue_id}` |
+| 7 | No-show / rejoin | Receptionist update endpoints |
+| 8 | Queue history + CSV export | History + export APIs |
+
+### Backend — Phase 2 (optional)
+
+| # | Feature | Notes |
+|---|---------|--------|
+| 1 | Real-time pending calls | WebSocket or polling (optional) |
+| 2 | Tests | Check-in 409, call flow, CSV export |
+| 3 | Doc sync | Keep aligned with [receptionist-module.md](../flows/receptionist-module.md) |
+
+### Phase 2 — Out of scope
+
+- Patient registration / billing → [opd-billing.md](./opd-billing.md)
+- Doctor consultation → [doctor.md](./doctor.md)

@@ -2,6 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import Base, engine
 from Models import department, opd_billing, patient, role, user  # noqa: F401
+from Models.audit_log import AuditLog  # noqa: F401
+from Models.hospital_settings import HospitalSettings  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
@@ -36,6 +38,7 @@ from Routers.opd import router as opd_router
 from Routers.pharmacy import router as pharmacy_router
 from Routers.roles import router as roles_router
 from Routers.lab_router import router as lab_router
+from Routers.super_admin_router import router as super_admin_router
 from Routers.receptionist_router import router as receptionist_router
 
 Base.metadata.create_all(bind=engine)
@@ -76,6 +79,7 @@ app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 app.include_router(lab_router)
+app.include_router(super_admin_router)
 app.include_router(receptionist_router)
 
 

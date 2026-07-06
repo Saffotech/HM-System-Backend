@@ -46,7 +46,7 @@ def create_department(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:list")),
 ):
-    department = department_service.create_department(db, data)
+    department = department_service.create_department(db, data, current_user)
     return DepartmentActionResponse(
         message="Department created successfully",
         department=department,
@@ -61,7 +61,7 @@ def update_department(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:list")),
 ):
-    department = department_service.update_department(db, department_id, data)
+    department = department_service.update_department(db, department_id, data, current_user)
     return DepartmentActionResponse(
         message="Department updated successfully",
         department=department,

@@ -5,6 +5,17 @@
 
 ---
 
+## Phases
+
+| Phase | Scope |
+|-------|--------|
+| **Phase 1** | Staff CRUD, dashboard, roles view, register security — documented below |
+| **Phase 2** | Frontend wiring, reports UI, optional polish — end of file |
+
+> **Current status (backend):** Phase 1 APIs are **done**. Admin UI still uses mock data in frontend.
+
+---
+
 ## Read this first — two panels, not one
 
 We started building **one admin panel** before the proposal split roles into two:
@@ -61,9 +72,11 @@ reports:view
 | `roles:view` | Roles page — **view only** |
 | `reports:view` | Reports page — when API exists |
 
-> **Today:** `seed.py` still gives admin `__all__`. After approval → narrow to list above. Re-login required.
+> **Today:** `seed.py` gives admin the 6 permissions above (not `__all__`). Re-login required after seed changes.
 
 ---
+
+## Phase 1 — Done (backend)
 
 ## What we already built — belongs to ADMIN ✅
 
@@ -141,21 +154,21 @@ No links in admin sidebar to `/opd/`, `/doctor/`, `/nurse/`, `/pharmacy/`.
 
 | Feature | API | Notes |
 |---------|-----|-------|
-| Hospital reports (view) | `GET /admin/reports/...` | Permission `reports:view` exists, API missing |
-| Department CRUD | `POST/PATCH /departments` | Only `GET /opd/departments` today |
+| Hospital reports (view) UI | `GET /admin/reports/...` | **Backend ✅ Done** — frontend Phase 2 |
+| Department CRUD UI | `POST/PATCH /departments/` | **Backend ✅ Done** — admin uses via `users:list` |
 
 ---
 
 ## Backend fixes needed (config + security) 🔧
 
-| # | Task | File |
-|---|------|------|
-| 1 | Change admin from `__all__` to permissions above | `seed.py` |
-| 2 | Protect register (logged-in admin/super only) | `auth.py` |
-| 3 | Block admin from creating admin/super_admin roles | `auth.py` |
-| 4 | Add `roles:view` check on `GET /roles/` | `roles.py` |
+> **Updated:** Items 1–4 below are **done** in codebase.
 
-Steps 2–4 are not done yet. Register and roles list are open today.
+| # | Task | File | Status |
+|---|------|------|--------|
+| 1 | Change admin from `__all__` to permissions above | `seed.py` | ✅ Done |
+| 2 | Protect register (logged-in admin/super only) | `auth.py` | ✅ Done |
+| 3 | Block admin from creating admin/super_admin roles | `auth.py` | ✅ Done |
+| 4 | Add `roles:view` check on `GET /roles/` | `roles.py` | ✅ Done |
 
 ---
 
@@ -195,3 +208,39 @@ GET    /opd/departments     → register helper
 - Proposal: [../../HMS_Role_Permission_Proposal.docx](../../HMS_Role_Permission_Proposal.docx)
 - Super Admin: [super-admin.md](./super-admin.md)
 - Frontend: [../../frontend/roles/admin.md](../../frontend/roles/admin.md)
+
+---
+
+## Phase 2 — Planned
+
+Phase 1 backend content above is **kept as-is**. Phase 2 is mostly **frontend** and polish.
+
+### Frontend — Phase 2 (primary)
+
+| # | Task | Backend API |
+|---|------|-------------|
+| 1 | Replace mock `admin.js` with real API client | All Phase 1 endpoints |
+| 2 | Dashboard page | `GET /admin/dashboard` |
+| 3 | Staff list / detail / register | `GET /users/`, `PATCH`, `POST /auth/register` |
+| 4 | Roles page (read-only) | `GET /roles/` — hide `admin`, `super_admin` in dropdown |
+| 5 | Reports page | `GET /admin/reports/overview`, `/visits` |
+| 6 | Department management (optional) | `GET/POST/PATCH /departments/` |
+
+**Do not add on admin UI:** create role, assign permissions, settings, audit (Super Admin only).
+
+### Backend — Phase 2 (optional)
+
+| # | Feature | Notes |
+|---|---------|--------|
+| 1 | Filter `GET /roles/` response for admin callers | Hide privileged role names in list |
+| 2 | Tests | Admin cannot register `admin` role; reports 403 for clinical roles |
+| 3 | Doc sync | Keep this file aligned with seed permissions |
+
+### Phase 2 — Suggested order
+
+```
+1. Wire staff + dashboard to live APIs
+2. Register staff (clinical roles only)
+3. Reports screen
+4. Optional departments UI
+```

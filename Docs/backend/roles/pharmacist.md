@@ -6,6 +6,15 @@ Pharmacist receives prescriptions from doctors and dispenses medicines.
 
 ---
 
+## Phases
+
+| Phase | Scope |
+|-------|--------|
+| **Phase 1** | View prescriptions + dispense — below |
+| **Phase 2** | Inventory, stock, suppliers — later section in this file |
+
+---
+
 ## Permissions
 
 **Current seed (fix when building):**
@@ -37,7 +46,7 @@ patients:view
 
 ---
 
-## Phase 1 — Build these first
+## Phase 1 — Done / build these first
 
 | What | Method | URL |
 |------|--------|-----|
@@ -81,9 +90,9 @@ Uses **prescriptions** table from doctor module.
 
 ---
 
-## Phase 2 — Later (Word file Views 5–12)
+## Phase 2 — Later (inventory & stock)
 
-Do **not** build until Phase 1 works:
+Do **not** build until Phase 1 dispense flow works in UI:
 
 - Medicine inventory
 - Stock inward / outward
@@ -93,7 +102,17 @@ Do **not** build until Phase 1 works:
 
 These need tables: `medicines`, `medicine_stock`, `suppliers`, etc.
 
----
+### Frontend — Phase 2 (after Phase 1 UI)
+
+| # | Screen | Notes |
+|---|--------|--------|
+| 1 | Pending prescriptions list | `GET /pharmacy/prescriptions?status=pending` |
+| 2 | Prescription detail + dispense | `POST /pharmacy/dispense/{id}` |
+| 3 | Dispense history | `GET /pharmacy/history` |
+
+### Backend — Phase 2b (inventory)
+
+See bullet list above (medicines, stock, suppliers, purchase orders, expiry alerts).
 
 ## What pharmacist can see
 
