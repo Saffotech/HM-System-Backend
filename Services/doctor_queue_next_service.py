@@ -278,7 +278,7 @@ def fulfill_call_patient(
 
 
 def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -> dict:
-    """Deprecated: prefer POST /receptionist/call-patient/{queue_id}."""
+    """Legacy send-in helper; receptionist call-patient endpoint removed."""
     apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")

@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
-from Models.opd_billing import BillItem, PaymentTransaction
+from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import (
@@ -29,11 +29,58 @@ from Schemas.opd_schema import (
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
 from Services import appointment_service, opd_helpers as h
+from Services.queue_enqueue_service import enqueue_after_payment_if_eligible
 
 # Re-export helpers used by router
 get_patient = h.get_patient
 list_doctors_in_department = h.list_doctors_in_department
 display_name = h.display_name
+
+
+def _resolve_appointment_for_visit(
+    db: Session,
+    *,
+    patient_id: int,
+    doctor_id: int,
+    department_id: int,
+    registered_by: int,
+    appointment_id: Optional[int] = None,
+) -> Appointment:
+    if appointment_id:
+        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if not apt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        if apt.patient_id != patient_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Appointment does not belong to this patient",
+            )
+        if apt.status == AppointmentStatus.cancelled:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot bill a cancelled appointment",
+            )
+        return apt
+
+    return appointment_service.create_walk_in_appointment(
+        db,
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        created_by=registered_by,
+    )
+
+
+def _finalize_visit_appointment_and_queue(
+    db: Session,
+    visit: OpdVisit,
+    apt: Appointment,
+    *,
+    handled_by: int,
+) -> None:
+    visit.appointment_id = apt.id
+    db.flush()
+    enqueue_after_payment_if_eligible(db, visit, handled_by=handled_by)
 
 
 def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
@@ -178,6 +225,7 @@ def register_new_patient(
         department_id=data.department_id,
         created_by=registered_by,
     )
+    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -212,13 +260,15 @@ def create_visit_for_existing_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
-    apt = appointment_service.create_walk_in_appointment(
+    apt = _resolve_appointment_for_visit(
         db,
         patient_id=patient.id,
         doctor_id=billing.doctor_id,
         department_id=billing.department_id,
-        created_by=registered_by,
+        registered_by=registered_by,
+        appointment_id=data.appointment_id,
     )
+    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -256,6 +306,14 @@ def generate_bill(
         extra_items=extra or None,
         transaction_reference=data.transaction_reference,
     )
+    apt = appointment_service.create_walk_in_appointment(
+        db,
+        patient_id=patient.id,
+        doctor_id=data.doctor_id,
+        department_id=data.department_id,
+        created_by=registered_by,
+    )
+    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -268,6 +326,8 @@ def generate_bill(
         visit_id=visit.id,
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
+        appointment_id=apt.id,
+        appointment_uid=apt.appointment_uid,
     )
 
 
@@ -506,10 +566,11 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
         raise HTTPException(status_code=400, detail=f"Amount exceeds balance due ({visit.balance_due})")
 
     h.record_payment(db, visit, data.paid_amount, data.payment_mode, recorded_by, data.transaction_reference)
+    queue = enqueue_after_payment_if_eligible(db, visit, handled_by=recorded_by)
     db.commit()
     db.refresh(visit)
 
-    return {
+    payload = {
         "message": "Payment recorded",
         "bill_number": visit.bill_number,
         "patient_id": patient.id,
@@ -519,6 +580,11 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
         "balance_due": visit.balance_due,
         "payment_status": visit.payment_status,
     }
+    if queue:
+        payload["queue_id"] = queue.id
+        payload["queue_number"] = queue.token_number
+        payload["appointment_id"] = visit.appointment_id
+    return payload
 
 
 def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:

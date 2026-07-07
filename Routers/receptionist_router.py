@@ -1,26 +1,22 @@
 from datetime import date
-from typing import Literal, Optional
+from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, status
-from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import PermissionChecker, get_current_user
-from Models.doctor_patient_queue import QueueStatus
 from Models.user import User
 from Schemas.receptionist_schema import (
-    ArrivalsResponse,
-    CallPatientResponse,
-    CheckInResponse,
     DashboardResponse,
     DoctorQueueResponse,
-    PendingCallsResponse,
-    QueueActionResponse,
+    DoctorScheduleListResponse,
     QueueHistoryResponse,
+    ReceptionistAppointmentStatus,
     TodayQueueResponse,
 )
 from Services import receptionist_service
+from Services.queue_helpers import receptionist_payment_filter_from_query
 
 router = APIRouter(prefix="/receptionist", tags=["Receptionist"])
 
@@ -50,7 +46,15 @@ def receptionist_today_queue(
     doctor_id: Optional[int] = Query(None, ge=1),
     doctor_name: Optional[str] = Query(None, min_length=1),
     patient_id: Optional[int] = Query(None, ge=1),
-    status_filter: Optional[QueueStatus] = Query(None, alias="status"),
+    status_filter: Optional[ReceptionistAppointmentStatus] = Query(
+        None,
+        alias="status",
+        description="Filter by appointment status: scheduled or completed",
+    ),
+    payment_status: Optional[str] = Query(
+        None,
+        description="Filter by payment: paid or unpaid",
+    ),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -65,58 +69,14 @@ def receptionist_today_queue(
             doctor_id=doctor_id,
             doctor_name=doctor_name,
             patient_id=patient_id,
-            status=status_filter,
+            status=receptionist_service.receptionist_appointment_status_from_query(
+                status_filter.value if status_filter else None
+            ),
+            payment_filter=receptionist_payment_filter_from_query(payment_status),
             search=search,
             page=page,
             limit=limit,
         ),
-    }
-
-
-@router.get(
-    "/arrivals",
-    response_model=ArrivalsResponse,
-    status_code=status.HTTP_200_OK,
-)
-def receptionist_arrivals(
-    doctor_id: Optional[int] = Query(None, ge=1),
-    search: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    limit: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view")),
-):
-    return {
-        "success": True,
-        **receptionist_service.get_arrivals(
-            db,
-            doctor_id=doctor_id,
-            search=search,
-            page=page,
-            limit=limit,
-        ),
-    }
-
- 
-@router.post(
-    "/check-in/{appointment_id}",
-    response_model=CheckInResponse,
-    status_code=status.HTTP_201_CREATED,
-)
-def receptionist_check_in(
-    appointment_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    queue = receptionist_service.check_in_patient(
-        db, appointment_id, handled_by=current_user.id
-    )
-    return {
-        "success": True,
-        "message": "Patient checked in successfully",
-        "queue": queue,
     }
 
 
@@ -127,7 +87,15 @@ def receptionist_check_in(
 )
 def receptionist_doctor_queue(
     doctor_id: int,
-    status_filter: Optional[QueueStatus] = Query(None, alias="status"),
+    status_filter: Optional[ReceptionistAppointmentStatus] = Query(
+        None,
+        alias="status",
+        description="Filter by appointment status: scheduled or completed",
+    ),
+    payment_status: Optional[str] = Query(
+        None,
+        description="Filter by payment: paid or unpaid",
+    ),
     search: Optional[str] = Query(None),
     queue_date: Optional[date] = Query(None, alias="date"),
     page: Optional[int] = Query(None, ge=1),
@@ -141,86 +109,15 @@ def receptionist_doctor_queue(
         **receptionist_service.get_doctor_queue(
             db,
             doctor_id,
-            status=status_filter,
+            status=receptionist_service.receptionist_appointment_status_from_query(
+                status_filter.value if status_filter else None
+            ),
+            payment_filter=receptionist_payment_filter_from_query(payment_status),
             search=search,
             queue_date=queue_date,
             page=page,
             limit=limit,
         ),
-    }
-
-
-@router.get(
-    "/pending-calls",
-    response_model=PendingCallsResponse,
-    status_code=status.HTTP_200_OK,
-)
-def receptionist_pending_calls(
-    doctor_id: Optional[int] = Query(None, ge=1),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
-):
-    return {
-        "success": True,
-        **receptionist_service.get_pending_calls(db, doctor_id=doctor_id),
-    }
-
-
-@router.post(
-    "/call-patient/{queue_id}",
-    response_model=CallPatientResponse,
-    status_code=status.HTTP_200_OK,
-)
-def receptionist_call_patient(
-    queue_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    queue = receptionist_service.call_patient(db, queue_id, handled_by=current_user.id)
-    return {
-        "success": True,
-        "message": "Patient called to doctor room",
-        "queue": queue,
-    }
-
-
-@router.patch(
-    "/queue/{queue_id}/no-show",
-    response_model=QueueActionResponse,
-    status_code=status.HTTP_200_OK,
-)
-def receptionist_no_show(
-    queue_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    queue = receptionist_service.mark_no_show(db, queue_id, handled_by=current_user.id)
-    return {
-        "success": True,
-        "message": "Patient marked as no-show",
-        "queue": queue,
-    }
-
-
-@router.patch(
-    "/queue/{queue_id}/rejoin",
-    response_model=QueueActionResponse,
-    status_code=status.HTTP_200_OK,
-)
-def receptionist_rejoin(
-    queue_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    queue = receptionist_service.rejoin_queue(db, queue_id, handled_by=current_user.id)
-    return {
-        "success": True,
-        "message": "Patient rejoined the queue",
-        "queue": queue,
     }
 
 
@@ -234,7 +131,15 @@ def receptionist_queue_history(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     doctor_id: Optional[int] = Query(None, ge=1),
-    status_filter: Optional[QueueStatus] = Query(None, alias="status"),
+    status_filter: Optional[ReceptionistAppointmentStatus] = Query(
+        None,
+        alias="status",
+        description="Filter by appointment status: scheduled or completed",
+    ),
+    payment_status: Optional[str] = Query(
+        None,
+        description="Filter by payment: paid or unpaid",
+    ),
     search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
@@ -250,7 +155,10 @@ def receptionist_queue_history(
             date_from=date_from,
             date_to=date_to,
             doctor_id=doctor_id,
-            status=status_filter,
+            status=receptionist_service.receptionist_appointment_status_from_query(
+                status_filter.value if status_filter else None
+            ),
+            payment_filter=receptionist_payment_filter_from_query(payment_status),
             search=search,
             page=page,
             limit=limit,
@@ -259,33 +167,31 @@ def receptionist_queue_history(
 
 
 @router.get(
-    "/queue-history/export",
+    "/doctors/schedule",
+    response_model=DoctorScheduleListResponse,
     status_code=status.HTTP_200_OK,
-    summary="Export queue history as CSV (opens in Excel)",
+    summary="View doctor schedules and slot availability (read-only)",
 )
-def receptionist_queue_history_export(
-    single_date: Optional[date] = Query(None, alias="date"),
-    date_from: Optional[date] = Query(None),
-    date_to: Optional[date] = Query(None),
+def receptionist_doctor_schedule(
+    schedule_date: date = Query(..., alias="date", description="Schedule date (required)"),
     doctor_id: Optional[int] = Query(None, ge=1),
-    status_filter: Optional[QueueStatus] = Query(None, alias="status"),
+    department_id: Optional[int] = Query(None, ge=1),
     search: Optional[str] = Query(None),
-    export_format: Literal["csv"] = Query("csv", alias="format"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("receptionist:view_doctor_schedule")),
 ):
-    content, filename = receptionist_service.export_queue_history_csv(
-        db,
-        single_date=single_date,
-        date_from=date_from,
-        date_to=date_to,
-        doctor_id=doctor_id,
-        status=status_filter,
-        search=search,
-    )
-    return Response(
-        content=content,
-        media_type="text/csv",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+    return {
+        "success": True,
+        **receptionist_service.get_doctor_schedules(
+            db,
+            schedule_date=schedule_date,
+            doctor_id=doctor_id,
+            department_id=department_id,
+            search=search,
+            page=page,
+            page_size=page_size,
+        ),
+    }

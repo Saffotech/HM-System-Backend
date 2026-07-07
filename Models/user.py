@@ -25,6 +25,8 @@ class User(Base):
 
     department = relationship("Department")
 
+    specialization = Column(String(120), nullable=True)
+
     # profile
     gender          = Column(Integer, nullable=True)
     phone           = Column(String(20), nullable=True)

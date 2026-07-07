@@ -1,23 +1,9 @@
 """
 Seed reference data: permissions, roles, departments, beds.
 
-Configures the full HMS RBAC baseline for new developers and existing databases.
-
 Usage:
-  python seed.py
-      Safe sync — permissions, roles, departments, beds (no staff users)
-
-  python seed.py --fresh
-      Wipe roles/permissions and reseed (empty DB only, no users)
-
-  python seed.py --super-admin-email owner@hospital.com --super-admin-password 'YourPass123'
-      Also create or update the first super_admin login (POST /auth/register requires auth)
-
-After changing role permissions, existing users must log in again (JWT carries permissions).
-
-Role split:
-  admin       — Hospital manager panel (/admin): staff, departments, reports (6 permissions)
-  super_admin — Hospital owner panel (/super-admin): full access (__all__)
+  python seed.py          Safe sync — upsert only (safe on existing DB)
+  python seed.py --fresh  Wipe roles/permissions and reseed (empty DB only)
 """
 import argparse
 import sys
@@ -25,7 +11,6 @@ import sys
 from database import SessionLocal
 from Models.department import Department
 from Models.role import Permission, Role, RolePermission
-from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.user import User
 
 PERMISSIONS_LIST = [
@@ -77,6 +62,7 @@ PERMISSIONS_LIST = [
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
+    "receptionist:view_doctor_schedule",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -91,11 +77,7 @@ ADMIN_PERMISSIONS = [
 
 ROLES_DATA = {
     "admin": {
-        "description": "Hospital administrator (staff, departments, reports)",
-        "permissions": ADMIN_PERMISSIONS,
-    },
-    "super_admin": {
-        "description": "Hospital owner — full system control",
+        "description": "System administrator",
         "permissions": "__all__",
     },
     "doctor": {
@@ -176,12 +158,11 @@ ROLES_DATA = {
         ],
     },
     "receptionist": {
-        "description": "Reception / front desk queue management",
+        "description": "Reception / front desk queue monitoring (view only)",
         "permissions": [
             "patients:view",
             "opd:view",
-            "appointments:view",
-            "appointments:update",
+            "receptionist:view_doctor_schedule",
         ],
     },
 }
@@ -287,6 +268,22 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=pid))
             links_added += 1
+        target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
+
+        existing_links = (
+            db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
+        )
+        existing_perm_ids = {rp.permission_id for rp in existing_links}
+
+        for rp in existing_links:
+            if rp.permission_id not in target_perm_ids:
+                db.delete(rp)
+                links_removed += 1
+
+        for pid in target_perm_ids:
+            if pid not in existing_perm_ids:
+                db.add(RolePermission(role_id=role.id, permission_id=pid))
+                links_added += 1
 
     db.commit()
     print(

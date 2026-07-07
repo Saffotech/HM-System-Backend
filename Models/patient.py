@@ -35,6 +35,7 @@ class OpdVisit(Base):
     token_number = Column(String, nullable=False, unique=True)
 
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
+    appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True, index=True)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 

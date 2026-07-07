@@ -29,11 +29,6 @@ from Schemas.opd_schema import (
 from Schemas.patient_schema import PatientOut, PatientUpdate
 from dependencies import PermissionChecker, get_current_user
 from Services import appointment_service, bed_service, opd_service
-from Services.doctor_queue_next_service import (
-    list_pending_next_requests_service,
-    send_in_patient_service,
-)
-from Schemas.doctor_queue_next_request_schema import SendInPatientSchema
 from Utils.deprecation import mark_deprecated
 
 router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
@@ -324,8 +319,8 @@ def today_billing_visits(
     """
     Lists today's **registered OPD visits** (bills, payment status, billing tokens).
 
-    **Not** the doctor waiting-room queue. For check-in and live queue use:
-    - `GET /receptionist/arrivals`
+    **Not** the doctor waiting-room queue. For live clinical queue use:
+    - `GET /receptionist/today-queue`
     - `GET /receptionist/doctor-queue/{doctor_id}`
     """
     return opd_service.fetch_today_billing_visits(db)
@@ -343,54 +338,6 @@ def today_queue(
 ):
     mark_deprecated(response, "/opd/visits/today")
     return opd_service.fetch_today_billing_visits(db)
-
-
-@router.get(
-    "/queue/next-requests",
-    deprecated=True,
-    summary="[Deprecated] Use GET /receptionist/pending-calls",
-)
-def doctor_next_patient_requests(
-    response: Response,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
-):
-    mark_deprecated(response, "/receptionist/pending-calls")
-    result = list_pending_next_requests_service(db)
-    return {
-        "success": True,
-        "total": len(result),
-        "pending_calls": result,
-        "requests": result,
-        "message": "Deprecated — use GET /receptionist/pending-calls",
-    }
-
-
-@router.post(
-    "/queue/send-in",
-    status_code=201,
-    deprecated=True,
-    summary="[Deprecated] Use POST /receptionist/call-patient/{queue_id}",
-)
-def send_in_patient(
-    body: SendInPatientSchema,
-    response: Response,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    mark_deprecated(response, "/receptionist/call-patient/{queue_id}")
-    payload = send_in_patient_service(
-        db=db,
-        appointment_id=body.appointment_id,
-        handled_by=current_user.id,
-    )
-    payload["message"] = (
-        f"{payload['message']} "
-        "(deprecated — use POST /receptionist/call-patient/{{queue_id}})"
-    )
-    return payload
 
 
 # ── Appointments ──────────────────────────────────────────────

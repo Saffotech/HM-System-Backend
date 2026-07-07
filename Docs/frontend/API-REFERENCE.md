@@ -452,34 +452,16 @@ See [Queue endpoints guide](../flows/queue-endpoints-guide.md) for `/receptionis
 
 # 4. Receptionist (`/receptionist`)
 
-**Role:** `receptionist` (permissions: `patients:view`, `opd:view`, `appointments:view`, `appointments:update`).
+**Role:** `receptionist` (permissions: `patients:view`, `opd:view`).
 
-Handles patient check-in, doctor queue board, and answering doctor **Next patient** requests. OPD billing creates appointments; reception moves patients into the queue.
-
-### Workflow
-
-```
-OPD billing → appointment (scheduled)
-Reception check-in → patient_queue (waiting)
-Doctor request-next → doctor_queue_next_requests (pending)
-Reception call-patient → called + called_at + called_by
-Doctor start → in_progress + consultation_started_at
-Doctor complete → completed
-```
+**View-only** module: monitor dashboard, live doctor queues, and queue history.
 
 | Method | Path | Permission | Description |
 |--------|------|------------|-------------|
 | GET | `/receptionist/dashboard` | `opd:view` | Today's queue stats (+ manager metrics); optional `doctor_id` |
 | GET | `/receptionist/today-queue` | `opd:view` | **All doctors** — patients checked in today |
-| GET | `/receptionist/arrivals` | `appointments:view` | Scheduled, not yet checked in |
-| POST | `/receptionist/check-in/{appointment_id}` | `appointments:update` | Add to doctor queue (409 if duplicate) |
 | GET | `/receptionist/doctor-queue/{doctor_id}` | `opd:view` | Live queue for one doctor |
-| GET | `/receptionist/pending-calls` | `opd:view` | Doctors waiting for patient call |
-| POST | `/receptionist/call-patient/{queue_id}` | `appointments:update` | Send patient to doctor room (`called`) |
-| PATCH | `/receptionist/queue/{queue_id}/no-show` | `appointments:update` | Mark patient no-show |
-| PATCH | `/receptionist/queue/{queue_id}/rejoin` | `appointments:update` | Rejoin after no-show |
 | GET | `/receptionist/queue-history` | `opd:view` | Historical queue report |
-| GET | `/receptionist/queue-history/export` | `opd:view` | CSV export (same filters) |
 
 #### GET `/receptionist/dashboard`
 
@@ -525,95 +507,9 @@ All patients **checked in** today across all doctors (`patient_queue`, IST date)
 GET /receptionist/today-queue?doctor_name=sharma&search=42&status=waiting&page=1&limit=20
 ```
 
-#### GET `/receptionist/arrivals?doctor_id=5&search=APT-0042&page=1&limit=20`
-
-**Search:** patient name, UHID, phone, **appointment_uid**.
-
-```json
-{
-  "success": true,
-  "total": 3,
-  "page": 1,
-  "limit": 20,
-  "arrivals": [
-    {
-      "appointment_id": 42,
-      "appointment_uid": "APT-0042",
-      "patient_id": 1,
-      "patient_name": "Nilesh Patil",
-      "patient_uid": "P-1001",
-      "patient_phone": "9567154627",
-      "doctor_id": 5,
-      "doctor_name": "Dr. Sharma",
-      "scheduled_at": "2026-06-23T09:30:00+05:30"
-    }
-  ]
-}
-```
-
-#### POST `/receptionist/check-in/{appointment_id}`
-
-**Response 201** — creates queue row with `status: waiting`.
-
-**Response 409** — patient already checked in (same appointment or same patient+doctor today).
-
-```json
-{
-  "success": true,
-  "message": "Patient checked in successfully",
-  "queue": {
-    "queue_id": 16,
-    "appointment_id": 42,
-    "queue_number": 7,
-    "patient_id": 1,
-    "patient_name": "Nilesh Patil",
-    "patient_uid": "P-1001",
-    "doctor_id": 5,
-    "status": "waiting",
-    "checked_in_at": "2026-06-23T09:45:00+05:30"
-  }
-}
-```
-
-#### GET `/receptionist/pending-calls?doctor_id=5`
-
-Poll every 5–10 seconds. Call patient only when a row appears here (doctor clicked **Next patient**).
-
-```json
-{
-  "success": true,
-  "total": 1,
-  "pending_calls": [
-    {
-      "request_id": 3,
-      "doctor_id": 5,
-      "doctor_name": "Dr. Sharma",
-      "queue_id": 16,
-      "queue_number": 7,
-      "appointment_id": 42,
-      "patient_id": 1,
-      "patient_name": "Nilesh Patil",
-      "patient_uid": "P-1001",
-      "requested_at": "2026-06-23T10:30:00+05:30",
-      "status": "pending"
-    }
-  ]
-}
-```
-
-#### POST `/receptionist/call-patient/{queue_id}`
-
-Requires matching pending doctor request. Sets `called_at`, `called_by`, and status **`called`** (not `in_progress`). Doctor `PUT /queue/start/{queue_id}` moves to `in_progress`.
-
 #### GET `/receptionist/queue-history`
 
 Same filters as list view. **Search** includes appointment UID.
-
-#### GET `/receptionist/queue-history/export?format=csv`
-
-CSV download with same query params as queue history (opens in Excel).
-
-**Legacy equivalents (deprecate):** `POST /queue/add`, `GET /opd/queue/next-requests`, `POST /opd/queue/send-in`
 
 ---
 
@@ -825,7 +721,7 @@ Requires appointment `status` = `completed`.
 
 ### `receptionist`
 
-`patients:view`, `opd:view`, `appointments:view`, `appointments:update`
+`patients:view`, `opd:view`
 
 ### `doctor`
 
@@ -903,18 +799,10 @@ All permissions (from seed).
 | GET | `/prescriptions/{prescription_id}` |
 | PUT | `/prescriptions/{prescription_id}` |
 | DELETE | `/prescriptions/{prescription_id}` |
-| GET | `/receptionist/arrivals` |
-| POST | `/receptionist/call-patient/{queue_id}` |
-| POST | `/receptionist/check-in/{appointment_id}` |
 | GET | `/receptionist/dashboard` |
 | GET | `/receptionist/today-queue` |
 | GET | `/receptionist/doctor-queue/{doctor_id}` |
-| GET | `/receptionist/pending-calls` |
 | GET | `/receptionist/queue-history` |
-| GET | `/receptionist/queue-history/export` |
-| PATCH | `/receptionist/queue/{queue_id}/no-show` |
-| PATCH | `/receptionist/queue/{queue_id}/rejoin` |
-| POST | `/queue/add` |
 | PUT | `/queue/complete/{queue_id}` |
 | GET | `/queue/current` |
 | PUT | `/queue/start/{queue_id}` |

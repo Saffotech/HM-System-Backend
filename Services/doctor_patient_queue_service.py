@@ -8,11 +8,13 @@ from zoneinfo import ZoneInfo
 
 from Models.doctor_patient_queue import PatientQueue, QueuePriority, QueueStatus
 from Models.opd_billing import Appointment, AppointmentStatus
+from Models.patient import OpdVisit
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Services import doctor_helpers as h
 from Services import opd_helpers
 from Services.queue_helpers import (
     START_CONSULTATION_ELIGIBLE,
+    apply_eligible_queue_filters,
     is_queue_status,
     persist,
     status_value,
@@ -234,6 +236,21 @@ def add_patient_to_queue_service(
     if not appointment:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
+    if appointment.status == AppointmentStatus.cancelled:
+        raise HTTPException(status_code=400, detail="Cannot queue a cancelled appointment")
+
+    visit = (
+        db.query(OpdVisit)
+        .filter(OpdVisit.appointment_id == appointment_id)
+        .order_by(OpdVisit.id.desc())
+        .first()
+    )
+    if not visit or visit.payment_status != "paid":
+        raise HTTPException(
+            status_code=400,
+            detail="Payment must be completed before the patient can join the queue",
+        )
+
     if (
         db.query(PatientQueue)
         .filter(
@@ -288,15 +305,17 @@ def add_patient_to_queue_service(
 
 
 def get_today_queue_service(db: Session, doctor_id: int) -> list[PatientQueue]:
-    return (
+    q = (
         db.query(PatientQueue)
+        .join(Appointment, PatientQueue.appointment_id == Appointment.id)
+        .join(OpdVisit, OpdVisit.appointment_id == Appointment.id)
         .filter(
             PatientQueue.doctor_id == doctor_id,
             PatientQueue.queue_date == _today(),
         )
-        .order_by(PatientQueue.priority.desc(), PatientQueue.token_number.asc())
-        .all()
     )
+    q = apply_eligible_queue_filters(q)
+    return q.order_by(PatientQueue.priority.desc(), PatientQueue.token_number.asc()).all()
 
 
 def start_consultation_service(db: Session, queue_id: int, doctor_id: int) -> dict:
