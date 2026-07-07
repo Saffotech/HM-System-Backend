@@ -58,6 +58,7 @@ class OpdVisitCreate(VisitBillingFields):
     """Existing patient — new OPD visit + bill."""
 
     patient_id: int
+    appointment_id: Optional[int] = None
     waive_registration_fee: bool = False
 
     class Config:

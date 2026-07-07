@@ -9,18 +9,16 @@ HMS has **four different “queue” concepts**. Using the wrong URL is a common
 | Who | What you need | Correct API | Data source |
 |-----|---------------|-------------|-------------|
 | **OPD billing** | Today’s registered visits, bills, payment status | `GET /opd/visits/today` | `opd_visits` |
-| **Receptionist** | Patients to check in (not yet in queue) | `GET /receptionist/arrivals` | `appointments` |
 | **Receptionist** | **All doctors** — checked in today | `GET /receptionist/today-queue` | `patient_queue` |
 | **Receptionist** | One doctor — live waiting room / tokens | `GET /receptionist/doctor-queue/{doctor_id}` | `patient_queue` |
-| **Receptionist** | Doctor clicked “next patient” | `GET /receptionist/pending-calls` | `doctor_queue_next_requests` |
-| **Receptionist** | Queue history / CSV export | `GET /receptionist/queue-history` / `.../export` | `patient_queue` |
+| **Receptionist** | Queue history (reporting) | `GET /receptionist/queue-history` | `patient_queue` |
 | **Doctor** | My patients today in queue | `GET /queue/today` | `patient_queue` |
 | **Nurse** | Vitals queue view | `GET /nurse/queue/today` | `patient_queue` (+ vitals flags) |
 
-**`today-queue` filters:** `doctor_id`, `doctor_name`, `patient_id`, `status`, `search` (name, UHID, phone, patient id, token, appointment UID, doctor name), `page`, `limit`.  
-**Sort:** priority (high first) → `called` / `waiting` → token.
+**Receptionist is view-only** — no arrivals, check-in, pending-calls, call-patient, no-show, rejoin, or CSV export on `/receptionist/*`.
 
-**Queue status flow (clinical):** `waiting` → `called` → `in_progress` → `completed`
+**`today-queue` filters:** `doctor_id`, `doctor_name`, `patient_id`, `status`, `search`, `page`, `limit`.  
+**Sort:** priority (high first) → `called` / `waiting` → token.
 
 ---
 
@@ -30,75 +28,47 @@ HMS has **four different “queue” concepts**. Using the wrong URL is a common
 
 - **Role:** `opd_billing`
 - **Table:** `opd_visits`
-- **Shows:** Bill number, billing token (`OPD-20260623-001`), payment status, fees
-- **Use for:** Billing counter — “who paid / who owes today”
-- **Does NOT show:** Check-in status, doctor queue position, `called_at`, `called_by`, consultation state
+- **Shows:** Bill number, billing token, payment status, fees
+- **Use for:** Billing counter
 
-### `GET /receptionist/*` — clinical queue
+### `GET /receptionist/*` — clinical queue (view)
 
 - **Role:** `receptionist`
 - **Table:** `patient_queue` (+ `appointments`)
-- **Shows:** Queue token, `waiting` / `called` / `in_progress` / `no_show`, `called_at`, `called_by`
-- **Use for:** Front desk — check-in, call patient to doctor room, no-show
-
-**A patient can have an OPD visit (bill paid) and still not be in the clinical queue until reception checks them in.**
+- **Shows:** Queue token, status, `called_at`, `called_by` (read-only)
+- **Use for:** Front desk monitoring boards
 
 ---
 
-## Deprecated / misleading paths
+## Removed / deprecated paths
 
-| Old path | Problem | Use instead |
-|----------|---------|-------------|
-| `GET /opd/queue/today` | Name says “queue” but returns **billing visits** | `GET /opd/visits/today` |
-| `GET /opd/queue/next-requests` | Legacy doctor-next signal | `GET /receptionist/pending-calls` |
-| `POST /opd/queue/send-in` | Legacy call patient | `POST /receptionist/call-patient/{queue_id}` |
-| `POST /queue/add` | Legacy check-in | `POST /receptionist/check-in/{appointment_id}` |
-
----
-
-## Typical day flow (how endpoints connect)
-
-```
-OPD Billing                    Receptionist                    Doctor
-───────────                    ────────────                    ──────
-POST /opd/patient/register  →  POST /receptionist/check-in
-   (creates opd_visit            (creates patient_queue row)
-    + appointment)
-
-GET /opd/visits/today       →  GET /receptionist/arrivals
-   (billing list)                (who still needs check-in)
-
-                               GET /receptionist/today-queue
-                               GET /receptionist/doctor-queue/{id}
-                               GET /receptionist/pending-calls
-                               POST /receptionist/call-patient/{id}
-                                                                  POST /queue/request-next
-                                                                  PUT /queue/start/{id}
-                                                                  PUT /queue/complete/{id}
-```
+| Old path | Status |
+|----------|--------|
+| `GET /receptionist/arrivals` | **Removed** |
+| `GET /opd/queue/today` | Deprecated → `GET /opd/visits/today` |
+| `GET /opd/queue/next-requests` | **Removed** |
+| `POST /opd/queue/send-in` | **Removed** |
+| `POST /queue/add` | **Removed** |
+| `POST /receptionist/check-in/{id}` | **Removed** |
+| `GET /receptionist/pending-calls` | **Removed** |
+| `POST /receptionist/call-patient/{id}` | **Removed** |
+| `PATCH /receptionist/queue/{id}/no-show` | **Removed** |
+| `PATCH /receptionist/queue/{id}/rejoin` | **Removed** |
+| `GET /receptionist/queue-history/export` | **Removed** |
 
 ---
 
-## Response shape: `/opd/visits/today`
+## Typical day flow
 
-```json
-{
-  "source": "opd_visits",
-  "description": "Registered OPD visits and bills for today. This is NOT the clinical waiting-room queue...",
-  "total": 12,
-  "visits": [
-    {
-      "visit_id": 1,
-      "token_number": "OPD-20260623-001",
-      "bill_number": "BILL-001",
-      "payment_status": "paid",
-      "grand_total": 1050.0
-    }
-  ]
-}
 ```
-
-The `source` and `description` fields are intentional — they prevent mixing this list with `/receptionist/doctor-queue`.
+OPD Billing                    Receptionist (view)              Doctor
+───────────                    ───────────────────              ──────
+POST /opd/patient/register     GET /receptionist/today-queue
+   + check-in (queue row)      GET /receptionist/today-queue
+                               GET /receptionist/doctor-queue/{id}    POST /queue/request-next
+                                                                        PUT /queue/start/{id}
+                                                                        PUT /queue/complete/{id}
+```
 
 ---
 

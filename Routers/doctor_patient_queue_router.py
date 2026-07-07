@@ -1,16 +1,14 @@
-from fastapi import APIRouter, Body, Depends, Response, status
+from fastapi import APIRouter, Body, Depends, status
 
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user,PermissionChecker
 from Models.user import User
 from Schemas.doctor_consultation_schema import SaveConsultationRequest, SaveConsultationResponse
-from Schemas.doctor_patient_queue_schema import AddPatientQueueSchema, CompleteConsultationSchema
+from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Schemas.doctor_queue_next_request_schema import RequestNextPatientSchema
 from Services import doctor_helpers as h
 from Services.doctor_patient_queue_service import (
-
-    add_patient_to_queue_service,
     get_today_queue_service,
     start_consultation_service,
     complete_consultation_service,
@@ -19,74 +17,10 @@ from Services.doctor_patient_queue_service import (
 from Services.doctor_consultation_service import save_consultation_service
 from Services.doctor_queue_next_service import request_next_patient_service
 
-from Services.receptionist_service import check_in_patient
-
-from Utils.deprecation import mark_deprecated
-
-
 
 router = APIRouter(
     prefix="/queue",
     tags=["Doctor Patient Queue"])
-
-# ==========================================================
-
-# Add Patient To Queue (deprecated — use receptionist check-in)
-
-# ==========================================================
-
-
-
-@router.post("/add",status_code=status.HTTP_201_CREATED,deprecated=True,
-    summary="[Deprecated] Use POST /receptionist/check-in/{appointment_id}",)
-
-def add_patient_to_queue(
-
-    queue_data: AddPatientQueueSchema,
-
-    response: Response,
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(get_current_user),
-
-    _: bool = Depends(PermissionChecker("appointments:update")),
-
-):
-
-    mark_deprecated(
-
-        response,
-
-        f"/receptionist/check-in/{queue_data.appointment_id}",
-
-    )
-
-    queue = check_in_patient(
-
-        db,
-
-        queue_data.appointment_id,
-
-        handled_by=current_user.id,
-
-    )
-
-    return {
-
-        "success": True,
-
-        "message": (
-
-            "Patient added to queue successfully. "
-
-            "This endpoint is deprecated — use POST /receptionist/check-in/{appointment_id}."
-
-        ),
-
-        "queue": queue,
-
-    }
 
 # ==========================================================
 # Get Today's Queue

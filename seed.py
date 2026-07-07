@@ -61,6 +61,7 @@ PERMISSIONS_LIST = [
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
+    "receptionist:view_doctor_schedule",
 ]
 
 ROLES_DATA = {
@@ -146,12 +147,11 @@ ROLES_DATA = {
         ],
     },
     "receptionist": {
-        "description": "Reception / front desk queue management",
+        "description": "Reception / front desk queue monitoring (view only)",
         "permissions": [
             "patients:view",
             "opd:view",
-            "appointments:view",
-            "appointments:update",
+            "receptionist:view_doctor_schedule",
         ],
     },
 }
@@ -206,6 +206,7 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
     role_ids: dict[str, int] = {}
     roles_added = 0
     links_added = 0
+    links_removed = 0
 
     for role_name, role_data in ROLES_DATA.items():
         role = db.query(Role).filter(Role.name == role_name).first()
@@ -224,19 +225,29 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
         else:
             target_perms = set(role_data["permissions"])
 
-        existing_perm_ids = {
-            rp.permission_id
-            for rp in db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
-        }
-        for perm_name in target_perms:
-            pid = perm_ids.get(perm_name)
-            if pid is None or pid in existing_perm_ids:
-                continue
-            db.add(RolePermission(role_id=role.id, permission_id=pid))
-            links_added += 1
+        target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
+
+        existing_links = (
+            db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
+        )
+        existing_perm_ids = {rp.permission_id for rp in existing_links}
+
+        for rp in existing_links:
+            if rp.permission_id not in target_perm_ids:
+                db.delete(rp)
+                links_removed += 1
+
+        for pid in target_perm_ids:
+            if pid not in existing_perm_ids:
+                db.add(RolePermission(role_id=role.id, permission_id=pid))
+                links_added += 1
 
     db.commit()
-    print(f"Roles synced: {len(role_ids)} total ({roles_added} new, {links_added} permission links added)")
+    print(
+        f"Roles synced: {len(role_ids)} total "
+        f"({roles_added} new, {links_added} permission links added, "
+        f"{links_removed} removed)"
+    )
     return role_ids
 
 

@@ -1,170 +1,90 @@
 # Receptionist (`receptionist`)
 
-Front desk **queue management**: check-in, today's queue (all doctors), doctor queues, pending doctor calls, call patient, no-show, rejoin, queue history, CSV export.
+Front desk **view-only** monitoring of appointments and the clinical queue. Queue rows are created automatically by OPD Billing after payment — receptionist does not create queue entries.
 
-**Full module spec:** [Receptionist Module](../../flows/receptionist-module.md)  
-**Frontend UI spec:** [Receptionist frontend flow](../../frontend/roles/receptionist.md)
-
----
-
-## Workflow (why this module exists)
-
-Reception does **not** decide when the doctor is ready (consultation length varies).  
-**Doctor** clicks **Next patient** → **Reception** sees pending call → **Reception** calls patient to the room → **Doctor** starts consultation when patient arrives.
+## Workflow
 
 ```
-OPD Billing → appointment (scheduled)
-Reception   → check-in (patient_queue, waiting)
-Doctor      → complete → request-next (auto FIFO)
-Reception   → pending-calls → call-patient (called + called_at + called_by)
-Doctor      → start (in_progress) → complete
+Patient arrives → OPD Billing (register / appointment / pay)
+        ↓
+Appointment created (paid or unpaid)
+        ↓
+Receptionist views all today's appointments (paid + unpaid)
+        ↓
+Payment completed → system auto-creates patient_queue row
+        ↓
+Doctor views GET /queue/today (paid patients in queue only)
 ```
 
-**Queue status flow:** `waiting` → `called` → `in_progress` → `completed`  
-(`no_show` / `rejoin` / `cancelled` as exceptions)
-
----
-
-## Permissions (seed)
+## Permissions
 
 ```
 patients:view
 opd:view
-appointments:view
-appointments:update
+receptionist:view_doctor_schedule
 ```
 
-`Constants/constants.py` already has `Role.RECEPTIONIST = "receptionist"`.
+## What receptionist sees
 
----
+- All **non-cancelled** appointments for the selected date(s)
+- **Paid** and **unpaid** (`pending` / `partial`) patients
+- Optional filter: `payment_status=paid` or `payment_status=unpaid`
+- Appointment `status` in list responses: **`scheduled`** or **`completed`** only (not queue workflow statuses)
 
-## Register receptionist user
+Unpaid patients appear in receptionist lists but are **not** in the doctor's live queue until paid.
 
-**POST** `/auth/register`
+## APIs (view only)
 
-| Field | Required |
-|-------|----------|
-| first_name, email, password | Yes |
-| role_id | Yes — `receptionist` from `GET /roles/` |
-| department_id | No |
+| Method | Path | Permission |
+|--------|------|------------|
+| GET | `/receptionist/dashboard` | `opd:view` |
+| GET | `/receptionist/today-queue` | `opd:view` |
+| GET | `/receptionist/doctor-queue/{doctor_id}` | `opd:view` |
+| GET | `/receptionist/queue-history` | `opd:view` |
+| GET | `/receptionist/doctors/schedule` | `receptionist:view_doctor_schedule` |
 
----
+### Payment filter (today-queue, doctor-queue, queue-history)
 
-## APIs (11)
+| Query param | Values | Description |
+|-------------|--------|-------------|
+| `payment_status` | `paid` | Only fully paid visits |
+| `payment_status` | `unpaid` | `pending`, `partial`, or no visit row |
+| *(omit)* | — | Both paid and unpaid |
 
-| # | Method | Path | Query params |
-|---|--------|------|--------------|
-| 1 | GET | `/receptionist/dashboard` | `doctor_id?` |
-| 2 | GET | `/receptionist/today-queue` | `doctor_id`, `doctor_name`, `patient_id`, `status`, `search`, `page`, `limit` |
-| 3 | GET | `/receptionist/arrivals` | `doctor_id`, `search`, `page`, `limit` |
-| 4 | POST | `/receptionist/check-in/{appointment_id}` | — |
-| 5 | GET | `/receptionist/doctor-queue/{doctor_id}` | `status`, `search`, `date`, `page?`, `limit?` |
-| 6 | GET | `/receptionist/pending-calls` | `doctor_id?` |
-| 7 | POST | `/receptionist/call-patient/{queue_id}` | — |
-| 8 | PATCH | `/receptionist/queue/{queue_id}/no-show` | — |
-| 9 | PATCH | `/receptionist/queue/{queue_id}/rejoin` | — |
-| 10 | GET | `/receptionist/queue-history` | `date`, `date_from`, `date_to`, `doctor_id`, `status`, `search`, `page`, `limit` |
-| 11 | GET | `/receptionist/queue-history/export` | Same as history + `format=csv` |
+### Appointment status filter (today-queue, doctor-queue, queue-history)
 
-Request/response examples → [Receptionist Module §6](../../flows/receptionist-module.md#6-apis).
+| Query param | Values | Description |
+|-------------|--------|-------------|
+| `status` | `scheduled` | Appointment not yet completed by doctor |
+| `status` | `completed` | Doctor marked consultation completed |
+| *(omit)* | — | Both scheduled and completed |
 
----
+Receptionist `status` is derived from `appointments.status`, not `patient_queue.status`.
+Doctor queue still uses `waiting`, `called`, `in_progress`, etc. internally.
+
+### GET `/receptionist/doctors/schedule`
+
+View-only doctor availability. Required query: `date=YYYY-MM-DD`.
+
+Optional: `doctor_id`, `department_id`, `search`, `page`, `page_size`.
+
+## OPD Billing responsibilities
+
+| Action | API |
+|--------|-----|
+| Register + bill + appointment | `POST /opd/patient/register` |
+| Existing patient visit | `POST /opd/visit` (optional `appointment_id` for pre-booked) |
+| Collect later payment → auto queue | `POST /opd/visit/{visit_id}/pay` |
+
+After `payment_status` becomes `paid`, `queue_enqueue_service.enqueue_after_payment_if_eligible()` runs automatically.
 
 ## Code files
 
 ```
-Routers/receptionist_router.py       # Thin — delegates to service
-Services/receptionist_service.py     # Orchestration; reuses existing queue services
-Schemas/receptionist_schema.py       # Pydantic models + paginated wrappers
+Services/queue_enqueue_service.py   # Auto-enqueue after payment
+Services/opd_service.py             # Links visit ↔ appointment, triggers enqueue
+Services/receptionist_service.py    # Appointment-based views + payment filter
+Services/queue_helpers.py           # apply_receptionist_payment_filter
+Services/doctor_patient_queue_service.py  # Doctor queue: paid only
+Models/patient.py                   # OpdVisit.appointment_id
 ```
-
-### Service delegation (no duplicate queue logic)
-
-| `receptionist_service` function | Reuses / notes |
-|---------------------------------|----------------|
-| `get_dashboard` | Aggregates `patient_queue`, `appointments`, `doctor_queue_next_requests`; optional `doctor_id` |
-| `get_today_queue` | All doctors checked-in today; priority + attention sort |
-| `get_arrivals` | `appointments` not in queue; search includes `appointment_uid` |
-| `check_in_patient` | `add_patient_to_queue_service` — **409** on duplicate |
-| `get_doctor_queue` | Filtered `patient_queue` with attention sort |
-| `get_pending_calls` | `list_pending_next_requests_service` |
-| `call_patient` | `fulfill_call_patient` — sets `called`, `called_at`, `called_by` |
-| `mark_no_show` / `rejoin_queue` | Queue status updates; clears `called_by` on no-show/rejoin |
-| `get_queue_history` | Date-range query; search includes `appointment_uid` |
-| `export_queue_history_csv` | Same filters as history → CSV download |
-
----
-
-## Tables
-
-| Table | Role |
-|-------|------|
-| `appointments` | Arrivals list, dashboard arrival/cancelled counts |
-| `patient_queue` | Check-in, queue, history, `called_at`, `called_by` |
-| `doctor_queue_next_requests` | Pending doctor next calls |
-
-**Schema (migrations):**
-
-| Change | Migration |
-|--------|-----------|
-| `called_at`, `no_show` enum | `7954ceb7aea4` |
-| `appointmentstatus` enum, `queue_id` FK | `e1f2a3b4c5d6` |
-| `called` enum, `called_by` FK | `f7a8b9c0d1e2` |
-
----
-
-## Pagination
-
-| Endpoint | Pagination |
-|----------|------------|
-| `/arrivals` | **Required** — `page`, `limit` (default 20, max 100) |
-| `/today-queue` | **Required** |
-| `/queue-history` | **Required** |
-| `/doctor-queue` | Optional |
-| Others | No |
-
-Standard response: `{ success, total, page, limit, ... }`
-
----
-
-## Duplicate check-in (409)
-
-**POST** `/receptionist/check-in/{appointment_id}` returns **409 Conflict** when:
-
-- Same `appointment_id` already has a row in today's `patient_queue`, or
-- Same `patient_id` + `doctor_id` already has a queue entry today
-
----
-
-## Legacy endpoints (deprecated)
-
-| Old | New |
-|-----|-----|
-| `POST /queue/add` | `POST /receptionist/check-in/{appointment_id}` |
-| `GET /opd/queue/next-requests` | `GET /receptionist/pending-calls` |
-| `POST /opd/queue/send-in` | `POST /receptionist/call-patient/{queue_id}` |
-
-**Do not use** `GET /opd/queue/today` for reception queue — returns `opd_visits`.
-
----
-
-## Does not include
-
-- Patient registration / billing → [opd-billing.md](./opd-billing.md)
-- Doctor consultation → [doctor.md](./doctor.md)
-
----
-
-## Implementation status
-
-| Item | Status |
-|------|--------|
-| Router, service, schema | Done |
-| Dashboard manager metrics + `doctor_id` filter | Done |
-| `today-queue` filters and attention sort | Done |
-| `called` status + `called_by` audit | Done |
-| Arrivals / history `appointment_uid` search | Done |
-| Queue history CSV export | Done |
-| Duplicate check-in 409 | Done |
-| `receptionist` role in seed | Done |
-| Frontend screens | To build |

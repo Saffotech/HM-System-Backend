@@ -2,6 +2,8 @@
 
 Complete specification for the **Receptionist** module in SaffoCare HMS.
 
+> **v2.0 (July 2026):** Receptionist is **view-only**. Action endpoints (check-in, pending-calls, call-patient, no-show, rejoin, CSV export) have been removed. Permissions: `patients:view`, `opd:view`, `appointments:view` only.
+
 | Audience | Sections |
 |----------|----------|
 | Backend | [§4 Code structure](#4-code-structure), [§6 APIs](#6-apis), [§5 Database](#5-database) |
@@ -18,24 +20,21 @@ Complete specification for the **Receptionist** module in SaffoCare HMS.
 
 ## 1. Module overview
 
-The **Receptionist** module manages the **live OPD waiting line** after OPD Billing has created an appointment. Reception does **not** register patients or collect payment.
+The **Receptionist** module provides **read-only visibility** into the live OPD waiting line after OPD Billing has created an appointment.
 
 | Module | Role (API) | Responsibility |
 |--------|------------|----------------|
-| OPD Billing | `opd_billing` | Register, pay, create `appointments` |
-| **Receptionist** | `receptionist` | Check-in, queue board, answer doctor “next patient” calls |
+| OPD Billing | `opd_billing` | Register, pay, create `appointments`, check-in |
+| **Receptionist** | `receptionist` | View queue boards, arrivals, dashboard, history |
 | Doctor | `doctor` | Complete consultation, request next, start/complete |
 
 ### Design principles
 
-1. **Appointment ≠ in queue** — booking (`scheduled`) is separate from arrival (`waiting` in `patient_queue`).
-2. **Reception owns the waiting area** — check-in, token order, no-show, rejoin.
-3. **Doctor owns timing** — reception does not know consult duration; doctor clicks **Next patient** when ready.
-4. **Reception physically calls the patient** — after doctor’s signal; status `called` + `called_at` + `called_by`.
-5. **Reception does not call next blindly** — no reception-only `call-next` without doctor request.
-6. **No duplicate queue logic** — `receptionist_service.py` orchestrates; existing queue services do the work.
-7. **No new tables** — reuse `patient_queue` and `doctor_queue_next_requests`.
-8. **Duplicate check-in returns 409** — same appointment or same patient+doctor today.
+1. **View only** — receptionist cannot mutate queue state via API.
+2. **Appointment ≠ in queue** — booking (`scheduled`) is separate from arrival (`waiting` in `patient_queue`).
+3. **Check-in owned by OPD billing** — not receptionist.
+4. **Doctor owns timing** — doctor clicks **Next patient** when ready.
+5. **No duplicate queue logic** — `receptionist_service.py` orchestrates reads only.
 
 ---
 
@@ -44,19 +43,17 @@ The **Receptionist** module manages the **live OPD waiting line** after OPD Bill
 ### Receptionist does
 
 - Show today’s arrivals (scheduled, not checked in)
-- Check-in patients → `patient_queue`
 - View per-doctor queue boards
-- Show pending doctor **“next patient”** requests (doctor signals timing)
-- Call patient to doctor’s room
-- Mark no-show / rejoin
+- View dashboard metrics
 - View queue history (past dates, reporting)
 
 ### Receptionist does not
 
 - Register new patients (`POST /opd/patient/register`)
 - Collect payment / generate bills
+- Check-in patients (removed from receptionist API)
+- Call patient / mark no-show / rejoin (removed)
 - Start or complete consultations (doctor only)
-- Choose **when** doctor is ready (doctor clicks next)
 
 ### Depends on (other modules)
 

@@ -2,11 +2,13 @@
 from enum import Enum
 
 from fastapi import HTTPException
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from Models.doctor_patient_queue import QueueStatus
 from Models.doctor_queue_next_request import NextRequestStatus
-from Models.opd_billing import AppointmentStatus
+from Models.opd_billing import Appointment, AppointmentStatus
+from Models.patient import OpdVisit
 
 READY_FOR_DOCTOR = frozenset({QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED})
 NO_SHOW_ELIGIBLE = frozenset(
@@ -39,6 +41,13 @@ __all__ = [
     "is_appointment_status",
     "queue_status_from_query",
     "persist",
+    "is_visit_paid",
+    "is_appointment_active",
+    "apply_eligible_queue_filters",
+    "apply_receptionist_payment_filter",
+    "is_visit_unpaid_sql",
+    "is_visit_paid_sql",
+    "receptionist_payment_filter_from_query",
 ]
 
 
@@ -84,3 +93,72 @@ def persist(db: Session, *, commit: bool = True) -> None:
         db.commit()
     else:
         db.flush()
+
+
+def is_visit_paid(visit: OpdVisit) -> bool:
+    """Paid in full, or no payment required (zero total)."""
+    if visit.payment_status == "paid":
+        return True
+    if (visit.grand_total or 0) <= 0:
+        return True
+    return False
+
+
+def is_appointment_active(appointment: Appointment) -> bool:
+    return appointment_status_value(appointment.status) != AppointmentStatus.cancelled.value
+
+
+def apply_eligible_queue_filters(query):
+    """
+    Doctor queue views: paid visit + active appointment.
+    Query must already join Appointment and OpdVisit on appointment_id.
+    """
+    return query.filter(
+        OpdVisit.payment_status == "paid",
+        Appointment.status != AppointmentStatus.cancelled,
+    )
+
+
+def is_visit_paid_sql():
+    """SQL expression matching is_visit_paid() for OpdVisit rows."""
+    return or_(
+        OpdVisit.payment_status == "paid",
+        func.coalesce(OpdVisit.grand_total, 0) <= 0,
+    )
+
+
+def is_visit_unpaid_sql():
+    """SQL expression for unpaid visits (no visit row also counts as unpaid)."""
+    return or_(
+        OpdVisit.id.is_(None),
+        and_(
+            OpdVisit.payment_status.in_(["pending", "partial"]),
+            func.coalesce(OpdVisit.grand_total, 0) > 0,
+        ),
+    )
+
+
+def receptionist_payment_filter_from_query(value: str | None) -> str | None:
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized in {"paid", "unpaid"}:
+        return normalized
+    raise HTTPException(
+        status_code=422,
+        detail="Invalid payment_status filter. Use 'paid' or 'unpaid'.",
+    )
+
+
+def apply_receptionist_payment_filter(query, payment_filter: str | None):
+    """
+    Receptionist appointment views: optional paid/unpaid filter.
+    Query must already outerjoin OpdVisit on appointment_id.
+    """
+    if payment_filter is None:
+        return query
+    if payment_filter == "paid":
+        return query.filter(OpdVisit.id.isnot(None), is_visit_paid_sql())
+    if payment_filter == "unpaid":
+        return query.filter(is_visit_unpaid_sql())
+    return query
