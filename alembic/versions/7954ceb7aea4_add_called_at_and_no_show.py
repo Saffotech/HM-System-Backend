@@ -19,10 +19,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "patient_queue",
-        sa.Column("called_at", sa.DateTime(timezone=True), nullable=True),
-    )
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {c["name"] for c in inspector.get_columns("patient_queue")}
+    if "called_at" not in columns:
+        op.add_column(
+            "patient_queue",
+            sa.Column("called_at", sa.DateTime(timezone=True), nullable=True),
+        )
     op.execute(
         """
         DO $$ BEGIN

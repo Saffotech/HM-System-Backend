@@ -17,6 +17,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    inspector = sa.inspect(bind)
+    columns = {c["name"] for c in inspector.get_columns("patient_queue")}
+    fk_names = {fk["name"] for fk in inspector.get_foreign_keys("patient_queue")}
+
     op.execute(
         """
         DO $$ BEGIN
@@ -26,17 +31,19 @@ def upgrade() -> None:
         END $$;
         """
     )
-    op.add_column(
-        "patient_queue",
-        sa.Column("called_by", sa.Integer(), nullable=True),
-    )
-    op.create_foreign_key(
-        "fk_patient_queue_called_by_users",
-        "patient_queue",
-        "users",
-        ["called_by"],
-        ["id"],
-    )
+    if "called_by" not in columns:
+        op.add_column(
+            "patient_queue",
+            sa.Column("called_by", sa.Integer(), nullable=True),
+        )
+    if "fk_patient_queue_called_by_users" not in fk_names:
+        op.create_foreign_key(
+            "fk_patient_queue_called_by_users",
+            "patient_queue",
+            "users",
+            ["called_by"],
+            ["id"],
+        )
 
 
 def downgrade() -> None:

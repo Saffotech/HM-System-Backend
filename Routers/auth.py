@@ -13,6 +13,7 @@ from Services import audit_service, auth_service
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
+
 @router.post("/register", status_code=201)
 def register(
     data: UserCreate,

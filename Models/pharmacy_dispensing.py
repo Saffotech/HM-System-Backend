@@ -43,6 +43,7 @@ class DispensingItem(Base):
         nullable=False,
         index=True,
     )
+    medicine_name = Column(String(255), nullable=False, default="")
     quantity_dispensed = Column(Integer, nullable=False)
     created_at = Column(DateTime(timezone=True), default=_now)
 

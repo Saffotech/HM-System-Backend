@@ -269,10 +269,13 @@ def dispense_prescription(
     db.flush()
 
     for line in data.items:
+        item_id = int(line.prescription_item_id)
+        item = rx_items[item_id]
         db.add(
             DispensingItem(
                 dispensing_id=dispensing.id,
-                prescription_item_id=int(line.prescription_item_id),
+                prescription_item_id=item_id,
+                medicine_name=item.medicine_name,
                 quantity_dispensed=line.quantity_dispensed,
             )
         )
