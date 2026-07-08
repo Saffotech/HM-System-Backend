@@ -9,6 +9,8 @@ from Models.department import Department
 from Models.role import Role
 from Models.user import User
 from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
+from Services import audit_service
+from Services.role_policy import assert_can_assign_role, caller_role_name
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -112,16 +114,25 @@ def activate_staff(
     db: Session,
     user_id: int,
     is_active: bool,
-    actor_id: int,
+    actor: User,
 ) -> dict:
     if not is_active:
-        _block_self_action(actor_id, user_id, "deactivate")
+        _block_self_action(actor.id, user_id, "deactivate")
 
     user = _get_staff_or_404(db, user_id)
     user.is_active = is_active
     db.commit()
 
     status = "activated" if is_active else "deactivated"
+    audit_service.log_event(
+        db,
+        actor=actor,
+        action="staff.activate" if is_active else "staff.deactivate",
+        resource_type="user",
+        resource_id=user.id,
+        summary=f"{status.capitalize()} staff {user.email}",
+        details={"email": user.email, "is_active": is_active},
+    )
     return {"message": f"Staff {status} successfully", "user_id": user.id}
 
 
@@ -129,6 +140,7 @@ def update_staff(
     db: Session,
     user_id: int,
     data: StaffUpdateRequest,
+    actor: User,
 ) -> StaffDetailOut:
     user = _get_staff_or_404(db, user_id)
     updates = data.model_dump(exclude_unset=True)
@@ -136,11 +148,18 @@ def update_staff(
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    audit_details: dict = {"email": user.email}
+    if "role_id" in updates:
+        audit_details["old_role_id"] = user.role_id
+
     if "role_id" in updates:
         role = db.query(Role).filter(Role.id == updates["role_id"]).first()
         if not role:
             raise HTTPException(status_code=404, detail="Role not found")
+        assert_can_assign_role(caller_role_name(actor), role.name)
         user.role_id = updates["role_id"]
+        audit_details["new_role_id"] = updates["role_id"]
+        audit_details["new_role_name"] = role.name
 
     if "department_id" in updates:
         dept = db.query(Department).filter(Department.id == updates["department_id"]).first()
@@ -154,15 +173,35 @@ def update_staff(
 
     db.commit()
     db.refresh(user)
+
+    audit_service.log_event(
+        db,
+        actor=actor,
+        action="staff.update",
+        resource_type="user",
+        resource_id=user.id,
+        summary=f"Updated staff {user.email}",
+        details={**audit_details, "fields": list(updates.keys())},
+    )
     return _to_detail(user)
 
 
-def delete_staff(db: Session, user_id: int, actor_id: int) -> dict:
-    _block_self_action(actor_id, user_id, "delete")
+def delete_staff(db: Session, user_id: int, actor: User) -> dict:
+    _block_self_action(actor.id, user_id, "delete")
 
     user = _get_staff_or_404(db, user_id)
     user.deleted_at = datetime.now(IST)
     user.is_active = False
     db.commit()
+
+    audit_service.log_event(
+        db,
+        actor=actor,
+        action="staff.delete",
+        resource_type="user",
+        resource_id=user.id,
+        summary=f"Deleted staff {user.email}",
+        details={"email": user.email},
+    )
 
     return {"message": "Staff deleted successfully", "user_id": user.id}

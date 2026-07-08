@@ -120,7 +120,6 @@ def complete_consultation(
     """Complete an existing queue visit by ``queue_id`` and persist optional clinical fields."""
 
     result = complete_consultation_service(
-
         db=db,
         queue_id=queue_id,
         doctor_id=current_user.id,

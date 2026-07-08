@@ -1,5 +1,5 @@
 """OPD & billing API — routes only; logic in Services/."""
-from datetime import datetime
+from datetime import date, datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query, Response
@@ -354,9 +354,26 @@ def book_appointment(
 
 @router.get("/appointments")
 def list_appointments(
-    status: Optional[str] = None,
-    date_from: Optional[datetime] = None,
-    date_to: Optional[datetime] = None,
+    patient_id: Optional[int] = Query(None, ge=1),
+    doctor_id: Optional[int] = Query(None, ge=1),
+    department_id: Optional[int] = Query(None, ge=1),
+    status: Optional[str] = Query(None),
+    list_filter: Optional[str] = Query(
+        None,
+        description="OPD list tab: all | scheduled | pending | completed | cancelled",
+    ),
+    search: Optional[str] = Query(None, min_length=1),
+    appointment_date: Optional[date] = Query(
+        None, alias="date", description="Single calendar day (YYYY-MM-DD)"
+    ),
+    date_from: Optional[datetime] = Query(None),
+    date_to: Optional[datetime] = Query(None),
+    sort: Optional[str] = Query(
+        "scheduled_at", description="Sort field (scheduled_at)"
+    ),
+    order: Optional[str] = Query(
+        "desc", description="Sort order: asc | desc"
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -364,7 +381,20 @@ def list_appointments(
     _: bool = Depends(PermissionChecker("appointments:view")),
 ):
     return appointment_service.list_appointments(
-        db, status=status, date_from=date_from, date_to=date_to, page=page, limit=limit
+        db,
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        status=status,
+        list_filter=list_filter,
+        search=search,
+        appointment_date=appointment_date,
+        date_from=date_from,
+        date_to=date_to,
+        sort=sort,
+        order=order,
+        page=page,
+        limit=limit,
     )
 
 

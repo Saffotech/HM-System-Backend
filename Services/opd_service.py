@@ -758,6 +758,7 @@ def get_dashboard(db: Session) -> dict:
     pending_bills = db.query(OpdVisit).filter(OpdVisit.payment_status.in_(["pending", "partial"])).count()
 
     from Models.opd_billing import Appointment, Bed
+    from Services import bed_service
 
     appointments_today = db.query(Appointment).filter(
         Appointment.scheduled_at >= today,
@@ -765,6 +766,7 @@ def get_dashboard(db: Session) -> dict:
     ).count()
     beds_free = db.query(Bed).filter(Bed.status == "available").count()
     beds_total = db.query(Bed).count()
+    ward_bed_stats = bed_service.get_ward_bed_stats(db)
 
     recent = fetch_today_queue(db)
     return {
@@ -774,6 +776,7 @@ def get_dashboard(db: Session) -> dict:
         "appointments_today": appointments_today,
         "beds_free": beds_free,
         "beds_total": beds_total,
+        "ward_bed_stats": ward_bed_stats,
         "recent_visits": recent.visits[:5],
     }
 

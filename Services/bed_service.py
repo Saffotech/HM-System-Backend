@@ -2,6 +2,7 @@
 from typing import Optional
 
 from fastapi import HTTPException
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
@@ -26,6 +27,28 @@ def _bed_out(db: Session, bed: Bed) -> BedOut:
         status=bed.status,
         admitted_at=bed.admitted_at.isoformat() if bed.admitted_at else None,
     )
+
+
+def get_ward_bed_stats(db: Session) -> list[dict]:
+    """Per-ward occupied/available counts for dashboard (single grouped query)."""
+    rows = (
+        db.query(
+            Bed.ward_name,
+            func.sum(case((Bed.status == "occupied", 1), else_=0)).label("occupied"),
+            func.sum(case((Bed.status == "available", 1), else_=0)).label("available"),
+        )
+        .group_by(Bed.ward_name)
+        .order_by(Bed.ward_name.asc())
+        .all()
+    )
+    return [
+        {
+            "ward": ward_name,
+            "occupied": int(occupied or 0),
+            "available": int(available or 0),
+        }
+        for ward_name, occupied, available in rows
+    ]
 
 
 def list_beds(

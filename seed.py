@@ -44,6 +44,7 @@ PERMISSIONS_LIST = [
     "appointments:update",
     "reports:view",
     "settings:manage",
+    "audit:view",
     "nurse_vitals:view",
     "nurse_vitals:create",
     "nurse_vitals:update",
@@ -62,6 +63,16 @@ PERMISSIONS_LIST = [
     "emergency_alerts:update",
     "emergency_alerts:escalate",
     "receptionist:view_doctor_schedule",
+]
+
+# Hospital Admin panel — see Docs/backend/roles/admin.md
+ADMIN_PERMISSIONS = [
+    "users:list",
+    "users:create",
+    "users:activate",
+    "users:delete",
+    "roles:view",
+    "reports:view",
 ]
 
 ROLES_DATA = {
@@ -139,11 +150,11 @@ ROLES_DATA = {
     "lab_technician": {
         "description": "Laboratory technician",
         "permissions": [
-                "patients:view",
-                "lab:view",
-                "lab:create",
-                "lab:update",
-                "lab:upload_report"
+            "patients:view",
+            "lab:view",
+            "lab:create",
+            "lab:update",
+            "lab:upload_report",
         ],
     },
     "receptionist": {
@@ -202,6 +213,25 @@ def fresh_clear_roles(db) -> None:
     print("Fresh mode: cleared roles and permissions")
 
 
+def _target_permission_ids(
+    role_name: str,
+    role_data: dict,
+    perm_ids: dict[str, int],
+) -> set[int]:
+    raw = role_data["permissions"]
+    if raw == "__all__":
+        return set(perm_ids.values())
+
+    target: set[int] = set()
+    for perm_name in raw:
+        pid = perm_ids.get(perm_name)
+        if pid is None:
+            print(f"  WARNING: role '{role_name}' references unknown permission '{perm_name}' — skipped")
+            continue
+        target.add(pid)
+    return target
+
+
 def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
     role_ids: dict[str, int] = {}
     roles_added = 0
@@ -220,11 +250,24 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
 
         role_ids[role_name] = role.id
 
-        if role_data["permissions"] == "__all__":
-            target_perms = set(perm_ids.keys())
-        else:
-            target_perms = set(role_data["permissions"])
+        target_perm_ids = _target_permission_ids(role_name, role_data, perm_ids)
+        existing_links = (
+            db.query(RolePermission)
+            .filter(RolePermission.role_id == role.id)
+            .all()
+        )
+        existing_perm_ids = {link.permission_id for link in existing_links}
 
+        for link in existing_links:
+            if link.permission_id not in target_perm_ids:
+                db.delete(link)
+                links_removed += 1
+
+        for pid in target_perm_ids:
+            if pid in existing_perm_ids:
+                continue
+            db.add(RolePermission(role_id=role.id, permission_id=pid))
+            links_added += 1
         target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
 
         existing_links = (
@@ -245,8 +288,7 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
     db.commit()
     print(
         f"Roles synced: {len(role_ids)} total "
-        f"({roles_added} new, {links_added} permission links added, "
-        f"{links_removed} removed)"
+        f"({roles_added} new, {links_added} links added, {links_removed} links removed)"
     )
     return role_ids
 
@@ -270,6 +312,72 @@ def upsert_departments(db) -> dict[str, int]:
     return dept_ids
 
 
+def ensure_hospital_settings(db) -> None:
+    row = db.query(HospitalSettings).filter(HospitalSettings.id == SETTINGS_ROW_ID).first()
+    if row:
+        print("Hospital settings row already exists")
+        return
+
+    db.add(
+        HospitalSettings(
+            id=SETTINGS_ROW_ID,
+            name="",
+            default_registration_fee=0.0,
+            default_consultation_fee=0.0,
+            default_gst_percent=0.0,
+            currency="INR",
+            timezone="Asia/Kolkata",
+        )
+    )
+    db.commit()
+    print("Hospital settings default row created (id=1)")
+
+
+def ensure_super_admin_user(
+    db,
+    role_ids: dict[str, int],
+    *,
+    email: str,
+    password: str,
+    first_name: str = "Super",
+    last_name: str = "Admin",
+) -> None:
+    from hash import hash_password
+
+    if len(password) < 8:
+        print("ERROR: --super-admin-password must be at least 8 characters")
+        sys.exit(1)
+
+    super_role_id = role_ids.get("super_admin")
+    if not super_role_id:
+        print("WARNING: super_admin role not found — skipped super admin user")
+        return
+
+    user = db.query(User).filter(User.email == email).first()
+    if user:
+        user.first_name = first_name
+        user.last_name = last_name
+        user.role_id = super_role_id
+        user.password = hash_password(password)
+        user.is_active = True
+        user.deleted_at = None
+        db.commit()
+        print(f"Super admin user updated: {email}")
+        return
+
+    user = User(
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        password=hash_password(password),
+        role_id=super_role_id,
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    print(f"Super admin user created: {email}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed HMS reference data")
     parser.add_argument(
@@ -277,7 +385,33 @@ def main() -> None:
         action="store_true",
         help="Wipe roles/permissions and reseed (only when no users exist)",
     )
+    parser.add_argument(
+        "--super-admin-email",
+        metavar="EMAIL",
+        help="Create or update a super_admin user (use with --super-admin-password)",
+    )
+    parser.add_argument(
+        "--super-admin-password",
+        metavar="PASSWORD",
+        help="Password for super_admin user (min 8 characters)",
+    )
+    parser.add_argument(
+        "--super-admin-first-name",
+        default="Super",
+        help="First name for super_admin user (default: Super)",
+    )
+    parser.add_argument(
+        "--super-admin-last-name",
+        default="Admin",
+        help="Last name for super_admin user (default: Admin)",
+    )
     args = parser.parse_args()
+
+    if bool(args.super_admin_email) ^ bool(args.super_admin_password):
+        print(
+            "ERROR: pass both --super-admin-email and --super-admin-password, or neither."
+        )
+        sys.exit(1)
 
     db = SessionLocal()
     try:
@@ -288,6 +422,17 @@ def main() -> None:
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
         upsert_departments(db)
+        ensure_hospital_settings(db)
+
+        if args.super_admin_email and args.super_admin_password:
+            ensure_super_admin_user(
+                db,
+                role_ids,
+                email=args.super_admin_email.strip(),
+                password=args.super_admin_password,
+                first_name=args.super_admin_first_name.strip(),
+                last_name=args.super_admin_last_name.strip(),
+            )
 
         from Services.bed_service import seed_default_beds
 
@@ -297,7 +442,20 @@ def main() -> None:
         print("\nSeed completed successfully!")
         print("\nRole IDs:")
         for name, rid in role_ids.items():
-            print(f"  role_id={rid} -> {name}")
+            perm_count = (
+                len(PERMISSIONS_LIST)
+                if ROLES_DATA[name]["permissions"] == "__all__"
+                else len(ROLES_DATA[name]["permissions"])
+            )
+            print(f"  role_id={rid} -> {name} ({perm_count} permissions)")
+        print("\nAdmin panel role: admin")
+        print("Super Admin role: super_admin")
+        if not args.super_admin_email:
+            print(
+                "\nNo super admin user created. First-time setup:\n"
+                "  python seed.py --super-admin-email YOU@hospital.com "
+                "--super-admin-password 'YourPass123'"
+            )
         print("\nExisting staff must re-login after permission changes.")
     finally:
         db.close()

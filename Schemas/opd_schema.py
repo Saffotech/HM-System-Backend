@@ -245,6 +245,12 @@ class AppointmentOut(BaseModel):
     notes: Optional[str]
     appointment_type: str
     status: str
+    payment_status: Optional[str] = None
+    bill_id: Optional[int] = None
+    bill_number: Optional[str] = None
+    total_amount: float = 0.0
+    paid_amount: float = 0.0
+    balance_amount: float = 0.0
 
 
 class BedOut(BaseModel):

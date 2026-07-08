@@ -58,7 +58,7 @@ def activate_staff(
     _: bool = Depends(PermissionChecker("users:activate")),
 ):
     return admin_users_service.activate_staff(
-        db, user_id, data.is_active, current_user.id
+        db, user_id, data.is_active, current_user
     )
 
 
@@ -70,7 +70,7 @@ def update_staff(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:create")),
 ):
-    return admin_users_service.update_staff(db, user_id, data)
+    return admin_users_service.update_staff(db, user_id, data, current_user)
 
 
 @router.delete("/{user_id}", response_model=StaffActionResponse)
@@ -80,4 +80,4 @@ def delete_staff(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:delete")),
 ):
-    return admin_users_service.delete_staff(db, user_id, current_user.id)
+    return admin_users_service.delete_staff(db, user_id, current_user)

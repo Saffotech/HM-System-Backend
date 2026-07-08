@@ -4,7 +4,9 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from Models.department import Department
+from Models.user import User
 from Schemas.department_schema import DepartmentCreate, DepartmentOut, DepartmentUpdate
+from Services import audit_service
 
 
 def _to_out(dept: Department) -> DepartmentOut:
@@ -35,7 +37,7 @@ def get_department_by_id(db: Session, department_id: int) -> DepartmentOut:
     return _to_out(dept)
 
 
-def create_department(db: Session, data: DepartmentCreate) -> DepartmentOut:
+def create_department(db: Session, data: DepartmentCreate, actor: User) -> DepartmentOut:
     if data.code:
         existing = db.query(Department).filter(Department.code == data.code).first()
         if existing:
@@ -54,6 +56,15 @@ def create_department(db: Session, data: DepartmentCreate) -> DepartmentOut:
     db.add(dept)
     db.commit()
     db.refresh(dept)
+    audit_service.log_event(
+        db,
+        actor=actor,
+        action="department.create",
+        resource_type="department",
+        resource_id=dept.id,
+        summary=f"Created department {dept.name}",
+        details={"name": dept.name, "code": dept.code},
+    )
     return _to_out(dept)
 
 
@@ -61,6 +72,7 @@ def update_department(
     db: Session,
     department_id: int,
     data: DepartmentUpdate,
+    actor: User,
 ) -> DepartmentOut:
     dept = db.query(Department).filter(Department.id == department_id).first()
     if not dept:
@@ -95,4 +107,13 @@ def update_department(
 
     db.commit()
     db.refresh(dept)
+    audit_service.log_event(
+        db,
+        actor=actor,
+        action="department.update",
+        resource_type="department",
+        resource_id=dept.id,
+        summary=f"Updated department {dept.name}",
+        details=data.model_dump(exclude_unset=True),
+    )
     return _to_out(dept)

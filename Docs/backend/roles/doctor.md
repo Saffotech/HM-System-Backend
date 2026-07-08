@@ -4,6 +4,15 @@ Doctor sees patients, writes consultation, prescriptions, and lab orders.
 
 ---
 
+## Phases
+
+| Phase | Scope |
+|-------|--------|
+| **Phase 1** | Queue, consultation, prescriptions, lab orders — core APIs below |
+| **Phase 2** | Doctor profile, frontend polish, integration — end of file |
+
+---
+
 ## Permissions (already in seed)
 
 ```
@@ -124,3 +133,38 @@ Status flow: `pending` → `in_progress` → `completed`
 2. Consultation save
 3. Prescription
 4. Lab order
+
+---
+
+## Phase 2 — Planned
+
+Phase 1 sections above are **kept as-is**. Phase 2 adds profile data, UI, and polish.
+
+### Backend — Phase 2
+
+| # | Feature | Notes |
+|---|---------|--------|
+| 1 | **Doctor profile** | `qualification`, `registration_no`, `consultation_fee`, `specialization` — new table or user columns |
+| 2 | **Default consultation fee** | Optional link to `hospital_settings.default_consultation_fee` |
+| 3 | **Appointment ↔ queue** | Tighter link with receptionist check-in flow |
+| 4 | **Tests** | Consultation, prescription, lab order happy paths |
+| 5 | **Doc sync** | Mark which Phase 1 APIs are actually implemented vs planned |
+
+### Frontend — Phase 2
+
+| # | Screen | Notes |
+|---|--------|--------|
+| 1 | Doctor dashboard / queue | Today's patients |
+| 2 | Consultation form | Symptoms, diagnosis, treatment |
+| 3 | Prescription builder | Items list |
+| 4 | Lab order form | Priority, test selection |
+| 5 | Patient history view | Read-only prior visits |
+
+### Phase 2 — Suggested order
+
+```
+1. Confirm Phase 1 APIs in Postman
+2. Doctor UI shell + queue
+3. Consultation + prescription + lab screens
+4. Doctor profile fields (backend + UI)
+```
