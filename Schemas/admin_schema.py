@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class StaffListItem(BaseModel):
@@ -28,6 +28,10 @@ class StaffListResponse(BaseModel):
 class StaffDetailOut(StaffListItem):
     phone: Optional[str] = None
     login_count: int = 0
+    specialization: Optional[str] = None
+    medical_license_number: Optional[str] = None
+    consultation_fee: Optional[float] = None
+    is_profile_completed: Optional[bool] = None
 
 
 class StaffActivateRequest(BaseModel):
@@ -40,6 +44,9 @@ class StaffUpdateRequest(BaseModel):
     role_id: Optional[int] = None
     department_id: Optional[int] = None
     phone: Optional[str] = None
+    specialization: Optional[str] = None
+    medical_license_number: Optional[str] = None
+    consultation_fee: Optional[float] = Field(None, ge=0)
 
 
 class StaffActionResponse(BaseModel):

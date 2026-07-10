@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from database import Base, engine
 from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
@@ -7,8 +10,8 @@ from Models.hospital_settings import HospitalSettings  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
+from Models.doctor_profile import DoctorProfile  # noqa: F401
 from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
-from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
 from Models.nurse_emergency_alert import EmergencyAlert  # noqa: F401
 from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
@@ -16,6 +19,7 @@ from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 from Models.lab_result import LabResult,LabResultParameter  # noqa: F401
+from Models.notification import Notification  # noqa: F401
 from Routers import auth
 from Routers.admin_reports_router import router as admin_reports_router
 from Routers.admin_router import router as admin_router
@@ -27,6 +31,8 @@ from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_patient_history_router import router as patient_router
 from Routers.doctor_patient_queue_router import router as patient_queue_router
 from Routers.doctor_prescription_router import router as prescription_router
+from Routers.doctor_profile_router import router as doctor_profile_router
+from Routers.doctor_notification_router import router as doctor_notification_router
 from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router,
@@ -71,6 +77,8 @@ app.include_router(consultation_router)
 app.include_router(patient_queue_router)
 app.include_router(patient_router)
 app.include_router(prescription_router)
+app.include_router(doctor_profile_router)
+app.include_router(doctor_notification_router)
 app.include_router(lab_test_router)
 app.include_router(nurse_dashboard_router)
 app.include_router(nurse_vitals_router)
@@ -82,6 +90,14 @@ app.include_router(pharmacy_router)
 app.include_router(lab_router)
 app.include_router(super_admin_router)
 app.include_router(receptionist_router)
+
+# Serve uploaded files (doctor photos, lab reports, etc.)
+# DB stores paths like "uploads/doctor_image/uuid.jpg"
+# API exposes them as "/uploads/doctor_image/uuid.jpg"
+_uploads_dir = Path("uploads")
+_uploads_dir.mkdir(parents=True, exist_ok=True)
+(_uploads_dir / "doctor_image").mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 
 @app.get("/")

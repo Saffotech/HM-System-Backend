@@ -11,10 +11,13 @@ from fastapi.responses import FileResponse
 from sqlalchemy import case, exists, func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult, LabResultParameter, ParameterFlag
 from Models.user import User
 from Schemas.lab_schema import LabReportCreate, ReportSource
+from Services import opd_helpers as h
+from Services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +31,34 @@ EXTENSION_MEDIA_TYPES = {
     ".png": "image/png",
 }
 MAX_FILE_SIZE = 10 * 1024 * 1024
+
+
+def _lab_uploader_name(db: Session, user_id: int) -> str:
+    uploader = db.query(User).filter(User.id == user_id).first()
+    if not uploader:
+        return "Lab Technician"
+    return h.display_name(uploader.first_name, uploader.last_name)
+
+
+def _notify_doctor_lab_report(
+    db: Session,
+    order: LabTestOrder,
+    *,
+    current_user_id: int,
+) -> None:
+    create_notification(
+        db,
+        user_id=order.doctor_id,
+        title="Lab Report Ready",
+        message=f"{order.test_name} — {order.patient_name}",
+        notification_type=NotificationType.LAB_REPORT_READY,
+        source_module=SourceModule.LAB,
+        reference_type=ReferenceType.LAB_ORDER,
+        reference_id=order.id,
+        created_by=current_user_id,
+        created_by_name=_lab_uploader_name(db, current_user_id),
+    )
+
 
 def format_file_size(size_in_bytes: int) -> str:
     if not size_in_bytes:
@@ -446,6 +477,12 @@ def upload_report(
         db.rollback()
         raise
 
+    _notify_doctor_lab_report(
+        db,
+        order,
+        current_user_id=current_user_id,
+    )
+
     return {
         "message": "Report uploaded successfully",
         "report_id": report.id,
@@ -503,6 +540,7 @@ def upload_report_file(
         .first()
     )
 
+    report_created_here = False
     if not report:
         report = LabResult(
             lab_test_order_id=order.id,
@@ -512,7 +550,9 @@ def upload_report_file(
         )
         db.add(report)
         db.flush()
+        report_created_here = True
 
+    had_previous_file = bool(report.report_file)
     old_file_path = None
     if report.report_file:
         try:
@@ -560,6 +600,13 @@ def upload_report_file(
             old_file_path.unlink()
         except OSError:
             logger.warning("Could not remove old lab file %s", old_file_path)
+
+    if report_created_here:
+        _notify_doctor_lab_report(
+            db,
+            order,
+            current_user_id=current_user_id,
+        )
 
     return {
         "message": "Report generated successfully",

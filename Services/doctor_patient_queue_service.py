@@ -9,9 +9,12 @@ from zoneinfo import ZoneInfo
 from Models.doctor_patient_queue import PatientQueue, QueuePriority, QueueStatus
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit
+from Models.user import User
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Services import doctor_helpers as h
 from Services import opd_helpers
+from Services.notification_service import create_notification
 from Services.queue_helpers import (
     START_CONSULTATION_ELIGIBLE,
     apply_eligible_queue_filters,
@@ -26,6 +29,42 @@ _ACTIVE_QUEUE_STATUSES = (
     QueueStatus.WAITING,
     QueueStatus.VITALS_COMPLETED,
 )
+
+
+def _staff_name(db: Session, user_id: int | None) -> str:
+    if not user_id:
+        return "Staff"
+    user = db.query(User).filter(User.id == user_id).first()
+    return opd_helpers.display_name(user.first_name, user.last_name) if user else "Staff"
+
+
+def _notify_paid_appointment_in_queue(
+    db: Session,
+    appointment: Appointment,
+    queue: PatientQueue,
+    *,
+    created_by: int | None,
+) -> None:
+    patient_name = queue.patient_name or "Patient"
+    scheduled_label = appointment.scheduled_at.astimezone(IST).strftime("%I:%M %p")
+    create_notification(
+        db,
+        user_id=appointment.doctor_id,
+        title="Paid Appointment Confirmed",
+        message=(
+            f"Payment confirmed.\n"
+            f"Patient {patient_name}\n"
+            f"Scheduled: {scheduled_label}\n"
+            f"Token #{queue.token_number}\n"
+            f"Ready for consultation."
+        ),
+        notification_type=NotificationType.NEW_APPOINTMENT,
+        source_module=SourceModule.OPD_BILLING,
+        reference_type=ReferenceType.APPOINTMENT,
+        reference_id=appointment.id,
+        created_by=created_by,
+        created_by_name=_staff_name(db, created_by),
+    )
 
 
 def reactivate_queue_for_appointment_service(
@@ -301,6 +340,7 @@ def add_patient_to_queue_service(
     appointment.status = AppointmentStatus.waiting
     persist(db)
     db.refresh(queue)
+    _notify_paid_appointment_in_queue(db, appointment, queue, created_by=created_by)
     return queue
 
 

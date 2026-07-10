@@ -74,26 +74,3 @@ class TodayQueueResponse(BaseModel):
     page: int
     limit: int
     queue: list[TodayQueueItem]
-
-
-class DoctorScheduleItem(BaseModel):
-    doctor_id: int
-    doctor_name: str
-    department: Optional[str] = None
-    specialization: Optional[str] = None
-    schedule_date: date
-    shift_start: Optional[str] = None
-    shift_end: Optional[str] = None
-    total_slots: int = 0
-    booked_slots: int = 0
-    available_slots: int = 0
-    status: str
-
-
-class DoctorScheduleListResponse(BaseModel):
-    success: bool = True
-    total_records: int
-    total_pages: int
-    current_page: int
-    page_size: int
-    items: list[DoctorScheduleItem]

@@ -10,6 +10,8 @@ import sys
 
 from database import SessionLocal
 from Models.department import Department
+from Models.doctor_profile import DoctorProfile  # noqa: F401 — required for User.doctor_profile relationship
+from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -62,7 +64,12 @@ PERMISSIONS_LIST = [
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
-    "receptionist:view_doctor_schedule",
+    "doctor_profile:view",
+    "doctor_profile:update",
+    "doctor_profile:upload_image",
+    "doctor_profile:delete_image",
+    "notifications:view",
+    "notifications:update",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -94,6 +101,12 @@ ROLES_DATA = {
             "appointments:view",
             "appointments:create",
             "appointments:update",
+            "doctor_profile:view",
+            "doctor_profile:update",
+            "doctor_profile:upload_image",
+            "doctor_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "nurse": {
@@ -162,7 +175,6 @@ ROLES_DATA = {
         "permissions": [
             "patients:view",
             "opd:view",
-            "receptionist:view_doctor_schedule",
         ],
     },
 }
@@ -268,22 +280,6 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=pid))
             links_added += 1
-        target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
-
-        existing_links = (
-            db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
-        )
-        existing_perm_ids = {rp.permission_id for rp in existing_links}
-
-        for rp in existing_links:
-            if rp.permission_id not in target_perm_ids:
-                db.delete(rp)
-                links_removed += 1
-
-        for pid in target_perm_ids:
-            if pid not in existing_perm_ids:
-                db.add(RolePermission(role_id=role.id, permission_id=pid))
-                links_added += 1
 
     db.commit()
     print(

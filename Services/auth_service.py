@@ -6,6 +6,7 @@ from Models.user import User
 from Schemas.schemas import UserCreate
 from hash import hash_password
 from Services import audit_service
+from Services.doctor_profile_service import create_empty_doctor_profile
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
 
@@ -30,8 +31,23 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         password=hash_password(data.password),
         role_id=data.role_id,
         department_id=data.department_id,
+        phone=data.phone,
+        specialization=data.specialization,
+        gender=data.gender,
+        date_of_birth=data.date_of_birth,
+        emergency_contact_phone=data.emergency_contact_phone,
     )
     db.add(new_user)
+    db.flush()
+
+    if role.name == "doctor":
+        create_empty_doctor_profile(
+            db,
+            new_user.id,
+            medical_license_number=data.medical_license_number,
+            consultation_fee=data.consultation_fee,
+        )
+
     db.commit()
     db.refresh(new_user)
 

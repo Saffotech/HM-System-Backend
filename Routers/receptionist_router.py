@@ -10,7 +10,6 @@ from Models.user import User
 from Schemas.receptionist_schema import (
     DashboardResponse,
     DoctorQueueResponse,
-    DoctorScheduleListResponse,
     QueueHistoryResponse,
     ReceptionistAppointmentStatus,
     TodayQueueResponse,
@@ -162,36 +161,5 @@ def receptionist_queue_history(
             search=search,
             page=page,
             limit=limit,
-        ),
-    }
-
-
-@router.get(
-    "/doctors/schedule",
-    response_model=DoctorScheduleListResponse,
-    status_code=status.HTTP_200_OK,
-    summary="View doctor schedules and slot availability (read-only)",
-)
-def receptionist_doctor_schedule(
-    schedule_date: date = Query(..., alias="date", description="Schedule date (required)"),
-    doctor_id: Optional[int] = Query(None, ge=1),
-    department_id: Optional[int] = Query(None, ge=1),
-    search: Optional[str] = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("receptionist:view_doctor_schedule")),
-):
-    return {
-        "success": True,
-        **receptionist_service.get_doctor_schedules(
-            db,
-            schedule_date=schedule_date,
-            doctor_id=doctor_id,
-            department_id=department_id,
-            search=search,
-            page=page,
-            page_size=page_size,
         ),
     }

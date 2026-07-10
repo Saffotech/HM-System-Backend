@@ -138,6 +138,12 @@ def doctors_by_department(
                 "name": opd_service.display_name(d.first_name, d.last_name, prefix="Dr. "),
                 "department_id": d.department_id,
                 "department_name": dept.name,
+                "specialization": d.specialization,
+                "consultation_fee": (
+                    d.doctor_profile.consultation_fee
+                    if d.doctor_profile
+                    else None
+                ),
             }
             for d in doctors
         ],
@@ -406,7 +412,9 @@ def update_appointment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    return appointment_service.update_appointment(db, appointment_id, data)
+    return appointment_service.update_appointment(
+        db, appointment_id, data, acted_by=current_user.id
+    )
 
 
 @router.post("/appointments/{appointment_id}/cancel", response_model=AppointmentOut)
@@ -416,7 +424,9 @@ def cancel_appointment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    return appointment_service.cancel_appointment(db, appointment_id)
+    return appointment_service.cancel_appointment(
+        db, appointment_id, acted_by=current_user.id
+    )
 
 
 @router.get("/appointments/doctor/{doctor_id}/slots")
