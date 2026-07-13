@@ -119,21 +119,21 @@ def apply_eligible_queue_filters(query):
     )
 
 
-def is_visit_paid_sql():
+def is_visit_paid_sql(visit_model=OpdVisit):
     """SQL expression matching is_visit_paid() for OpdVisit rows."""
     return or_(
-        OpdVisit.payment_status == "paid",
-        func.coalesce(OpdVisit.grand_total, 0) <= 0,
+        visit_model.payment_status == "paid",
+        func.coalesce(visit_model.grand_total, 0) <= 0,
     )
 
 
-def is_visit_unpaid_sql():
+def is_visit_unpaid_sql(visit_model=OpdVisit):
     """SQL expression for unpaid visits (no visit row also counts as unpaid)."""
     return or_(
-        OpdVisit.id.is_(None),
+        visit_model.id.is_(None),
         and_(
-            OpdVisit.payment_status.in_(["pending", "partial"]),
-            func.coalesce(OpdVisit.grand_total, 0) > 0,
+            visit_model.payment_status.in_(["pending", "partial"]),
+            func.coalesce(visit_model.grand_total, 0) > 0,
         ),
     )
 
@@ -150,15 +150,23 @@ def receptionist_payment_filter_from_query(value: str | None) -> str | None:
     )
 
 
-def apply_receptionist_payment_filter(query, payment_filter: str | None):
+def apply_receptionist_payment_filter(
+    query,
+    payment_filter: str | None,
+    *,
+    visit_model=OpdVisit,
+):
     """
     Receptionist appointment views: optional paid/unpaid filter.
-    Query must already outerjoin OpdVisit on appointment_id.
+    Query must already outerjoin OpdVisit (or an alias) on appointment_id.
     """
     if payment_filter is None:
         return query
     if payment_filter == "paid":
-        return query.filter(OpdVisit.id.isnot(None), is_visit_paid_sql())
+        return query.filter(
+            visit_model.id.isnot(None),
+            is_visit_paid_sql(visit_model),
+        )
     if payment_filter == "unpaid":
-        return query.filter(is_visit_unpaid_sql())
+        return query.filter(is_visit_unpaid_sql(visit_model))
     return query

@@ -1,19 +1,21 @@
 """Receptionist module — view-only appointment boards (scheduled / completed)."""
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import String, and_, cast, func, or_
+from sqlalchemy import String, and_, case, cast, func, or_
 from sqlalchemy.orm import Session, aliased
 
 from Models.doctor_patient_queue import PatientQueue
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit, Patient
-from Models.role import Role
 from Models.user import User
-from Services import doctor_helpers as dh
 from Services import opd_helpers
-from Services.queue_helpers import apply_receptionist_payment_filter, status_value
+from Services.queue_helpers import (
+    apply_receptionist_payment_filter,
+    is_visit_paid_sql,
+    status_value,
+)
 
 IST = opd_helpers.IST
 
@@ -75,6 +77,7 @@ def _appointment_row_to_dict(
         "doctor_id": appointment.doctor_id,
         "status": _receptionist_display_status(appointment),
         "payment_status": _resolve_payment_status(visit),
+        "scheduled_at": appointment.scheduled_at,
         "checked_in_at": queue.queue_entered_at if queue else None,
         "called_at": queue.called_at if queue else None,
         "consultation_started_at": queue.consultation_started_at if queue else None,
@@ -98,6 +101,19 @@ def _latest_visit_subquery(db: Session):
     )
 
 
+def _latest_queue_subquery(db: Session):
+    """One queue row per appointment+date (highest id)."""
+    return (
+        db.query(
+            PatientQueue.appointment_id.label("appointment_id"),
+            PatientQueue.queue_date.label("queue_date"),
+            func.max(PatientQueue.id).label("queue_id"),
+        )
+        .group_by(PatientQueue.appointment_id, PatientQueue.queue_date)
+        .subquery()
+    )
+
+
 def _receptionist_appointments_query(
     db: Session,
     *,
@@ -105,28 +121,30 @@ def _receptionist_appointments_query(
     date_to: date | None = None,
     doctor_id: Optional[int] = None,
     payment_filter: Optional[str] = None,
-    include_doctor_join: bool = False,
 ):
-    """Appointments in range with latest visit and optional queue row for that day."""
+    """Appointments in range with latest visit and single queue row for that day."""
     date_to = date_to or date_from
     range_start = datetime.combine(date_from, time.min, tzinfo=IST)
     range_end = datetime.combine(date_to, time.max, tzinfo=IST)
     latest_visit = _latest_visit_subquery(db)
+    latest_queue = _latest_queue_subquery(db)
     Visit = aliased(OpdVisit)
+    Queue = aliased(PatientQueue)
 
     q = (
-        db.query(Appointment, Patient, Visit, PatientQueue, User)
+        db.query(Appointment, Patient, Visit, Queue, User)
         .join(Patient, Appointment.patient_id == Patient.id)
         .outerjoin(latest_visit, latest_visit.c.appointment_id == Appointment.id)
         .outerjoin(Visit, Visit.id == latest_visit.c.visit_id)
         .outerjoin(
-            PatientQueue,
+            latest_queue,
             and_(
-                PatientQueue.appointment_id == Appointment.id,
-                PatientQueue.queue_date
+                latest_queue.c.appointment_id == Appointment.id,
+                latest_queue.c.queue_date
                 == func.date(func.timezone("Asia/Kolkata", Appointment.scheduled_at)),
             ),
         )
+        .outerjoin(Queue, Queue.id == latest_queue.c.queue_id)
         .outerjoin(User, Appointment.doctor_id == User.id)
         .filter(
             Appointment.scheduled_at >= range_start,
@@ -136,8 +154,8 @@ def _receptionist_appointments_query(
     )
     if doctor_id is not None:
         q = q.filter(Appointment.doctor_id == doctor_id)
-    q = apply_receptionist_payment_filter(q, payment_filter)
-    return q
+    q = apply_receptionist_payment_filter(q, payment_filter, visit_model=Visit)
+    return q, Visit
 
 
 def _appointment_search_filter(term: str, *, include_doctor: bool = False):
@@ -161,21 +179,73 @@ def _appointment_search_filter(term: str, *, include_doctor: bool = False):
     return or_(*clauses)
 
 
-def _appointment_list_order():
-    return (Appointment.scheduled_at.asc(),)
+def _canonical_priority_order(Visit):
+    """
+    Canonical pick when collapsing duplicates:
+    1. Paid appointment
+    2. Linked visit
+    3. Latest scheduled_at
+    4. Highest appointment id
+    """
+    is_paid = case(
+        (and_(Visit.id.isnot(None), is_visit_paid_sql(Visit)), 1),
+        else_=0,
+    )
+    has_visit = case((Visit.id.isnot(None), 1), else_=0)
+    return (
+        is_paid.desc(),
+        has_visit.desc(),
+        Appointment.scheduled_at.desc(),
+        Appointment.id.desc(),
+    )
+
+
+def _count_distinct_appointments(query) -> int:
+    return (
+        query.order_by(None)
+        .with_entities(Appointment.id)
+        .distinct()
+        .count()
+    )
+
+
+def _canonical_rows(query, Visit, *, partition_by_patient: bool = True):
+    """
+    One appointment → one queue row.
+    Same-day boards also collapse to one canonical appointment per patient:
+    paid > linked visit > latest scheduled_at > highest id.
+    """
+    if partition_by_patient:
+        return (
+            query.order_by(
+                Appointment.patient_id.asc(),
+                *_canonical_priority_order(Visit),
+            )
+            .distinct(Appointment.patient_id)
+            .all()
+        )
+    return (
+        query.order_by(
+            Appointment.id.asc(),
+            *_canonical_priority_order(Visit),
+        )
+        .distinct(Appointment.id)
+        .all()
+    )
+
+
+def _paginate_rows(rows: list, page: int, limit: int, *, sort_key, reverse: bool = False):
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+    ordered = sorted(rows, key=sort_key, reverse=reverse)
+    total = len(ordered)
+    start = (page - 1) * limit
+    return ordered[start : start + limit], total, page, limit
 
 
 def _today_range() -> tuple[datetime, datetime]:
     start = opd_helpers.today_start_ist()
     return start, start + timedelta(days=1)
-
-
-def _paginate(query, page: int, limit: int):
-    page = max(page, 1)
-    limit = min(max(limit, 1), 100)
-    total = query.count()
-    rows = query.offset((page - 1) * limit).limit(limit).all()
-    return rows, total, page, limit
 
 
 def _doctor_name_filter(doctor_name: str):
@@ -203,19 +273,19 @@ def _todays_appointments_query(
 
 
 def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
-    all_appointments = _todays_appointments_query(db, doctor_id=doctor_id)
-    paid_appointments = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="paid")
-    unpaid_appointments = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="unpaid")
-    completed_appointments = _apply_receptionist_status_filter(
-        _todays_appointments_query(db, doctor_id=doctor_id),
-        "completed",
+    all_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
+    paid_q, _ = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="paid")
+    unpaid_q, _ = _todays_appointments_query(
+        db, doctor_id=doctor_id, payment_filter="unpaid"
     )
+    completed_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
+    completed_q = _apply_receptionist_status_filter(completed_q, "completed")
 
     return {
-        "total_patients": all_appointments.count(),
-        "completed": completed_appointments.count(),
-        "todays_paid_appointments": paid_appointments.count(),
-        "todays_unpaid_appointments": unpaid_appointments.count(),
+        "total_patients": _count_distinct_appointments(all_q),
+        "completed": _count_distinct_appointments(completed_q),
+        "todays_paid_appointments": _count_distinct_appointments(paid_q),
+        "todays_unpaid_appointments": _count_distinct_appointments(unpaid_q),
         "todays_cancelled": (
             db.query(Appointment)
             .filter(
@@ -251,9 +321,9 @@ def get_today_queue(
 ) -> dict:
     """Today's appointments (paid and unpaid); optional appointment status and payment filters."""
     today = _today()
-    q = _todays_appointments_query(
+    q, Visit = _todays_appointments_query(
         db, doctor_id=doctor_id, payment_filter=payment_filter
-    ).order_by(*_appointment_list_order())
+    )
     if doctor_name:
         q = q.filter(_doctor_name_filter(doctor_name))
     if patient_id is not None:
@@ -262,7 +332,13 @@ def get_today_queue(
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
 
-    rows, total, page, limit = _paginate(q, page, limit)
+    canonical = _canonical_rows(q, Visit)
+    rows, total, page, limit = _paginate_rows(
+        canonical,
+        page,
+        limit,
+        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+    )
     return {
         "queue_date": today,
         "total": total,
@@ -274,7 +350,9 @@ def get_today_queue(
                 patient,
                 visit,
                 queue,
-                doctor_name=opd_helpers.display_name(doc.first_name, doc.last_name, prefix="Dr. ")
+                doctor_name=opd_helpers.display_name(
+                    doc.first_name, doc.last_name, prefix="Dr. "
+                )
                 if doc
                 else None,
                 queue_date=today,
@@ -296,21 +374,27 @@ def get_doctor_queue(
     limit: Optional[int] = None,
 ) -> dict:
     target_date = queue_date or _today()
-    q = _receptionist_appointments_query(
+    q, Visit = _receptionist_appointments_query(
         db,
         date_from=target_date,
         date_to=target_date,
         doctor_id=doctor_id,
         payment_filter=payment_filter,
-    ).order_by(*_appointment_list_order())
+    )
     q = _apply_receptionist_status_filter(q, status)
     if search:
         q = q.filter(_appointment_search_filter(search))
 
+    canonical = _canonical_rows(q, Visit)
     if page is not None and limit is not None:
-        rows, total, page, limit = _paginate(q, page, limit)
+        rows, total, page, limit = _paginate_rows(
+            canonical,
+            page,
+            limit,
+            sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+        )
     else:
-        rows = q.all()
+        rows = sorted(canonical, key=lambda r: (r[0].scheduled_at, r[0].id))
         total, page, limit = len(rows), 1, len(rows) or 1
 
     return {
@@ -349,17 +433,22 @@ def _queue_history_query(
     if not date_to:
         date_to = date_from
 
-    q = _receptionist_appointments_query(
+    q, Visit = _receptionist_appointments_query(
         db,
         date_from=date_from,
         date_to=date_to,
         doctor_id=doctor_id,
         payment_filter=payment_filter,
-    ).order_by(Appointment.scheduled_at.desc())
+    )
     q = _apply_receptionist_status_filter(q, status)
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
-    return q, date_from, date_to
+    return q, Visit, date_from, date_to
+
+
+def _unique_appointment_rows(query, Visit):
+    """History: one row per appointment across the date range."""
+    return _canonical_rows(query, Visit, partition_by_patient=False)
 
 
 def get_queue_history(
@@ -375,7 +464,7 @@ def get_queue_history(
     page: int = 1,
     limit: int = 20,
 ) -> dict:
-    q, date_from, date_to = _queue_history_query(
+    q, Visit, date_from, date_to = _queue_history_query(
         db,
         single_date=single_date,
         date_from=date_from,
@@ -386,17 +475,30 @@ def get_queue_history(
         search=search,
     )
 
-    rows, total, page, limit = _paginate(q, page, limit)
+    unique_rows = _unique_appointment_rows(q, Visit)
+    rows, total, page, limit = _paginate_rows(
+        unique_rows,
+        page,
+        limit,
+        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+        reverse=True,
+    )
     history = [
         _appointment_row_to_dict(
             appointment,
             patient,
             visit,
             queue,
-            doctor_name=opd_helpers.display_name(doc.first_name, doc.last_name, prefix="Dr. ")
+            doctor_name=opd_helpers.display_name(
+                doc.first_name, doc.last_name, prefix="Dr. "
+            )
             if doc
             else None,
-            queue_date=queue.queue_date if queue else appointment.scheduled_at.astimezone(IST).date(),
+            queue_date=(
+                queue.queue_date
+                if queue
+                else appointment.scheduled_at.astimezone(IST).date()
+            ),
         )
         for appointment, patient, visit, queue, doc in rows
     ]

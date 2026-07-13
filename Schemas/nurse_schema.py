@@ -1,6 +1,7 @@
-from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
+
+from pydantic import BaseModel, model_validator
 
 
 # ==========================================================
@@ -9,7 +10,8 @@ from typing import Optional
 
 class VitalCreate(BaseModel):
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    patient_id: Optional[int] = None
 
     temperature: Optional[float] = None
     blood_pressure: Optional[str] = None
@@ -21,6 +23,12 @@ class VitalCreate(BaseModel):
     pain_level: Optional[int] = None
     observation_notes: Optional[str] = None
     mark_critical: Optional[bool] = False
+
+    @model_validator(mode="after")
+    def require_appointment_or_patient(self):
+        if not self.appointment_id and not self.patient_id:
+            raise ValueError("Provide appointment_id or patient_id")
+        return self
 
 # ==========================================================
 # UPDATE VITAL
@@ -56,7 +64,7 @@ class VitalResponse(BaseModel):
 
     id: int
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
@@ -86,13 +94,20 @@ class VitalResponse(BaseModel):
 
 class NursingNoteCreate(BaseModel):
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    patient_id: Optional[int] = None
 
     symptoms: Optional[str] = None
 
     treatment_response: Optional[str] = None
 
     additional_notes: Optional[str] = None
+
+    @model_validator(mode="after")
+    def require_appointment_or_patient(self):
+        if not self.appointment_id and not self.patient_id:
+            raise ValueError("Provide appointment_id or patient_id")
+        return self
 
 
 # ==========================================================
@@ -116,7 +131,7 @@ class NursingNoteResponse(BaseModel):
 
     id: int
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
@@ -140,7 +155,7 @@ class NursingNoteResponse(BaseModel):
 
 class SearchResponse(BaseModel):
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
 
     patient_id: int
 
@@ -154,9 +169,7 @@ class SearchResponse(BaseModel):
 
     status: str
 
-    scheduled_at: datetime
+    scheduled_at: Optional[datetime] = None
 
     class Config:
         from_attributes = True
-
-

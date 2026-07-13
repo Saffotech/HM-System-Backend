@@ -33,6 +33,7 @@ class QueueItemOut(BaseModel):
     doctor_id: int
     status: ReceptionistAppointmentStatus
     payment_status: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
     checked_in_at: Optional[datetime] = None
     called_at: Optional[datetime] = None
     consultation_started_at: Optional[datetime] = None

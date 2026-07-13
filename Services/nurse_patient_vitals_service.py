@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
-
+from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_patient_vitals import PatientVitals
@@ -133,6 +133,73 @@ def _vital_query(db: Session):
     )
 
 
+def _occupied_bed_for_patient(db: Session, patient_id: int) -> Bed | None:
+    return (
+        db.query(Bed)
+        .filter(
+            Bed.patient_id == patient_id,
+            Bed.status == "occupied",
+        )
+        .order_by(Bed.admitted_at.desc())
+        .first()
+    )
+
+
+def _resolve_patient_and_appointment(
+    db: Session,
+    *,
+    appointment_id: int | None,
+    patient_id: int | None,
+) -> tuple[Patient, Appointment | None]:
+    """
+    OPD: resolve via appointment_id.
+    IPD: allow patient_id when the patient occupies a bed; optionally
+    attach today's/latest non-cancelled appointment when one exists.
+    """
+    appointment: Appointment | None = None
+
+    if appointment_id is not None:
+        appointment = (
+            db.query(Appointment)
+            .filter(Appointment.id == appointment_id)
+            .first()
+        )
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        if patient_id is not None and patient_id != appointment.patient_id:
+            raise HTTPException(
+                status_code=400,
+                detail="patient_id does not match appointment",
+            )
+        patient = (
+            db.query(Patient)
+            .filter(Patient.id == appointment.patient_id)
+            .first()
+        )
+        if not patient:
+            raise HTTPException(status_code=404, detail="Patient not found")
+        return patient, appointment
+
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == patient_id, Patient.is_active == True)  # noqa: E712
+        .first()
+    )
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    if not _occupied_bed_for_patient(db, patient.id):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "patient_id is only allowed for patients currently occupying a bed, "
+                "or provide appointment_id"
+            ),
+        )
+
+    return patient, None
+
+
 # ==========================================================
 # CREATE VITAL
 # ==========================================================
@@ -143,40 +210,48 @@ def create_vital_service(
     nurse_id: int
 ):
 
-    appointment = (
-        db.query(Appointment)
-        .filter(
-            Appointment.id == vital_data.appointment_id
-        )
-        .first()
+    patient, appointment = _resolve_patient_and_appointment(
+        db,
+        appointment_id=vital_data.appointment_id,
+        patient_id=vital_data.patient_id,
     )
 
-    if not appointment:
-        raise HTTPException(
-            status_code=404,
-            detail="Appointment not found"
+    if appointment is not None:
+        existing_vital = (
+            db.query(PatientVitals)
+            .filter(PatientVitals.appointment_id == appointment.id)
+            .first()
         )
-
-    # Prevent duplicate vitals for same appointment
-    existing_vital = (
-        db.query(PatientVitals)
-        .filter(
-            PatientVitals.appointment_id == appointment.id
+        if existing_vital:
+            raise HTTPException(
+                status_code=400,
+                detail="Vitals already recorded for this appointment",
+            )
+    else:
+        # IPD without appointment: block duplicate open vital for same patient today
+        day_start = datetime.now(IST).replace(
+            hour=0, minute=0, second=0, microsecond=0
         )
-        .first()
-    )
-
-    if existing_vital:
-        raise HTTPException(
-            status_code=400,
-            detail="Vitals already recorded for this appointment"
+        existing_today = (
+            db.query(PatientVitals)
+            .filter(
+                PatientVitals.patient_id == patient.id,
+                PatientVitals.appointment_id.is_(None),
+                PatientVitals.recorded_at >= day_start,
+            )
+            .first()
         )
+        if existing_today:
+            raise HTTPException(
+                status_code=400,
+                detail="Vitals already recorded today for this IPD patient",
+            )
 
     try:
 
         vital = PatientVitals(
-            appointment_id=appointment.id,
-            patient_id=appointment.patient_id,
+            appointment_id=appointment.id if appointment else None,
+            patient_id=patient.id,
             recorded_by=nurse_id,
 
             status="recorded",
@@ -194,16 +269,14 @@ def create_vital_service(
 
         db.add(vital)
 
-        queue = (
-            db.query(PatientQueue)
-            .filter(
-                PatientQueue.appointment_id == appointment.id
+        if appointment is not None:
+            queue = (
+                db.query(PatientQueue)
+                .filter(PatientQueue.appointment_id == appointment.id)
+                .first()
             )
-            .first()
-        )
-
-        if queue and queue.status == "waiting":
-            queue.status = "vitals_completed"
+            if queue and queue.status == "waiting":
+                queue.status = "vitals_completed"
 
         db.commit()
         db.refresh(vital)

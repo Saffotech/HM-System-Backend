@@ -5,7 +5,6 @@ from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_prescriptions import Prescription
 from Models.opd_billing import Appointment, AppointmentStatus
 from Schemas.doctor_consultation_schema import SaveConsultationRequest
-from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Services import doctor_helpers as h
 from Services.doctor_appointment_service import get_appointment_by_id_service
 from Services.doctor_patient_queue_service import (
@@ -13,6 +12,10 @@ from Services.doctor_patient_queue_service import (
     finalize_consultation,
     find_queue_for_appointment_today,
     queue_to_summary,
+)
+from Services.doctor_prescription_service import (
+    create_prescription_for_appointment,
+    serialize_prescription,
 )
 from Services.queue_helpers import persist, status_value
 
@@ -34,7 +37,7 @@ def _serialize_lab_order(order: LabTestOrder) -> dict:
     }
 
 
-def _serialize_prescription(rx: Prescription) -> dict:
+def _serialize_prescription_row(rx: Prescription) -> dict:
     return {
         "id": rx.id,
         "appointment_id": rx.appointment_id,
@@ -62,7 +65,7 @@ def get_consultation_context_service(
     prescriptions = []
     if patient_id:
         prescriptions = [
-            _serialize_prescription(rx)
+            _serialize_prescription_row(rx)
             for rx in (
                 db.query(Prescription)
                 .filter(
@@ -103,49 +106,93 @@ def save_consultation_service(
     doctor_id: int,
 ) -> dict:
     """
-    Atomic save: ensure queue row, persist clinical data, mark completed everywhere.
-    Skips intermediate waiting/in_progress exposure to the client.
+    Atomic save in one transaction:
+    ensure queue row, persist clinical data (diagnosis), optional prescription,
+    mark appointment + queue completed.
     """
-    appointment = (
-        db.query(Appointment)
-        .filter(
-            Appointment.id == payload.appointment_id,
-            Appointment.doctor_id == doctor_id,
+    try:
+        appointment = (
+            db.query(Appointment)
+            .filter(
+                Appointment.id == payload.appointment_id,
+                Appointment.doctor_id == doctor_id,
+            )
+            .with_for_update()
+            .first()
         )
-        .with_for_update()
-        .first()
-    )
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
+        if not appointment:
+            raise HTTPException(status_code=404, detail="Appointment not found")
 
-    status = _appointment_status_value(appointment.status)
-    if status == AppointmentStatus.completed.value:
-        raise HTTPException(status_code=400, detail="Consultation already completed")
-    if status == AppointmentStatus.cancelled.value:
-        raise HTTPException(status_code=400, detail="Cannot save consultation for cancelled appointment")
+        status = _appointment_status_value(appointment.status)
+        if status == AppointmentStatus.completed.value:
+            raise HTTPException(status_code=400, detail="Consultation already completed")
+        if status == AppointmentStatus.cancelled.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot save consultation for cancelled appointment",
+            )
 
-    queue = ensure_queue_for_appointment(
-        db,
-        payload.appointment_id,
-        created_by=doctor_id,
-        commit=False,
-    )
+        queue = ensure_queue_for_appointment(
+            db,
+            payload.appointment_id,
+            created_by=doctor_id,
+            commit=False,
+        )
 
-    finalize_consultation(
-        db,
-        queue,
-        appointment,
-        clinical=payload.clinical,
-        updated_by=doctor_id,
-    )
-    persist(db)
-    db.refresh(queue)
-    db.refresh(appointment)
+        finalize_consultation(
+            db,
+            queue,
+            appointment,
+            clinical=payload.clinical,
+            updated_by=doctor_id,
+        )
 
-    appointment_dict = h.appointment_to_dict(db, appointment)
-    return {
-        "success": True,
-        "message": "Consultation saved",
-        "appointment": appointment_dict,
-        "queue": queue_to_summary(queue),
-    }
+        prescription_out = None
+        if payload.prescription is not None:
+            # Diagnosis on prescription falls back to clinical diagnosis when omitted empty
+            rx_diagnosis = payload.prescription.diagnosis or (
+                payload.clinical.diagnosis or ""
+            )
+            if not rx_diagnosis:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prescription.diagnosis is required when saving a prescription",
+                )
+            if not payload.prescription.items:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prescription.items must not be empty",
+                )
+            rx = create_prescription_for_appointment(
+                db,
+                appointment,
+                doctor_id=doctor_id,
+                diagnosis=rx_diagnosis,
+                items=payload.prescription.items,
+                notes=payload.prescription.notes,
+                require_completed=False,
+                commit=False,
+            )
+            # Ensure appointment diagnosis is set when only prescription carries it
+            if not appointment.diagnosis and rx_diagnosis:
+                appointment.diagnosis = rx_diagnosis
+            prescription_out = serialize_prescription(rx).model_dump(mode="json")
+
+        persist(db)
+        db.refresh(queue)
+        db.refresh(appointment)
+
+        appointment_dict = h.appointment_to_dict(db, appointment)
+        return {
+            "success": True,
+            "message": "Consultation saved",
+            "appointment": appointment_dict,
+            "queue": queue_to_summary(queue),
+            "prescription": prescription_out,
+        }
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception:
+        db.rollback()
+        raise
