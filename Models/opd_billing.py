@@ -18,6 +18,7 @@ class AppointmentStatus(str, enum.Enum):
     in_progress = "in_progress"
     completed = "completed"
     cancelled = "cancelled"
+    no_show = "no_show"
 
 
 class BillItem(Base):

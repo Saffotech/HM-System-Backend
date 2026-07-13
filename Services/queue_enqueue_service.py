@@ -7,37 +7,20 @@ from sqlalchemy.orm import Session
 from Models.doctor_patient_queue import PatientQueue
 from Models.opd_billing import Appointment
 from Models.patient import OpdVisit
-from Services import appointment_service
 from Services.queue_helpers import is_appointment_active, is_visit_paid
 
 
-def _ensure_visit_appointment(
+def _get_linked_appointment(
     db: Session,
     visit: OpdVisit,
-    *,
-    created_by: int | None,
-) -> Appointment:
-    if visit.appointment_id:
-        apt = db.query(Appointment).filter(Appointment.id == visit.appointment_id).first()
-        if not apt:
-            raise HTTPException(status_code=404, detail="Linked appointment not found")
-        return apt
+) -> Appointment | None:
+    """Return linked appointment only — never auto-create a walk-in."""
+    if not visit.appointment_id:
+        return None
 
-    if not visit.doctor_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Visit has no doctor; cannot create appointment for queue",
-        )
-
-    apt = appointment_service.create_walk_in_appointment(
-        db,
-        patient_id=visit.patient_id,
-        doctor_id=visit.doctor_id,
-        department_id=visit.department_id,
-        created_by=created_by or visit.registered_by or 0,
-    )
-    visit.appointment_id = apt.id
-    db.flush()
+    apt = db.query(Appointment).filter(Appointment.id == visit.appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Linked appointment not found")
     return apt
 
 
@@ -49,12 +32,15 @@ def enqueue_after_payment_if_eligible(
 ) -> PatientQueue | None:
     """
     After successful payment, create patient_queue row for the linked appointment.
-    Returns None if not yet paid; returns existing or new queue row when enqueued.
+    Returns None if not yet paid, or if no appointment is linked yet
+    (appointment must be booked explicitly via POST /opd/appointments).
     """
     if not is_visit_paid(visit):
         return None
 
-    appointment = _ensure_visit_appointment(db, visit, created_by=handled_by)
+    appointment = _get_linked_appointment(db, visit)
+    if appointment is None:
+        return None
     if not is_appointment_active(appointment):
         return None
 
