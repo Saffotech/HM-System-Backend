@@ -17,6 +17,23 @@ from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # n
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 from Models.lab_result import LabResult,LabResultParameter  # noqa: F401
 from Routers import auth
+from Routers.roles import router as roles_router
+from Models import user, role, department, opd_billing  # noqa: F401
+from Routers.opd import router as opd_router
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.doctor_lab_test_order import LabTestOrder
+from Models.doctor_patient_queue import PatientQueue  # noqa: F401
+from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
+from Models import user, role, department, opd_billing, patient
+from Models.nurse_patient_vitals import PatientVitals
+from Models.nurse_nursing_notes import NursingNote
+from Models.doctor_patient_queue import PatientQueue
+from Models.nurse_patient_vitals import PatientVitals
+from Models.nurse_nursing_notes import NursingNote
+from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_shift_handover import ShiftHandover,ShiftHandoverPatient
+from Models.nurse_emergency_alert import EmergencyAlert
+
 from Routers.admin_reports_router import router as admin_reports_router
 from Routers.admin_router import router as admin_router
 from Routers.admin_users_router import router as admin_users_router
@@ -60,6 +77,16 @@ app.add_middleware(
 )
 
 app.include_router(auth.router)
+app.include_router(roles_router)
+app.include_router(opd_router)
+
+@app.get("/")
+def home():
+    return {"message": "Hospital api running.."}
+
+from Routers.doctor_appointment_router import (
+    router as appointments_router
+)
 app.include_router(admin_router)
 app.include_router(admin_reports_router)
 app.include_router(admin_users_router)
