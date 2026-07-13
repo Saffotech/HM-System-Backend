@@ -7,6 +7,7 @@ from Schemas.schemas import UserCreate
 from hash import hash_password
 from Services import audit_service
 from Services.doctor_profile_service import create_empty_doctor_profile
+from Services.nurse_profile_service import create_empty_nurse_profile
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
 
@@ -47,6 +48,8 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
             medical_license_number=data.medical_license_number,
             consultation_fee=data.consultation_fee,
         )
+    elif role.name == "nurse":
+        create_empty_nurse_profile(db, new_user.id)
 
     db.commit()
     db.refresh(new_user)

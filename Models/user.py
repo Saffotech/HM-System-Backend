@@ -30,6 +30,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    nurse_profile = relationship(
+        "NurseProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     specialization = Column(String(120), nullable=True)
 

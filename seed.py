@@ -12,6 +12,7 @@ from database import SessionLocal
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — required for User.doctor_profile relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.nurse_profile import NurseProfile  # noqa: F401 — required for User.nurse_profile relationship
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -68,6 +69,10 @@ PERMISSIONS_LIST = [
     "doctor_profile:update",
     "doctor_profile:upload_image",
     "doctor_profile:delete_image",
+    "nurse_profile:view",
+    "nurse_profile:update",
+    "nurse_profile:upload_image",
+    "nurse_profile:delete_image",
     "notifications:view",
     "notifications:update",
 ]
@@ -132,6 +137,10 @@ ROLES_DATA = {
             "emergency_alerts:create",
             "emergency_alerts:update",
             "emergency_alerts:escalate",
+            "nurse_profile:view",
+            "nurse_profile:update",
+            "nurse_profile:upload_image",
+            "nurse_profile:delete_image",
         ],
     },
     "opd_billing": {
