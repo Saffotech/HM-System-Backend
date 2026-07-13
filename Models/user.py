@@ -41,6 +41,7 @@ class User(Base):
     address         = Column(String, nullable=True)
     city            = Column(String(100), nullable=True)
     state           = Column(String(100), nullable=True)
+    emergency_contact_name = Column(String(120), nullable=True)
     emergency_contact_phone = Column(String(20), nullable=True)
     profile_picture = Column(String, nullable=True)
 

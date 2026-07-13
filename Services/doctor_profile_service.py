@@ -13,7 +13,15 @@ from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_profile import DoctorProfile
 from Models.user import User
-from Schemas.doctor_profile_schema import DoctorProfileResponse, DoctorProfileUpdate
+from Schemas.doctor_profile_schema import (
+    AddressInfo,
+    DepartmentInfo,
+    DoctorProfileResponse,
+    DoctorProfileUpdate,
+    EmergencyContactInfo,
+    RoleInfo,
+    ShiftInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +107,29 @@ def compute_profile_completed(profile: DoctorProfile) -> bool:
     )
 
 
+def compute_profile_completion_percentage(user: User, profile: DoctorProfile) -> int:
+    languages = profile.languages if isinstance(profile.languages, list) else []
+    checks = [
+        bool(user.phone),
+        bool(user.phone_code),
+        bool(user.address),
+        bool(user.city),
+        bool(user.state),
+        user.date_of_birth is not None,
+        user.gender is not None,
+        bool(user.emergency_contact_name),
+        bool(user.emergency_contact_phone),
+        bool(profile.qualification),
+        profile.experience_years is not None,
+        bool(profile.bio),
+        bool(languages),
+        bool(profile.profile_image),
+    ]
+    if not checks:
+        return 0
+    return int(round(100 * sum(1 for ok in checks if ok) / len(checks)))
+
+
 def _get_doctor_user(db: Session, user_id: int) -> User:
     user = (
         db.query(User)
@@ -128,29 +159,62 @@ def _get_profile_or_404(user: User) -> DoctorProfile:
 
 def _to_response(user: User, profile: DoctorProfile) -> DoctorProfileResponse:
     languages = profile.languages if isinstance(profile.languages, list) else []
+
+    department = None
+    if user.department:
+        department = DepartmentInfo(id=user.department.id, name=user.department.name)
+
+    role = None
+    if user.role_obj:
+        role = RoleInfo(id=user.role_obj.id, name=user.role_obj.name)
+
+    shift = None
+    if profile.shift_name or profile.shift_start_time or profile.shift_end_time:
+        shift = ShiftInfo(
+            name=profile.shift_name,
+            start_time=profile.shift_start_time,
+            end_time=profile.shift_end_time,
+        )
+
     return DoctorProfileResponse(
         user_id=user.id,
         first_name=user.first_name,
         last_name=user.last_name,
         email=user.email,
         phone=user.phone,
-        address=user.address,
-        city=user.city,
-        state=user.state,
+        phone_code=user.phone_code,
+        address=AddressInfo(
+            line=user.address,
+            city=user.city,
+            state=user.state,
+        ),
         date_of_birth=user.date_of_birth,
         gender=user.gender,
-        emergency_contact_phone=user.emergency_contact_phone,
-        is_active=bool(user.is_active),
-        department=user.department.name if user.department else None,
+        emergency_contact=EmergencyContactInfo(
+            name=user.emergency_contact_name,
+            phone=user.emergency_contact_phone,
+        ),
+        department=department,
+        role=role,
         specialization=user.specialization,
         qualification=profile.qualification,
         medical_license_number=profile.medical_license_number,
+        employee_id=profile.employee_id,
         experience_years=profile.experience_years,
+        joining_date=profile.joining_date,
         consultation_fee=profile.consultation_fee,
         bio=profile.bio,
         languages=languages,
+        shift=shift,
         profile_image_url=to_profile_image_url(profile.profile_image),
         is_profile_completed=bool(profile.is_profile_completed),
+        profile_completion_percentage=compute_profile_completion_percentage(
+            user, profile
+        ),
+        is_active=bool(user.is_active),
+        last_login=user.last_login,
+        created_at=profile.created_at,
+        updated_at=profile.updated_at,
     )
 
 
@@ -175,12 +239,9 @@ def update_doctor_profile(
     profile_fields = ("qualification", "experience_years", "bio")
     user_fields = (
         "phone",
-        "address",
-        "city",
-        "state",
+        "phone_code",
         "date_of_birth",
         "gender",
-        "emergency_contact_phone",
     )
 
     for field in profile_fields:
@@ -194,12 +255,28 @@ def update_doctor_profile(
         if field in updates:
             setattr(user, field, updates[field])
 
+    if "address" in updates and updates["address"] is not None:
+        address = updates["address"]
+        if "line" in address:
+            user.address = address["line"]
+        if "city" in address:
+            user.city = address["city"]
+        if "state" in address:
+            user.state = address["state"]
+
+    if "emergency_contact" in updates and updates["emergency_contact"] is not None:
+        contact = updates["emergency_contact"]
+        if "name" in contact:
+            user.emergency_contact_name = contact["name"]
+        if "phone" in contact:
+            user.emergency_contact_phone = contact["phone"]
+
     profile.is_profile_completed = compute_profile_completed(profile)
     profile.updated_at = _now()
 
     db.commit()
-    db.refresh(user)
-    db.refresh(profile)
+    user = _get_doctor_user(db, current_user.id)
+    profile = _get_profile_or_404(user)
 
     logger.info("Doctor %s updated profile", current_user.id)
     return _to_response(user, profile)
