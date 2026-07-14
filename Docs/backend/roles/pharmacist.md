@@ -1,4 +1,8 @@
-# Pharmacist (`pharmacist`)
+Tables:
+
+Product
+Category
+Unit# Pharmacist (`pharmacist`)
 
 Pharmacist receives prescriptions from doctors and dispenses medicines.
 

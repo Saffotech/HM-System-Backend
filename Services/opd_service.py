@@ -28,7 +28,7 @@ from Schemas.opd_schema import (
     VisitSuccessResponse,
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
-from Services import appointment_service, opd_helpers as h
+from Services import opd_helpers as h
 from Services.queue_enqueue_service import enqueue_after_payment_if_eligible
 
 # Re-export helpers used by router
@@ -41,45 +41,38 @@ def _resolve_appointment_for_visit(
     db: Session,
     *,
     patient_id: int,
-    doctor_id: int,
-    department_id: int,
-    registered_by: int,
     appointment_id: Optional[int] = None,
-) -> Appointment:
-    if appointment_id:
-        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-        if not apt:
-            raise HTTPException(status_code=404, detail="Appointment not found")
-        if apt.patient_id != patient_id:
-            raise HTTPException(
-                status_code=400,
-                detail="Appointment does not belong to this patient",
-            )
-        if apt.status == AppointmentStatus.cancelled:
-            raise HTTPException(
-                status_code=400,
-                detail="Cannot bill a cancelled appointment",
-            )
-        return apt
+) -> Optional[Appointment]:
+    """Link an existing appointment only — never auto-create a walk-in."""
+    if not appointment_id:
+        return None
 
-    return appointment_service.create_walk_in_appointment(
-        db,
-        patient_id=patient_id,
-        doctor_id=doctor_id,
-        department_id=department_id,
-        created_by=registered_by,
-    )
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if apt.patient_id != patient_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Appointment does not belong to this patient",
+        )
+    if apt.status == AppointmentStatus.cancelled:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot bill a cancelled appointment",
+        )
+    return apt
 
 
 def _finalize_visit_appointment_and_queue(
     db: Session,
     visit: OpdVisit,
-    apt: Appointment,
+    apt: Optional[Appointment],
     *,
     handled_by: int,
 ) -> None:
-    visit.appointment_id = apt.id
-    db.flush()
+    if apt is not None:
+        visit.appointment_id = apt.id
+        db.flush()
     enqueue_after_payment_if_eligible(db, visit, handled_by=handled_by)
 
 
@@ -218,14 +211,8 @@ def register_new_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
-    apt = appointment_service.create_walk_in_appointment(
-        db,
-        patient_id=patient.id,
-        doctor_id=data.doctor_id,
-        department_id=data.department_id,
-        created_by=registered_by,
-    )
-    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
+    # Appointment is created only via explicit booking (POST /opd/appointments).
+    # Do not auto-create a walk-in here — that caused duplicate appointments.
     db.commit()
     db.refresh(visit)
 
@@ -236,8 +223,8 @@ def register_new_patient(
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
-        appointment_id=apt.id,
-        appointment_uid=apt.appointment_uid,
+        appointment_id=None,
+        appointment_uid=None,
     )
 
 
@@ -263,9 +250,6 @@ def create_visit_for_existing_patient(
     apt = _resolve_appointment_for_visit(
         db,
         patient_id=patient.id,
-        doctor_id=billing.doctor_id,
-        department_id=billing.department_id,
-        registered_by=registered_by,
         appointment_id=data.appointment_id,
     )
     _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
@@ -281,8 +265,8 @@ def create_visit_for_existing_patient(
         visit_id=visit.id,
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
-        appointment_id=apt.id,
-        appointment_uid=apt.appointment_uid,
+        appointment_id=apt.id if apt else None,
+        appointment_uid=apt.appointment_uid if apt else None,
     )
 
 def generate_bill(
@@ -306,14 +290,7 @@ def generate_bill(
         extra_items=extra or None,
         transaction_reference=data.transaction_reference,
     )
-    apt = appointment_service.create_walk_in_appointment(
-        db,
-        patient_id=patient.id,
-        doctor_id=data.doctor_id,
-        department_id=data.department_id,
-        created_by=registered_by,
-    )
-    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
+    # No auto walk-in — book appointment separately via POST /opd/appointments.
     db.commit()
     db.refresh(visit)
 
@@ -326,8 +303,8 @@ def generate_bill(
         visit_id=visit.id,
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
-        appointment_id=apt.id,
-        appointment_uid=apt.appointment_uid,
+        appointment_id=None,
+        appointment_uid=None,
     )
 
 

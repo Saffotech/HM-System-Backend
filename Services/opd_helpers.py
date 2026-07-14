@@ -53,10 +53,14 @@ def ensure_immediate_payment_valid(
     if pay_later or paid <= 0:
         return
     validate_payment_mode(payment_mode)
-    if payment_mode in ("card", "upi") and not transaction_reference:
+    ref = (transaction_reference or "").strip()
+    if payment_mode in ("card", "upi") and not ref:
         raise HTTPException(
             status_code=400,
-            detail="transaction_reference required for card and upi payments",
+            detail=(
+                "transaction_reference is required when payment_mode is 'card' or 'upi'. "
+                "Send the UPI UTR / Card RRN or approval code from the payment receipt."
+            ),
         )
 
 

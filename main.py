@@ -1,21 +1,25 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+
 from database import Base, engine
+
+# Models registered for create_all / metadata (import side-effect)
 from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
 from Models.hospital_settings import HospitalSettings  # noqa: F401
+from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
 from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
-from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
+from Models.lab_result import LabResult, LabResultParameter  # noqa: F401
 from Models.nurse_emergency_alert import EmergencyAlert  # noqa: F401
 from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
 from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
-from Models.lab_result import LabResult,LabResultParameter  # noqa: F401
+
 from Routers import auth
 from Routers.admin_reports_router import router as admin_reports_router
 from Routers.admin_router import router as admin_router
@@ -27,6 +31,8 @@ from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_patient_history_router import router as patient_router
 from Routers.doctor_patient_queue_router import router as patient_queue_router
 from Routers.doctor_prescription_router import router as prescription_router
+from Routers.lab_router import router as lab_router
+from Routers.nurse_dashboard_router import router as nurse_dashboard_router
 from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router,
@@ -34,13 +40,11 @@ from Routers.nurse_medication_administration_router import (
 from Routers.nurse_nursing_notes_router import router as nurse_notes_router
 from Routers.nurse_patient_vitals_router import router as nurse_vitals_router
 from Routers.nurse_shift_handover_router import router as nurse_shift_handover_router
-from Routers.nurse_dashboard_router import router as nurse_dashboard_router
 from Routers.opd import router as opd_router
 from Routers.pharmacy import router as pharmacy_router
-from Routers.roles import router as roles_router
-from Routers.lab_router import router as lab_router
-from Routers.super_admin_router import router as super_admin_router
 from Routers.receptionist_router import router as receptionist_router
+from Routers.roles import router as roles_router
+from Routers.super_admin_router import router as super_admin_router
 
 Base.metadata.create_all(bind=engine)
 
