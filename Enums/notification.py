@@ -18,6 +18,8 @@ class NotificationType(str, enum.Enum):
     PRESCRIPTION_UPDATED = "PRESCRIPTION_UPDATED"
     EMERGENCY_ALERT = "EMERGENCY_ALERT"
     ADMIN_UPDATE = "ADMIN_UPDATE"
+    HANDOVER_TAKEN_OVER = "HANDOVER_TAKEN_OVER"
+    SHIFT_UPDATED = "SHIFT_UPDATED"
 
 
 class SourceModule(str, enum.Enum):
@@ -39,3 +41,5 @@ class ReferenceType(str, enum.Enum):
     USER = "USER"
     SCHEDULE = "SCHEDULE"
     LEAVE = "LEAVE"
+    HANDOVER = "HANDOVER"
+    ALERT = "ALERT"

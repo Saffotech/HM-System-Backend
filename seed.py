@@ -61,6 +61,7 @@ PERMISSIONS_LIST = [
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
+    "nurse_handover:take_over",
     "emergency_alerts:view",
     "emergency_alerts:create",
     "emergency_alerts:update",
@@ -88,6 +89,10 @@ ADMIN_PERMISSIONS = [
 ]
 
 ROLES_DATA = {
+    "super_admin": {
+        "description": "Hospital owner / highest privilege",
+        "permissions": "__all__",
+    },
     "admin": {
         "description": "System administrator",
         "permissions": "__all__",
@@ -133,6 +138,7 @@ ROLES_DATA = {
             "nurse_handover:create",
             "nurse_handover:update",
             "nurse_handover:submit",
+            "nurse_handover:take_over",
             "emergency_alerts:view",
             "emergency_alerts:create",
             "emergency_alerts:update",
@@ -141,6 +147,8 @@ ROLES_DATA = {
             "nurse_profile:update",
             "nurse_profile:upload_image",
             "nurse_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "opd_billing": {

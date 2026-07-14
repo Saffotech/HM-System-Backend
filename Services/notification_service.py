@@ -25,6 +25,9 @@ DEFAULT_PRIORITY_BY_TYPE: dict[NotificationType, NotificationPriority] = {
     NotificationType.APPOINTMENT_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_RESCHEDULED: NotificationPriority.HIGH,
     NotificationType.EMERGENCY_ALERT: NotificationPriority.CRITICAL,
+    NotificationType.ADMIN_UPDATE: NotificationPriority.HIGH,
+    NotificationType.HANDOVER_TAKEN_OVER: NotificationPriority.HIGH,
+    NotificationType.SHIFT_UPDATED: NotificationPriority.HIGH,
 }
 
 
@@ -77,6 +80,34 @@ def create_notification(
     return notification
 
 
+def notify_staff_admin_update(
+    db: Session,
+    *,
+    staff_user_id: int,
+    title: str,
+    message: str,
+    admin_user: User,
+    reference_type: ReferenceType = ReferenceType.USER,
+    reference_id: Optional[int] = None,
+    priority: NotificationPriority = NotificationPriority.HIGH,
+    notification_type: NotificationType = NotificationType.ADMIN_UPDATE,
+) -> Notification:
+    admin_name = h.display_name(admin_user.first_name, admin_user.last_name)
+    return create_notification(
+        db,
+        user_id=staff_user_id,
+        title=title,
+        message=message,
+        notification_type=notification_type,
+        source_module=SourceModule.ADMIN,
+        reference_type=reference_type,
+        reference_id=reference_id if reference_id is not None else staff_user_id,
+        created_by=admin_user.id,
+        created_by_name=admin_name,
+        priority=priority,
+    )
+
+
 def notify_doctor_admin_update(
     db: Session,
     *,
@@ -88,19 +119,68 @@ def notify_doctor_admin_update(
     reference_id: Optional[int] = None,
     priority: NotificationPriority = NotificationPriority.HIGH,
 ) -> Notification:
-    admin_name = h.display_name(admin_user.first_name, admin_user.last_name)
-    return create_notification(
+    """Backward-compatible alias for doctor admin notifications."""
+    return notify_staff_admin_update(
         db,
-        user_id=doctor_user_id,
+        staff_user_id=doctor_user_id,
         title=title,
         message=message,
-        notification_type=NotificationType.ADMIN_UPDATE,
-        source_module=SourceModule.ADMIN,
+        admin_user=admin_user,
         reference_type=reference_type,
-        reference_id=reference_id if reference_id is not None else doctor_user_id,
-        created_by=admin_user.id,
-        created_by_name=admin_name,
+        reference_id=reference_id,
         priority=priority,
+        notification_type=NotificationType.ADMIN_UPDATE,
+    )
+
+
+def notify_nurse_emergency_alert(
+    db: Session,
+    *,
+    nurse_user_id: int,
+    title: str,
+    message: str,
+    alert_id: int,
+    created_by: Optional[int] = None,
+    created_by_name: Optional[str] = None,
+    priority: Optional[NotificationPriority] = None,
+) -> Notification:
+    return create_notification(
+        db,
+        user_id=nurse_user_id,
+        title=title,
+        message=message,
+        notification_type=NotificationType.EMERGENCY_ALERT,
+        source_module=SourceModule.NURSE,
+        reference_type=ReferenceType.ALERT,
+        reference_id=alert_id,
+        created_by=created_by,
+        created_by_name=created_by_name,
+        priority=priority,
+    )
+
+
+def notify_nurse_handover_taken_over(
+    db: Session,
+    *,
+    outgoing_nurse_id: int,
+    title: str,
+    message: str,
+    handover_id: int,
+    created_by: Optional[int] = None,
+    created_by_name: Optional[str] = None,
+) -> Notification:
+    return create_notification(
+        db,
+        user_id=outgoing_nurse_id,
+        title=title,
+        message=message,
+        notification_type=NotificationType.HANDOVER_TAKEN_OVER,
+        source_module=SourceModule.NURSE,
+        reference_type=ReferenceType.HANDOVER,
+        reference_id=handover_id,
+        created_by=created_by,
+        created_by_name=created_by_name,
+        priority=NotificationPriority.HIGH,
     )
 
 

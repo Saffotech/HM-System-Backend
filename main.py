@@ -34,6 +34,7 @@ from Routers.doctor_patient_queue_router import router as patient_queue_router
 from Routers.doctor_prescription_router import router as prescription_router
 from Routers.doctor_profile_router import router as doctor_profile_router
 from Routers.doctor_notification_router import router as doctor_notification_router
+from Routers.nurse_notification_router import router as nurse_notification_router
 from Routers.nurse_profile_router import router as nurse_profile_router
 from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
@@ -82,6 +83,7 @@ app.include_router(prescription_router)
 app.include_router(doctor_profile_router)
 app.include_router(doctor_notification_router)
 app.include_router(lab_test_router)
+app.include_router(nurse_notification_router)
 app.include_router(nurse_profile_router)
 app.include_router(nurse_dashboard_router)
 app.include_router(nurse_vitals_router)

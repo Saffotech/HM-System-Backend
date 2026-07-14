@@ -99,6 +99,18 @@ class ShiftHandoverUpdate(BaseModel):
 
 
 # ==========================================================
+# TAKE OVER
+# ==========================================================
+
+class ShiftHandoverTakeOver(BaseModel):
+
+    take_over_notes: Optional[str] = Field(
+        None,
+        max_length=2000
+    )
+
+
+# ==========================================================
 # PATIENT RESPONSE
 # ==========================================================
 
@@ -147,11 +159,19 @@ class ShiftHandoverListResponse(BaseModel):
 
     outgoing_nurse_id: int
 
+    outgoing_nurse: Optional[str] = None
+
+    replacement_nurse_id: Optional[int] = None
+
+    replacement_nurse: Optional[str] = None
+
     ward_name: str
 
     shift_date: date
 
     status: str
+
+    taken_over_at: Optional[datetime] = None
 
     submitted_at: Optional[datetime]
 
@@ -174,6 +194,12 @@ class ShiftHandoverDetailResponse(BaseModel):
 
     outgoing_nurse_id: int
 
+    outgoing_nurse: Optional[str] = None
+
+    replacement_nurse_id: Optional[int] = None
+
+    replacement_nurse: Optional[str] = None
+
     department_id: Optional[int]
 
     ward_name: str
@@ -189,6 +215,10 @@ class ShiftHandoverDetailResponse(BaseModel):
     status: str
 
     submitted_at: Optional[datetime]
+
+    taken_over_at: Optional[datetime] = None
+
+    take_over_notes: Optional[str] = None
 
     created_at: datetime
 

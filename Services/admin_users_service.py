@@ -5,19 +5,20 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
+from Enums.notification import NotificationType, ReferenceType
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile
+from Models.nurse_profile import NurseProfile
 from Models.role import Role
 from Models.user import User
-from Enums.notification import ReferenceType
 from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
 from Services import audit_service
-from Services.notification_service import notify_doctor_admin_update
+from Services.notification_service import notify_staff_admin_update
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
 IST = ZoneInfo("Asia/Kolkata")
 
-DOCTOR_FIELD_LABELS = {
+FIELD_LABELS = {
     "consultation_fee": "Consultation fee",
     "medical_license_number": "Medical license number",
     "specialization": "Specialization",
@@ -26,10 +27,17 @@ DOCTOR_FIELD_LABELS = {
     "last_name": "Last name",
     "phone": "Phone number",
     "role_id": "Role",
+    "shift_name": "Shift name",
+    "shift_start_time": "Shift start time",
+    "shift_end_time": "Shift end time",
 }
 
-# Only department reassignment warrants a doctor inbox notification.
-DOCTOR_NOTIFY_PROFILE_FIELDS = frozenset({"department_id"})
+# Department reassignment for doctor / nurse inbox.
+STAFF_NOTIFY_PROFILE_FIELDS = frozenset({"department_id"})
+SHIFT_FIELDS = frozenset(
+    {"shift_name", "shift_start_time", "shift_end_time"}
+)
+CLINICAL_NOTIFY_ROLES = frozenset({"doctor", "nurse"})
 
 
 def _role_name(user: User) -> str:
@@ -39,7 +47,6 @@ def _role_name(user: User) -> str:
 
 
 def _get_doctor_profile(user: User) -> Optional[DoctorProfile]:
-    """Return doctor_profiles row for doctors; None for other roles."""
     if _role_name(user) != "doctor":
         return None
     return user.doctor_profile
@@ -53,6 +60,38 @@ def _require_doctor_profile(user: User) -> DoctorProfile:
             detail="Doctor profile not found.",
         )
     return profile
+
+
+def _require_nurse_profile(db: Session, user: User) -> NurseProfile:
+    if _role_name(user) != "nurse":
+        raise HTTPException(
+            status_code=400,
+            detail="Nurse profile required",
+        )
+    profile = user.nurse_profile
+    if profile is None:
+        profile = NurseProfile(user_id=user.id)
+        db.add(profile)
+        db.flush()
+        user.nurse_profile = profile
+    return profile
+
+
+def _apply_shift_fields(db: Session, user: User, updates: dict) -> None:
+    """Write admin shift fields onto doctor_profiles or nurse_profiles."""
+    role = _role_name(user)
+    if role == "doctor":
+        profile = _require_doctor_profile(user)
+    elif role == "nurse":
+        profile = _require_nurse_profile(db, user)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Shift fields apply only to doctors and nurses",
+        )
+    for field in SHIFT_FIELDS:
+        if field in updates:
+            setattr(profile, field, updates[field])
 
 
 def _assert_unique_medical_license(
@@ -95,20 +134,39 @@ def _to_list_item(user: User) -> StaffListItem:
 
 def _to_detail(user: User) -> StaffDetailOut:
     base = _to_list_item(user)
-    profile = user.doctor_profile
+    doctor_profile = user.doctor_profile
+    nurse_profile = user.nurse_profile
     role_name = user.role_obj.name if user.role_obj else None
+
+    shift_profile = None
+    if role_name == "doctor" and doctor_profile:
+        shift_profile = doctor_profile
+    elif role_name == "nurse" and nurse_profile:
+        shift_profile = nurse_profile
+
     return StaffDetailOut(
         **base.model_dump(),
         phone=user.phone,
         login_count=user.login_count or 0,
         specialization=user.specialization,
-        medical_license_number=profile.medical_license_number if profile else None,
-        consultation_fee=profile.consultation_fee if profile else None,
-        is_profile_completed=(
-            bool(profile.is_profile_completed)
-            if profile and role_name == "doctor"
-            else None
+        medical_license_number=(
+            doctor_profile.medical_license_number if doctor_profile else None
         ),
+        consultation_fee=(
+            doctor_profile.consultation_fee if doctor_profile else None
+        ),
+        is_profile_completed=(
+            bool(doctor_profile.is_profile_completed)
+            if doctor_profile and role_name == "doctor"
+            else (
+                bool(nurse_profile.is_profile_completed)
+                if nurse_profile and role_name == "nurse"
+                else None
+            )
+        ),
+        shift_name=shift_profile.shift_name if shift_profile else None,
+        shift_start_time=shift_profile.shift_start_time if shift_profile else None,
+        shift_end_time=shift_profile.shift_end_time if shift_profile else None,
     )
 
 
@@ -119,6 +177,7 @@ def _base_query(db: Session):
             joinedload(User.role_obj),
             joinedload(User.department),
             joinedload(User.doctor_profile),
+            joinedload(User.nurse_profile),
         )
         .filter(User.deleted_at.is_(None))
     )
@@ -139,10 +198,10 @@ def _block_self_action(actor_id: int, target_id: int, action: str) -> None:
         )
 
 
-def _describe_staff_updates(db: Session, user: User, updates: dict) -> list[str]:
+def _describe_staff_updates(db: Session, updates: dict) -> list[str]:
     lines: list[str] = []
     for field, value in updates.items():
-        label = DOCTOR_FIELD_LABELS.get(field, field.replace("_", " ").title())
+        label = FIELD_LABELS.get(field, field.replace("_", " ").title())
         if field == "department_id" and value is not None:
             dept = db.query(Department).filter(Department.id == value).first()
             display = dept.name if dept else str(value)
@@ -158,40 +217,67 @@ def _describe_staff_updates(db: Session, user: User, updates: dict) -> list[str]
     return lines
 
 
-def _notify_doctor_if_admin_changed_profile(
+def _notify_staff_if_admin_changed_profile(
     db: Session,
     user: User,
     updates: dict,
     actor: User,
-    *,
-    title: str,
-    message_prefix: str,
 ) -> None:
-    if _role_name(user) != "doctor":
+    role = _role_name(user)
+    if role not in CLINICAL_NOTIFY_ROLES:
         return
     if actor.id == user.id:
         return
 
-    relevant_updates = {
+    dept_updates = {
         key: value
         for key, value in updates.items()
-        if key in DOCTOR_NOTIFY_PROFILE_FIELDS
+        if key in STAFF_NOTIFY_PROFILE_FIELDS
     }
-    if not relevant_updates:
+    if dept_updates:
+        lines = _describe_staff_updates(db, dept_updates)
+        if lines:
+            notify_staff_admin_update(
+                db,
+                staff_user_id=user.id,
+                title="Department reassigned",
+                message=(
+                    "Admin reassigned your department:\n"
+                    + "\n".join(f"• {line}" for line in lines)
+                ),
+                admin_user=actor,
+                reference_type=ReferenceType.USER,
+                reference_id=user.id,
+                notification_type=NotificationType.ADMIN_UPDATE,
+            )
+
+    if role not in ("doctor", "nurse"):
         return
 
-    lines = _describe_staff_updates(db, user, relevant_updates)
+    shift_updates = {
+        key: value
+        for key, value in updates.items()
+        if key in SHIFT_FIELDS
+    }
+    if not shift_updates:
+        return
+
+    lines = _describe_staff_updates(db, shift_updates)
     if not lines:
         return
 
-    notify_doctor_admin_update(
+    notify_staff_admin_update(
         db,
-        doctor_user_id=user.id,
-        title=title,
-        message=f"{message_prefix}\n" + "\n".join(f"• {line}" for line in lines),
+        staff_user_id=user.id,
+        title="Shift updated by admin",
+        message=(
+            "Admin changed your duty shift:\n"
+            + "\n".join(f"• {line}" for line in lines)
+        ),
         admin_user=actor,
-        reference_type=ReferenceType.USER,
+        reference_type=ReferenceType.SCHEDULE,
         reference_id=user.id,
+        notification_type=NotificationType.SHIFT_UPDATED,
     )
 
 
@@ -263,10 +349,14 @@ def activate_staff(
         details={"email": user.email, "is_active": is_active},
     )
 
-    if _role_name(user) == "doctor" and actor.id != user.id and not is_active:
-        notify_doctor_admin_update(
+    if (
+        _role_name(user) in CLINICAL_NOTIFY_ROLES
+        and actor.id != user.id
+        and not is_active
+    ):
+        notify_staff_admin_update(
             db,
-            doctor_user_id=user.id,
+            staff_user_id=user.id,
             title="Account disabled by admin",
             message=(
                 "Admin deactivated your hospital account.\n"
@@ -275,6 +365,7 @@ def activate_staff(
             admin_user=actor,
             reference_type=ReferenceType.USER,
             reference_id=user.id,
+            notification_type=NotificationType.ADMIN_UPDATE,
         )
 
     return {"message": f"Staff {status} successfully", "user_id": user.id}
@@ -311,14 +402,12 @@ def update_staff(
             raise HTTPException(status_code=404, detail="Department not found")
         user.department_id = updates["department_id"]
 
-    # Admin may correct employment identity (names) and contact details.
     for field in ("first_name", "last_name", "phone", "specialization"):
         if field in updates:
             setattr(user, field, updates[field])
 
     doctor_admin_fields = ("medical_license_number", "consultation_fee")
     if any(field in updates for field in doctor_admin_fields):
-        # Role may have just changed in this request — reload relationships.
         db.flush()
         user = _get_staff_or_404(db, user_id)
 
@@ -340,6 +429,11 @@ def update_staff(
         if "consultation_fee" in updates:
             profile.consultation_fee = updates["consultation_fee"]
 
+    if any(field in updates for field in SHIFT_FIELDS):
+        db.flush()
+        user = _get_staff_or_404(db, user_id)
+        _apply_shift_fields(db, user, updates)
+
     db.commit()
 
     audit_service.log_event(
@@ -353,14 +447,7 @@ def update_staff(
     )
 
     user = _get_staff_or_404(db, user_id)
-    _notify_doctor_if_admin_changed_profile(
-        db,
-        user,
-        updates,
-        actor,
-        title="Department reassigned",
-        message_prefix="Admin reassigned your department:",
-    )
+    _notify_staff_if_admin_changed_profile(db, user, updates, actor)
 
     return _to_detail(user)
 
@@ -383,15 +470,16 @@ def delete_staff(db: Session, user_id: int, actor: User) -> dict:
         details={"email": user.email},
     )
 
-    if _role_name(user) == "doctor" and actor.id != user.id:
-        notify_doctor_admin_update(
+    if _role_name(user) in CLINICAL_NOTIFY_ROLES and actor.id != user.id:
+        notify_staff_admin_update(
             db,
-            doctor_user_id=user.id,
+            staff_user_id=user.id,
             title="Account removed by admin",
             message="Admin deactivated and removed your hospital account.",
             admin_user=actor,
             reference_type=ReferenceType.USER,
             reference_id=user.id,
+            notification_type=NotificationType.ADMIN_UPDATE,
         )
 
     return {"message": "Staff deleted successfully", "user_id": user.id}

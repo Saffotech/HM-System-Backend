@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Path, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -8,11 +8,17 @@ from Schemas.nurse_dashboard_schema import (
     NurseDashboardQueueResponse,
     NurseDashboardBedPatientListResponse,
     NurseDashboardBedPatientSummaryResponse,
+    NurseDashboardStatsResponse,
+    NursePatientOverviewResponse,
 )
 from Services.nurse_dashboard_service import (
     get_nurse_today_queue_service,
     get_nurse_bed_patients_service,
     get_nurse_bed_patients_summary_service,
+    get_nurse_dashboard_stats_service,
+)
+from Services.nurse_patient_overview_service import (
+    get_nurse_patient_overview_service,
 )
 
 router = APIRouter(
@@ -40,6 +46,15 @@ def _bed_patient_filters(
         "patient_id": patient_id,
         "patient_uid": patient_uid,
     }
+
+
+@router.get("/dashboard/stats", response_model=NurseDashboardStatsResponse)
+def get_dashboard_stats(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    return get_nurse_dashboard_stats_service(db)
 
 
 @router.get("/queue/today", response_model=NurseDashboardQueueResponse)
@@ -102,4 +117,24 @@ def get_bed_assigned_patients(
         page=page,
         page_size=page_size,
         **filters,
+    )
+
+
+@router.get(
+    "/patients/{patient_id}",
+    response_model=NursePatientOverviewResponse,
+)
+def get_patient_overview(
+    patient_id: int = Path(..., ge=1),
+    notes_limit: int = Query(5, ge=1, le=50),
+    alerts_limit: int = Query(10, ge=1, le=50),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("patients:view")),
+):
+    return get_nurse_patient_overview_service(
+        db=db,
+        patient_id=patient_id,
+        notes_limit=notes_limit,
+        alerts_limit=alerts_limit,
     )
