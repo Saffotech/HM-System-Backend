@@ -218,10 +218,15 @@ def finalize_consultation(
     appointment.status = AppointmentStatus.completed
 
     consultation_minutes = 0.0
-    if queue.consultation_started_at:
+    started_at = queue.consultation_started_at
+    completed_at = queue.consultation_completed_at
+    if started_at is not None and started_at.tzinfo is None:
+        started_at = started_at.replace(tzinfo=IST)
+    if completed_at is not None and completed_at.tzinfo is None:
+        completed_at = completed_at.replace(tzinfo=IST)
+    if started_at and completed_at:
         consultation_minutes = round(
-            (queue.consultation_completed_at - queue.consultation_started_at).total_seconds()
-            / 60,
+            (completed_at - started_at).total_seconds() / 60,
             2,
         )
 
@@ -387,7 +392,12 @@ def start_consultation_service(db: Session, queue_id: int, doctor_id: int) -> di
     if appointment:
         appointment.status = AppointmentStatus.in_progress
 
-    waiting_minutes = round((now - queue.queue_entered_at).total_seconds() / 60, 2)
+    entered_at = queue.queue_entered_at
+    if entered_at is not None and entered_at.tzinfo is None:
+        entered_at = entered_at.replace(tzinfo=IST)
+    waiting_minutes = (
+        round((now - entered_at).total_seconds() / 60, 2) if entered_at else 0.0
+    )
     persist(db)
     db.refresh(queue)
     return {"queue": queue, "waiting_minutes": waiting_minutes}
