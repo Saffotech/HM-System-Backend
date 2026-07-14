@@ -11,16 +11,9 @@ from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit
 
 READY_FOR_DOCTOR = frozenset({QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED})
-NO_SHOW_ELIGIBLE = frozenset(
-    {QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED, QueueStatus.CALLED}
-)
-START_CONSULTATION_ELIGIBLE = frozenset(
-    {
-        QueueStatus.WAITING,
-        QueueStatus.VITALS_COMPLETED,
-        QueueStatus.CALLED,
-        QueueStatus.IN_PROGRESS,
-    }
+NO_SHOW_ELIGIBLE = frozenset({QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED})
+COMPLETE_CONSULTATION_ELIGIBLE = frozenset(
+    {QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED}
 )
 
 REQUEST_NEXT_APPOINTMENT_STATUSES = frozenset(
@@ -33,7 +26,7 @@ __all__ = [
     "QueueStatus",
     "READY_FOR_DOCTOR",
     "NO_SHOW_ELIGIBLE",
-    "START_CONSULTATION_ELIGIBLE",
+    "COMPLETE_CONSULTATION_ELIGIBLE",
     "REQUEST_NEXT_APPOINTMENT_STATUSES",
     "status_value",
     "appointment_status_value",

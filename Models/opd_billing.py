@@ -15,7 +15,6 @@ def _now():
 class AppointmentStatus(str, enum.Enum):
     scheduled = "scheduled"
     waiting = "waiting"
-    in_progress = "in_progress"
     completed = "completed"
     cancelled = "cancelled"
 

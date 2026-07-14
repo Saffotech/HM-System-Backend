@@ -16,8 +16,7 @@ from Services.queue_helpers import persist
 
 VALID_TRANSITIONS = {
     "scheduled": ["waiting", "completed", "cancelled"],
-    "waiting": ["in_progress", "completed", "cancelled"],
-    "in_progress": ["completed", "cancelled"],
+    "waiting": ["completed", "cancelled"],
     "completed": [],
     "cancelled": [],
 }
@@ -71,7 +70,7 @@ def complete_appointment_consultation_service(
 ) -> dict:
     """
     Queue-optional consultation save (Change 3):
-    scheduled/waiting/in_progress → completed with clinical fields.
+    scheduled/waiting → completed with clinical fields.
     Updates patient_queue only if a row already exists today.
     """
     appointment = (
@@ -194,7 +193,6 @@ def get_dashboard_stats_service(db: Session, doctor_id: int) -> dict:
     return {
         "today_appointments": base.count(),
         "patients_waiting": base.filter(Appointment.status == "waiting").count(),
-        "patients_in_progress": base.filter(Appointment.status == "in_progress").count(),
         "completed_consultations": base.filter(Appointment.status == "completed").count(),
         "cancelled_appointments": base.filter(Appointment.status == "cancelled").count(),
     }

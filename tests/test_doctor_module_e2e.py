@@ -65,7 +65,7 @@ from Services.doctor_patient_history_service import (
 )
 from Services.doctor_patient_queue_service import (
     get_today_queue_service,
-    start_consultation_service,
+    complete_consultation_service,
 )
 from Services.doctor_profile_service import get_doctor_profile, update_doctor_profile
 from Services.notification_service import (
@@ -225,19 +225,15 @@ def test_doctor_clinical_flow_end_to_end(db, doctor_seed):
     assert len(today_queue) == 1
     assert today_queue[0].id == queue.id
 
-    # 2) Start consultation
-    started = start_consultation_service(db, queue.id, doctor.id)
-    assert started["queue"].status == QueueStatus.IN_PROGRESS
-    db.refresh(appointment)
-    assert appointment.status == AppointmentStatus.in_progress
-
-    # 3) Consultation context
+    # 2) Consultation context (queue still waiting — no start step)
     ctx = get_consultation_context_service(db, appointment.id, doctor.id)
     assert ctx["success"] is True
     assert ctx["appointment"]["id"] == appointment.id
     assert ctx["queue"]["id"] == queue.id
+    db.refresh(queue)
+    assert queue.status == QueueStatus.WAITING
 
-    # 4) Atomic save: clinical + prescription → completes appointment + queue
+    # 3) Atomic save: clinical + prescription → completes appointment + queue directly
     saved = save_consultation_service(
         db,
         SaveConsultationRequest(
@@ -322,9 +318,9 @@ def test_doctor_clinical_flow_end_to_end(db, doctor_seed):
     assert order.status == LabTestStatus.CANCELLED
 
 
-def test_cannot_start_consultation_for_another_doctor(db, doctor_seed):
+def test_cannot_complete_consultation_for_another_doctor(db, doctor_seed):
     with pytest.raises(HTTPException) as exc:
-        start_consultation_service(
+        complete_consultation_service(
             db,
             doctor_seed["queue"].id,
             doctor_seed["other_doctor"].id,
@@ -335,9 +331,7 @@ def test_cannot_start_consultation_for_another_doctor(db, doctor_seed):
 def test_cannot_save_consultation_twice(db, doctor_seed):
     doctor = doctor_seed["doctor"]
     appointment = doctor_seed["appointment"]
-    queue = doctor_seed["queue"]
 
-    start_consultation_service(db, queue.id, doctor.id)
     save_consultation_service(
         db,
         SaveConsultationRequest(

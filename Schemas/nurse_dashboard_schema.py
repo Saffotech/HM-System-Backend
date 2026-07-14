@@ -82,7 +82,6 @@ class NurseDashboardQueueStats(BaseModel):
     total: int = 0
     waiting: int = 0
     vitals_completed: int = 0
-    in_progress: int = 0
     completed: int = 0
     cancelled: int = 0
     by_status: Dict[str, int] = Field(default_factory=dict)

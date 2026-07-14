@@ -459,7 +459,6 @@ def get_nurse_dashboard_stats_service(db: Session) -> dict:
             "total": sum(queue_by_status.values()),
             "waiting": queue_by_status.get("waiting", 0),
             "vitals_completed": queue_by_status.get("vitals_completed", 0),
-            "in_progress": queue_by_status.get("in_progress", 0),
             "completed": queue_by_status.get("completed", 0),
             "cancelled": queue_by_status.get("cancelled", 0),
             "by_status": queue_by_status,

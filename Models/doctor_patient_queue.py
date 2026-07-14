@@ -31,8 +31,6 @@ def _now():
 class QueueStatus(str, enum.Enum):
     WAITING = "waiting"
     VITALS_COMPLETED = "vitals_completed"
-    CALLED = "called"
-    IN_PROGRESS = "in_progress"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
@@ -173,14 +171,6 @@ class PatientQueue(Base):
         onupdate=_now
     )
 
-    called_at = Column(DateTime(timezone=True), nullable=True)
-
-    called_by = Column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-    )
-
     # Relationships
 
     appointment = relationship(
@@ -194,9 +184,4 @@ class PatientQueue(Base):
     doctor = relationship(
         "User",
         foreign_keys=[doctor_id],
-    )
-
-    called_by_user = relationship(
-        "User",
-        foreign_keys=[called_by],
     )  

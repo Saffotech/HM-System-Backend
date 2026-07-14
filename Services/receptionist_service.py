@@ -79,7 +79,6 @@ def _appointment_row_to_dict(
         "payment_status": _resolve_payment_status(visit),
         "scheduled_at": appointment.scheduled_at,
         "checked_in_at": queue.queue_entered_at if queue else None,
-        "called_at": queue.called_at if queue else None,
         "consultation_started_at": queue.consultation_started_at if queue else None,
         "consultation_completed_at": queue.consultation_completed_at if queue else None,
         "queue_date": queue.queue_date if queue else queue_date,

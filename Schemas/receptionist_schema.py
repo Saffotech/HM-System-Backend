@@ -35,7 +35,6 @@ class QueueItemOut(BaseModel):
     payment_status: Optional[str] = None
     scheduled_at: Optional[datetime] = None
     checked_in_at: Optional[datetime] = None
-    called_at: Optional[datetime] = None
     consultation_started_at: Optional[datetime] = None
     consultation_completed_at: Optional[datetime] = None
     queue_date: Optional[date] = None
