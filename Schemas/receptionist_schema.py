@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class ReceptionistAppointmentStatus(str, Enum):
     scheduled = "scheduled"
     completed = "completed"
+    cancelled = "cancelled"
 
 
 class ReceptionistDashboardData(BaseModel):

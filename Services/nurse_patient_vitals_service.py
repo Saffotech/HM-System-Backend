@@ -8,7 +8,6 @@ from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_patient_vitals import PatientVitals
-from Models.doctor_patient_queue import PatientQueue
 
 from Schemas.nurse_schema import (
     VitalCreate,
@@ -268,15 +267,6 @@ def create_vital_service(
         )
 
         db.add(vital)
-
-        if appointment is not None:
-            queue = (
-                db.query(PatientQueue)
-                .filter(PatientQueue.appointment_id == appointment.id)
-                .first()
-            )
-            if queue and queue.status == "waiting":
-                queue.status = "vitals_completed"
 
         db.commit()
         db.refresh(vital)

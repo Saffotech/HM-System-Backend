@@ -1,9 +1,10 @@
 from pathlib import Path
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from database import Base, engine
+from database import Base, engine, SessionLocal
 from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
 from Models.hospital_settings import HospitalSettings  # noqa: F401
@@ -53,7 +54,23 @@ from Routers.receptionist_router import router as receptionist_router
 
 Base.metadata.create_all(bind=engine)
 
-app = FastAPI(title="Hospital Management API")
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    db = SessionLocal()
+    try:
+        from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
+
+        mark_past_scheduled_as_no_show(db)
+    except Exception:
+        # Startup must not fail if migration/status rename is mid-rollout.
+        db.rollback()
+    finally:
+        db.close()
+    yield
+
+
+app = FastAPI(title="Hospital Management API", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,

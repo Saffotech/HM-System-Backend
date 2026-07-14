@@ -49,7 +49,7 @@ def receptionist_today_queue(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,
@@ -90,7 +90,7 @@ def receptionist_doctor_queue(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,
@@ -134,7 +134,7 @@ def receptionist_queue_history(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,

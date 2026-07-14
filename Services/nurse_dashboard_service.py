@@ -456,12 +456,19 @@ def get_nurse_dashboard_stats_service(db: Session) -> dict:
     return {
         "success": True,
         "queue_today": {
-            "total": sum(queue_by_status.values()),
-            "waiting": queue_by_status.get("waiting", 0),
-            "vitals_completed": queue_by_status.get("vitals_completed", 0),
+            "total": sum(
+                count
+                for status, count in queue_by_status.items()
+                if status != "no_show"
+            ),
+            "scheduled": queue_by_status.get("scheduled", 0),
             "completed": queue_by_status.get("completed", 0),
             "cancelled": queue_by_status.get("cancelled", 0),
-            "by_status": queue_by_status,
+            "by_status": {
+                status: count
+                for status, count in queue_by_status.items()
+                if status != "no_show"
+            },
         },
         "beds": {
             "occupied_count": occupied_beds,

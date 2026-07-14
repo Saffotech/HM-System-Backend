@@ -189,7 +189,7 @@ def doctor_seed(db):
         doctor_id=doctor.id,
         token_number=1,
         queue_date=date.today(),
-        status=QueueStatus.WAITING,
+        status=QueueStatus.SCHEDULED,
         priority=QueuePriority.NORMAL,
     )
     db.add(queue)
@@ -225,13 +225,13 @@ def test_doctor_clinical_flow_end_to_end(db, doctor_seed):
     assert len(today_queue) == 1
     assert today_queue[0].id == queue.id
 
-    # 2) Consultation context (queue still waiting — no start step)
+    # 2) Consultation context (queue stays scheduled until complete)
     ctx = get_consultation_context_service(db, appointment.id, doctor.id)
     assert ctx["success"] is True
     assert ctx["appointment"]["id"] == appointment.id
     assert ctx["queue"]["id"] == queue.id
     db.refresh(queue)
-    assert queue.status == QueueStatus.WAITING
+    assert queue.status == QueueStatus.SCHEDULED
 
     # 3) Atomic save: clinical + prescription → completes appointment + queue directly
     saved = save_consultation_service(
@@ -480,3 +480,27 @@ def test_lab_order_wrong_doctor_rejected(db, doctor_seed):
             doctor_seed["other_doctor"].id,
         )
     assert exc.value.status_code == 404
+
+
+def test_past_scheduled_appointment_becomes_no_show(db, doctor_seed):
+    from Services.doctor_appointment_service import (
+        get_today_appointments_service,
+        mark_past_scheduled_as_no_show,
+    )
+
+    appointment = doctor_seed["appointment"]
+    queue = doctor_seed["queue"]
+    appointment.scheduled_at = datetime(2026, 7, 13, 10, 0, tzinfo=IST)
+    db.commit()
+
+    marked = mark_past_scheduled_as_no_show(db, as_of=date(2026, 7, 14))
+    assert marked == 1
+
+    db.refresh(appointment)
+    db.refresh(queue)
+    assert appointment.status == AppointmentStatus.no_show
+    assert queue.status == QueueStatus.NO_SHOW
+
+    # Doctor frontend must not see no-show patients
+    today = get_today_appointments_service(db, doctor_seed["doctor"].id)
+    assert all(a["id"] != appointment.id for a in today)

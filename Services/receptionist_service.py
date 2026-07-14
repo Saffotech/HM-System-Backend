@@ -27,27 +27,29 @@ def receptionist_appointment_status_from_query(value: str | None) -> str | None:
     if value is None:
         return None
     normalized = value.strip().lower()
-    if normalized in {"scheduled", "completed"}:
+    if normalized in {"scheduled", "completed", "cancelled"}:
         return normalized
     raise HTTPException(
         status_code=422,
-        detail="Invalid status filter. Use 'scheduled' or 'completed'.",
+        detail="Invalid status filter. Use 'scheduled', 'completed', or 'cancelled'.",
     )
 
 
 def _receptionist_display_status(appointment: Appointment) -> str:
-    if status_value(appointment.status) == AppointmentStatus.completed.value:
-        return "completed"
-    return "scheduled"
+    return status_value(appointment.status)
 
 
 def _apply_receptionist_status_filter(query, status: str | None):
+    # Hide system no_show from receptionist frontend boards.
+    query = query.filter(Appointment.status != AppointmentStatus.no_show)
     if status is None:
         return query
     if status == "completed":
         return query.filter(Appointment.status == AppointmentStatus.completed)
+    if status == "cancelled":
+        return query.filter(Appointment.status == AppointmentStatus.cancelled)
     if status == "scheduled":
-        return query.filter(Appointment.status != AppointmentStatus.completed)
+        return query.filter(Appointment.status == AppointmentStatus.scheduled)
     return query
 
 
@@ -152,6 +154,7 @@ def _receptionist_appointments_query(
             Appointment.scheduled_at >= range_start,
             Appointment.scheduled_at <= range_end,
             Appointment.status != AppointmentStatus.cancelled,
+            Appointment.status != AppointmentStatus.no_show,
         )
     )
     if doctor_id is not None:
@@ -275,6 +278,9 @@ def _todays_appointments_query(
 
 
 def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
+    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
+
+    mark_past_scheduled_as_no_show(db)
     all_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
     paid_q, _ = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="paid")
     unpaid_q, _ = _todays_appointments_query(
@@ -322,6 +328,9 @@ def get_today_queue(
     limit: int = 20,
 ) -> dict:
     """Today's appointments (paid and unpaid); optional appointment status and payment filters."""
+    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
+
+    mark_past_scheduled_as_no_show(db)
     today = _today()
     q, Visit = _todays_appointments_query(
         db, doctor_id=doctor_id, payment_filter=payment_filter

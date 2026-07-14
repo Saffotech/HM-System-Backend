@@ -5,19 +5,24 @@ from fastapi import HTTPException
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
-from Models.doctor_patient_queue import QueueStatus
+from Models.doctor_patient_queue import PatientQueue, QueueStatus
 from Models.doctor_queue_next_request import NextRequestStatus
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit
 
-READY_FOR_DOCTOR = frozenset({QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED})
-NO_SHOW_ELIGIBLE = frozenset({QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED})
-COMPLETE_CONSULTATION_ELIGIBLE = frozenset(
-    {QueueStatus.WAITING, QueueStatus.VITALS_COMPLETED}
-)
+# Active queue rows ready for doctor work (not terminal).
+READY_FOR_DOCTOR = frozenset({QueueStatus.SCHEDULED})
+NO_SHOW_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
+COMPLETE_CONSULTATION_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
 
-REQUEST_NEXT_APPOINTMENT_STATUSES = frozenset(
-    {AppointmentStatus.scheduled, AppointmentStatus.waiting}
+REQUEST_NEXT_APPOINTMENT_STATUSES = frozenset({AppointmentStatus.scheduled})
+
+TERMINAL_APPOINTMENT_STATUSES = frozenset(
+    {
+        AppointmentStatus.completed,
+        AppointmentStatus.cancelled,
+        AppointmentStatus.no_show,
+    }
 )
 
 __all__ = [
@@ -28,6 +33,7 @@ __all__ = [
     "NO_SHOW_ELIGIBLE",
     "COMPLETE_CONSULTATION_ELIGIBLE",
     "REQUEST_NEXT_APPOINTMENT_STATUSES",
+    "TERMINAL_APPOINTMENT_STATUSES",
     "status_value",
     "appointment_status_value",
     "is_queue_status",
@@ -98,17 +104,18 @@ def is_visit_paid(visit: OpdVisit) -> bool:
 
 
 def is_appointment_active(appointment: Appointment) -> bool:
-    return appointment_status_value(appointment.status) != AppointmentStatus.cancelled.value
+    return not is_appointment_status(appointment.status, TERMINAL_APPOINTMENT_STATUSES)
 
 
 def apply_eligible_queue_filters(query):
     """
-    Doctor queue views: paid visit + active appointment.
+    Doctor queue views: paid visit + scheduled appointment/queue.
     Query must already join Appointment and OpdVisit on appointment_id.
     """
     return query.filter(
         OpdVisit.payment_status == "paid",
-        Appointment.status != AppointmentStatus.cancelled,
+        Appointment.status == AppointmentStatus.scheduled,
+        PatientQueue.status == QueueStatus.SCHEDULED,
     )
 
 

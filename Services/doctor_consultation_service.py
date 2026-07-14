@@ -57,6 +57,8 @@ def get_consultation_context_service(
     status = _appointment_status_value(appointment.get("status"))
     if status == AppointmentStatus.cancelled.value:
         raise HTTPException(status_code=400, detail="Cannot open consultation for cancelled appointment")
+    if status == AppointmentStatus.no_show.value:
+        raise HTTPException(status_code=400, detail="Cannot open consultation for no-show appointment")
 
     queue_row = find_queue_for_appointment_today(db, appointment_id)
     queue = queue_to_summary(queue_row) if queue_row else None
@@ -130,6 +132,11 @@ def save_consultation_service(
             raise HTTPException(
                 status_code=400,
                 detail="Cannot save consultation for cancelled appointment",
+            )
+        if status == AppointmentStatus.no_show.value:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot save consultation for no-show appointment",
             )
 
         queue = ensure_queue_for_appointment(

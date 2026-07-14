@@ -94,7 +94,7 @@ def request_next_patient_service(
     if appointment_id is None:
         queue = _next_ready_queue_row(db, doctor_id)
         if not queue:
-            raise HTTPException(status_code=404, detail="No waiting patients in queue")
+            raise HTTPException(status_code=404, detail="No scheduled patients in queue")
         appointment_id = queue.appointment_id
 
     apt = (
@@ -129,7 +129,7 @@ def request_next_patient_service(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Next patient must be waiting or vitals-completed "
+                "Next patient must be scheduled "
                 f"(current: {status_value(existing_queue.status)})"
             ),
         )
@@ -184,7 +184,7 @@ def fulfill_call_patient(
     *,
     require_pending_request: bool = True,
 ) -> PatientQueue:
-    """Fulfill doctor's next-patient request; queue stays waiting/vitals_completed."""
+    """Fulfill doctor's next-patient request; appointment/queue stay scheduled."""
     queue = (
         db.query(PatientQueue)
         .filter(PatientQueue.id == queue_id)
@@ -197,7 +197,7 @@ def fulfill_call_patient(
     if not is_queue_status(queue.status, READY_FOR_DOCTOR):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot call patient when queue status is {status_value(queue.status)}",
+            detail=f"Cannot fulfill next-patient request when queue status is {status_value(queue.status)}",
         )
 
     pending_req = (
@@ -225,10 +225,6 @@ def fulfill_call_patient(
     now = datetime.now(IST)
     queue.updated_by = handled_by
 
-    appointment = db.query(Appointment).filter(Appointment.id == queue.appointment_id).first()
-    if appointment and appointment_status_value(appointment.status) == AppointmentStatus.scheduled.value:
-        appointment.status = AppointmentStatus.waiting
-
     if pending_req:
         pending_req.status = NextRequestStatus.fulfilled.value
         pending_req.handled_at = now
@@ -248,6 +244,7 @@ def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -
     if appointment_status_value(apt.status) in (
         AppointmentStatus.completed.value,
         AppointmentStatus.cancelled.value,
+        AppointmentStatus.no_show.value,
     ):
         raise HTTPException(
             status_code=400,
@@ -262,10 +259,17 @@ def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -
         )
         .first()
     )
-    if existing_queue and status_value(existing_queue.status) == QueueStatus.COMPLETED.value:
+    if existing_queue and status_value(existing_queue.status) in (
+        QueueStatus.COMPLETED.value,
+        QueueStatus.NO_SHOW.value,
+        QueueStatus.CANCELLED.value,
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Patient consultation already completed",
+            detail=(
+                "Patient consultation already finished "
+                f"(queue status: {status_value(existing_queue.status)})"
+            ),
         )
 
     if existing_queue and is_queue_status(existing_queue.status, READY_FOR_DOCTOR):

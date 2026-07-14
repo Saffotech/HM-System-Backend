@@ -29,8 +29,7 @@ def _now():
 # ==========================================================
 
 class QueueStatus(str, enum.Enum):
-    WAITING = "waiting"
-    VITALS_COMPLETED = "vitals_completed"
+    SCHEDULED = "scheduled"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
@@ -123,7 +122,7 @@ class PatientQueue(Base):
             values_callable=lambda enum_cls: [item.value for item in enum_cls],
         ),
         nullable=False,
-        default=QueueStatus.WAITING,
+        default=QueueStatus.SCHEDULED,
     )
 
     priority = Column(

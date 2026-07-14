@@ -65,7 +65,7 @@ def get_today_queue(
     ),
     status: str | None = Query(
         None,
-        description="waiting, vitals_completed, completed, cancelled",
+        description="scheduled, completed, cancelled",
     ),
     doctor_id: int | None = Query(None, ge=1),
     patient_id: int | None = Query(None, ge=1),

@@ -230,7 +230,7 @@ def test_dashboard_stats_counts(db, nurse_seed):
             doctor_id=doctor.id,
             token_number=1,
             queue_date=date.today(),
-            status=QueueStatus.WAITING,
+            status=QueueStatus.SCHEDULED,
             priority=QueuePriority.NORMAL,
         )
     )
@@ -262,7 +262,7 @@ def test_dashboard_stats_counts(db, nurse_seed):
     stats = get_nurse_dashboard_stats_service(db)
 
     assert stats["success"] is True
-    assert stats["queue_today"]["waiting"] == 1
+    assert stats["queue_today"]["scheduled"] == 1
     assert stats["queue_today"]["total"] == 1
     assert stats["beds"]["occupied_count"] == 1
     assert stats["alerts"]["active_count"] == 1

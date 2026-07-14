@@ -1,14 +1,20 @@
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from Models.opd_billing import AppointmentStatus
+
+class DoctorAppointmentStatusUpdate(str, Enum):
+    """Statuses doctors may set via API — no_show is system/DB only."""
+
+    scheduled = "scheduled"
+    completed = "completed"
+    cancelled = "cancelled"
 
 
 class AppointmentStatusUpdate(BaseModel):
-    status: AppointmentStatus
+    status: DoctorAppointmentStatusUpdate
 
 
 class AppointmentConsultationUpdate(BaseModel):

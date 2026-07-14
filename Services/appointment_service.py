@@ -616,6 +616,21 @@ def update_appointment(
     for key, value in updates.items():
         setattr(apt, key, value)
 
+    if appointment_status_value(apt.status) == AppointmentStatus.cancelled.value:
+        from Models.doctor_patient_queue import PatientQueue, QueueStatus
+
+        (
+            db.query(PatientQueue)
+            .filter(
+                PatientQueue.appointment_id == apt.id,
+                PatientQueue.status == QueueStatus.SCHEDULED,
+            )
+            .update(
+                {"status": QueueStatus.CANCELLED},
+                synchronize_session=False,
+            )
+        )
+
     db.commit()
     db.refresh(apt)
 
