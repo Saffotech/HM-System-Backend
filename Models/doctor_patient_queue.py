@@ -117,15 +117,23 @@ class PatientQueue(Base):
     )
 
     status = Column(
-        Enum(QueueStatus),
+        Enum(
+            QueueStatus,
+            name="queuestatus",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
-        default=QueueStatus.WAITING
+        default=QueueStatus.WAITING,
     )
 
     priority = Column(
-        Enum(QueuePriority),
+        Enum(
+            QueuePriority,
+            name="queuepriority",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
-        default=QueuePriority.NORMAL
+        default=QueuePriority.NORMAL,
     )
 
     is_current = Column(

@@ -4,11 +4,14 @@ from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import String, and_, case, cast, func, or_
-from sqlalchemy.orm import Session, aliased
+from sqlalchemy.orm import Session, aliased, joinedload
 
+from Models.department import Department
 from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_profile import DoctorProfile
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit, Patient
+from Models.role import Role
 from Models.user import User
 from Services import opd_helpers
 from Services.queue_helpers import (
@@ -508,4 +511,154 @@ def get_queue_history(
         "page": page,
         "limit": limit,
         "history": history,
+    }
+
+
+def _appointment_counts_by_doctor(db: Session, target_date: date) -> dict[int, dict]:
+    """Per-doctor appointment totals for the given IST calendar date."""
+    range_start = datetime.combine(target_date, time.min, tzinfo=IST)
+    range_end = datetime.combine(target_date, time.max, tzinfo=IST)
+    rows = (
+        db.query(
+            Appointment.doctor_id,
+            func.count(Appointment.id).label("appointments_count"),
+            func.sum(
+                case(
+                    (Appointment.status == AppointmentStatus.scheduled, 1),
+                    else_=0,
+                )
+            ).label("scheduled_count"),
+            func.sum(
+                case(
+                    (Appointment.status == AppointmentStatus.completed, 1),
+                    else_=0,
+                )
+            ).label("completed_count"),
+            func.sum(
+                case(
+                    (Appointment.status == AppointmentStatus.cancelled, 1),
+                    else_=0,
+                )
+            ).label("cancelled_count"),
+        )
+        .filter(
+            Appointment.scheduled_at >= range_start,
+            Appointment.scheduled_at <= range_end,
+        )
+        .group_by(Appointment.doctor_id)
+        .all()
+    )
+    return {
+        row.doctor_id: {
+            "appointments_count": int(row.appointments_count or 0),
+            "scheduled_count": int(row.scheduled_count or 0),
+            "completed_count": int(row.completed_count or 0),
+            "cancelled_count": int(row.cancelled_count or 0),
+        }
+        for row in rows
+    }
+
+
+def get_doctors_schedule(
+    db: Session,
+    *,
+    schedule_date: date,
+    doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    search: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    """
+    View-only doctor board for a date (IST).
+
+    Returns active doctors with shift fields from doctor_profiles and that day's
+    appointment counts. Filters: doctor_id, department_id, search, page, page_size.
+    """
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+    search_term = search.strip() if search and search.strip() else None
+
+    q = (
+        db.query(User)
+        .options(joinedload(User.doctor_profile), joinedload(User.department))
+        .join(Role, User.role_id == Role.id)
+        .outerjoin(Department, User.department_id == Department.id)
+        .filter(
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            Role.name == opd_helpers.DOCTOR_ROLE,
+        )
+    )
+    if doctor_id is not None:
+        q = q.filter(User.id == doctor_id)
+    if department_id is not None:
+        q = q.filter(User.department_id == department_id)
+    if search_term:
+        pattern = f"%{search_term}%"
+        q = q.filter(
+            or_(
+                User.first_name.ilike(pattern),
+                User.last_name.ilike(pattern),
+                User.specialization.ilike(pattern),
+                Department.name.ilike(pattern),
+                cast(User.id, String).ilike(pattern),
+                func.concat(User.first_name, " ", func.coalesce(User.last_name, "")).ilike(
+                    pattern
+                ),
+            )
+        )
+
+    total = (
+        q.order_by(None)
+        .with_entities(User.id)
+        .distinct()
+        .count()
+    )
+    doctors = (
+        q.order_by(User.first_name.asc(), User.last_name.asc(), User.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    counts = _appointment_counts_by_doctor(db, schedule_date)
+    empty_stats = {
+        "appointments_count": 0,
+        "scheduled_count": 0,
+        "completed_count": 0,
+        "cancelled_count": 0,
+    }
+
+    items = []
+    for doctor in doctors:
+        profile: DoctorProfile | None = doctor.doctor_profile
+        dept: Department | None = doctor.department
+        stats = counts.get(doctor.id, empty_stats)
+        items.append(
+            {
+                "doctor_id": doctor.id,
+                "doctor_name": opd_helpers.display_name(
+                    doctor.first_name, doctor.last_name, prefix="Dr. "
+                ),
+                "department_id": doctor.department_id,
+                "department_name": dept.name if dept else None,
+                "specialization": doctor.specialization,
+                "shift_name": profile.shift_name if profile else None,
+                "shift_start_time": profile.shift_start_time if profile else None,
+                "shift_end_time": profile.shift_end_time if profile else None,
+                "appointments_count": stats["appointments_count"],
+                "scheduled_count": stats["scheduled_count"],
+                "completed_count": stats["completed_count"],
+                "cancelled_count": stats["cancelled_count"],
+                # Active doctors are listable; shift fields indicate configured hours.
+                "is_available": True,
+            }
+        )
+
+    return {
+        "date": schedule_date,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "doctors": items,
     }

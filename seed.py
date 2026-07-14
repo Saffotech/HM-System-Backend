@@ -76,6 +76,7 @@ PERMISSIONS_LIST = [
     "nurse_profile:delete_image",
     "notifications:view",
     "notifications:update",
+    "receptionist:view_doctor_schedule",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -192,6 +193,7 @@ ROLES_DATA = {
         "permissions": [
             "patients:view",
             "opd:view",
+            "receptionist:view_doctor_schedule",
         ],
     },
 }
