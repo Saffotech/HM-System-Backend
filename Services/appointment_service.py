@@ -12,7 +12,9 @@ from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
-from Services.queue_helpers import appointment_status_value
+from Services.queue_helpers import appointment_status_value, is_visit_paid
+from Services.notification_service import create_notification
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 
 LIST_FILTERS = frozenset({"all", "scheduled", "pending", "completed", "cancelled"})
 LIST_SORT_FIELDS = frozenset({"scheduled_at"})
@@ -22,6 +24,36 @@ _OPD_LIST_STATUSES = (
     AppointmentStatus.completed,
     AppointmentStatus.cancelled,
 )
+
+
+def _actor_name(db: Session, user_id: Optional[int]) -> str:
+    if not user_id:
+        return "Staff"
+    actor = db.query(User).filter(User.id == user_id).first()
+    return h.display_name(actor.first_name, actor.last_name) if actor else "Staff"
+
+
+def _patient_name_for_appointment(db: Session, apt: Appointment) -> str:
+    patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    return h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+
+
+def _appointment_time_label(scheduled_at: datetime) -> str:
+    return scheduled_at.astimezone(h.IST).strftime("%I:%M %p")
+
+
+def _is_cancelled_status(status) -> bool:
+    return status == AppointmentStatus.cancelled or status == AppointmentStatus.cancelled.value
+
+
+def _appointment_has_completed_payment(db: Session, appointment_id: int) -> bool:
+    visit = (
+        db.query(OpdVisit)
+        .filter(OpdVisit.appointment_id == appointment_id)
+        .order_by(OpdVisit.id.desc())
+        .first()
+    )
+    return visit is not None and is_visit_paid(visit)
 
 
 def _payment_from_visit(visit: OpdVisit | None) -> dict:
@@ -472,6 +504,7 @@ def create_appointment(db: Session, data: AppointmentCreate, created_by: int) ->
     db.add(apt)
     db.commit()
     db.refresh(apt)
+
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
 
 
@@ -485,13 +518,13 @@ def create_walk_in_appointment(
     reason: str = "OPD walk-in",
 ) -> Appointment:
     """Create today's scheduled appointment so reception can check the patient in."""
-    h.get_patient(db, patient_id)
+    patient = h.get_patient(db, patient_id)
     h.get_department(db, department_id)
     h.get_doctor_in_department(db, doctor_id, department_id)
 
     apt = Appointment(
         appointment_uid=h.next_appointment_uid(db),
-        patient_id=patient_id,
+        patient_id=patient.id,
         doctor_id=doctor_id,
         department_id=department_id,
         scheduled_at=h.now_ist(),
@@ -563,10 +596,18 @@ def list_appointments(
     }
 
 
-def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate) -> AppointmentOut:
+def update_appointment(
+    db: Session,
+    appointment_id: int,
+    data: AppointmentUpdate,
+    acted_by: Optional[int] = None,
+) -> AppointmentOut:
     apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
+
+    old_scheduled_at = apt.scheduled_at
+    was_cancelled = _is_cancelled_status(apt.status)
 
     updates = data.model_dump(exclude_unset=True)
     if updates.get("scheduled_at") is not None and apt.status == "completed":
@@ -575,14 +616,75 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
     for key, value in updates.items():
         setattr(apt, key, value)
 
+    if appointment_status_value(apt.status) == AppointmentStatus.cancelled.value:
+        from Models.doctor_patient_queue import PatientQueue, QueueStatus
+
+        (
+            db.query(PatientQueue)
+            .filter(
+                PatientQueue.appointment_id == apt.id,
+                PatientQueue.status == QueueStatus.SCHEDULED,
+            )
+            .update(
+                {"status": QueueStatus.CANCELLED},
+                synchronize_session=False,
+            )
+        )
+
     db.commit()
     db.refresh(apt)
+
+    patient_name = _patient_name_for_appointment(db, apt)
+    actor_name = _actor_name(db, acted_by)
+    time_label = _appointment_time_label(apt.scheduled_at)
+    now_cancelled = _is_cancelled_status(apt.status)
+    notify_doctor = _appointment_has_completed_payment(db, apt.id)
+
+    if notify_doctor and now_cancelled and not was_cancelled:
+        create_notification(
+            db,
+            user_id=apt.doctor_id,
+            title="Appointment Cancelled",
+            message=f"Patient {patient_name}\n{time_label}",
+            notification_type=NotificationType.APPOINTMENT_CANCELLED,
+            source_module=SourceModule.OPD_BILLING,
+            reference_type=ReferenceType.APPOINTMENT,
+            reference_id=apt.id,
+            created_by=acted_by,
+            created_by_name=actor_name,
+        )
+    elif (
+        notify_doctor
+        and "scheduled_at" in updates
+        and updates["scheduled_at"] != old_scheduled_at
+        and not now_cancelled
+    ):
+        create_notification(
+            db,
+            user_id=apt.doctor_id,
+            title="Appointment Rescheduled",
+            message=f"Patient {patient_name}\nNew time: {time_label}",
+            notification_type=NotificationType.APPOINTMENT_RESCHEDULED,
+            source_module=SourceModule.OPD_BILLING,
+            reference_type=ReferenceType.APPOINTMENT,
+            reference_id=apt.id,
+            created_by=acted_by,
+            created_by_name=actor_name,
+        )
+
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
 
 
-def cancel_appointment(db: Session, appointment_id: int) -> AppointmentOut:
+def cancel_appointment(
+    db: Session,
+    appointment_id: int,
+    acted_by: Optional[int] = None,
+) -> AppointmentOut:
     return update_appointment(
-        db, appointment_id, AppointmentUpdate(status="cancelled")
+        db,
+        appointment_id,
+        AppointmentUpdate(status="cancelled"),
+        acted_by=acted_by,
     )
 
 

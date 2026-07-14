@@ -29,11 +29,136 @@ from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertResolve,
     EmergencyAlertEscalate
 )
+from Enums.notification import (
+    NotificationPriority,
+    NotificationType,
+    ReferenceType,
+    SourceModule,
+)
+from Services import opd_helpers as h
+from Services.notification_service import (
+    create_notification,
+    notify_nurse_emergency_alert,
+)
 
 
 def _now():
     return datetime.now(
         ZoneInfo("Asia/Kolkata")
+    )
+
+
+def _alert_severity_priority(severity) -> NotificationPriority:
+    value = severity.value if hasattr(severity, "value") else str(severity)
+    if value == AlertSeverity.CRITICAL.value:
+        return NotificationPriority.CRITICAL
+    if value == AlertSeverity.HIGH.value:
+        return NotificationPriority.HIGH
+    return NotificationPriority.NORMAL
+
+
+def _alert_notify_message(db: Session, alert: EmergencyAlert) -> str:
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == alert.patient_id)
+        .first()
+    )
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name)
+        if patient
+        else "Patient"
+    )
+    severity_label = (
+        alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
+    )
+    message_lines = [f"{severity_label.upper()} — {patient_name}"]
+    location_parts = [part for part in (alert.ward_name, alert.bed_number) if part]
+    if location_parts:
+        message_lines.append(" — ".join(location_parts))
+    if alert.description:
+        message_lines.append(alert.description)
+    return "\n".join(message_lines)
+
+
+def _notify_assigned_nurse_alert(
+    db: Session,
+    alert: EmergencyAlert,
+    *,
+    nurse_user_id: int,
+    title: str,
+    created_by: int | None = None,
+    created_by_name: str | None = None,
+) -> None:
+    if not nurse_user_id:
+        return
+    notify_nurse_emergency_alert(
+        db,
+        nurse_user_id=nurse_user_id,
+        title=title,
+        message=_alert_notify_message(db, alert),
+        alert_id=alert.id,
+        created_by=created_by,
+        created_by_name=created_by_name,
+        priority=_alert_severity_priority(alert.severity),
+    )
+
+
+def _doctor_id_for_patient(db: Session, patient_id: int) -> int | None:
+    latest_appointment = (
+        db.query(Appointment)
+        .filter(Appointment.patient_id == patient_id)
+        .order_by(Appointment.created_at.desc())
+        .first()
+    )
+    return latest_appointment.doctor_id if latest_appointment else None
+
+
+def _notify_doctor_critical_auto_alert(
+    db: Session,
+    alert: EmergencyAlert,
+    *,
+    triggered_by: int | None,
+) -> None:
+    doctor_id = _doctor_id_for_patient(db, alert.patient_id)
+    if not doctor_id:
+        return
+
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == alert.patient_id)
+        .first()
+    )
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    actor_name = "System"
+    created_by = triggered_by
+    if triggered_by:
+        actor = db.query(User).filter(User.id == triggered_by).first()
+        if actor:
+            actor_name = h.display_name(actor.first_name, actor.last_name)
+
+    severity_label = (
+        alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
+    )
+    location_parts = [part for part in (alert.ward_name, alert.bed_number) if part]
+    message_lines = [f"{severity_label.upper()} — {patient_name}"]
+    if location_parts:
+        message_lines.append(" — ".join(location_parts))
+    if alert.description:
+        message_lines.append(alert.description)
+
+    create_notification(
+        db,
+        user_id=doctor_id,
+        title=alert.title or "Critical emergency alert",
+        message="\n".join(message_lines),
+        notification_type=NotificationType.EMERGENCY_ALERT,
+        source_module=SourceModule.NURSE,
+        reference_type=ReferenceType.PATIENT,
+        reference_id=alert.patient_id,
+        created_by=created_by,
+        created_by_name=actor_name,
     )
 
 
@@ -692,6 +817,21 @@ def assign_alert_service(
             detail="Failed to assign alert"
         )
 
+    assigner = db.query(User).filter(User.id == nurse_id).first()
+    assigner_name = (
+        h.display_name(assigner.first_name, assigner.last_name)
+        if assigner
+        else "Nurse"
+    )
+    _notify_assigned_nurse_alert(
+        db,
+        alert,
+        nurse_user_id=assigned_nurse_id,
+        title=alert.title or "Alert assigned to you",
+        created_by=nurse_id,
+        created_by_name=assigner_name,
+    )
+
     return {
 
         "message":
@@ -899,6 +1039,42 @@ def escalate_alert_service(
             detail="Failed to escalate alert"
         )
 
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == alert.patient_id)
+        .first()
+    )
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    nurse = db.query(User).filter(User.id == nurse_id).first()
+    nurse_name = h.display_name(nurse.first_name, nurse.last_name) if nurse else "Nurse"
+    location_parts = [part for part in (alert.ward_name, alert.bed_number) if part]
+    location = " — ".join(location_parts)
+    severity_label = (
+        alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
+    )
+    message_lines = [f"{severity_label.upper()} — {patient_name}"]
+    if location:
+        message_lines.append(location)
+    if escalate_data.escalation_notes:
+        message_lines.append(escalate_data.escalation_notes)
+
+    # Critical alerts already notify the doctor when auto-created.
+    if alert.severity != AlertSeverity.CRITICAL:
+        create_notification(
+            db,
+            user_id=doctor_id,
+            title=alert.title or "Emergency alert escalated",
+            message="\n".join(message_lines),
+            notification_type=NotificationType.EMERGENCY_ALERT,
+            source_module=SourceModule.NURSE,
+            reference_type=ReferenceType.PATIENT,
+            reference_id=alert.patient_id,
+            created_by=nurse_id,
+            created_by_name=nurse_name,
+        )
+
     return {
 
         "message":
@@ -1024,6 +1200,33 @@ def create_auto_alert_service(
         db.commit()
 
         db.refresh(alert)
+
+        if alert.severity == AlertSeverity.CRITICAL:
+            _notify_doctor_critical_auto_alert(
+                db,
+                alert,
+                triggered_by=triggered_by,
+            )
+
+        # Notify the nurse who triggered a high/critical auto alert
+        if (
+            triggered_by
+            and alert.severity in (AlertSeverity.CRITICAL, AlertSeverity.HIGH)
+        ):
+            actor = db.query(User).filter(User.id == triggered_by).first()
+            actor_name = (
+                h.display_name(actor.first_name, actor.last_name)
+                if actor
+                else "System"
+            )
+            _notify_assigned_nurse_alert(
+                db,
+                alert,
+                nurse_user_id=triggered_by,
+                title=alert.title or "Emergency alert raised",
+                created_by=triggered_by,
+                created_by_name=actor_name,
+            )
 
         return alert
 

@@ -10,6 +10,9 @@ import sys
 
 from database import SessionLocal
 from Models.department import Department
+from Models.doctor_profile import DoctorProfile  # noqa: F401 — required for User.doctor_profile relationship
+from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.nurse_profile import NurseProfile  # noqa: F401 — required for User.nurse_profile relationship
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -58,10 +61,21 @@ PERMISSIONS_LIST = [
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
+    "nurse_handover:take_over",
     "emergency_alerts:view",
     "emergency_alerts:create",
     "emergency_alerts:update",
     "emergency_alerts:escalate",
+    "doctor_profile:view",
+    "doctor_profile:update",
+    "doctor_profile:upload_image",
+    "doctor_profile:delete_image",
+    "nurse_profile:view",
+    "nurse_profile:update",
+    "nurse_profile:upload_image",
+    "nurse_profile:delete_image",
+    "notifications:view",
+    "notifications:update",
     "receptionist:view_doctor_schedule",
 ]
 
@@ -76,6 +90,10 @@ ADMIN_PERMISSIONS = [
 ]
 
 ROLES_DATA = {
+    "super_admin": {
+        "description": "Hospital owner / highest privilege",
+        "permissions": "__all__",
+    },
     "admin": {
         "description": "System administrator",
         "permissions": "__all__",
@@ -94,6 +112,12 @@ ROLES_DATA = {
             "appointments:view",
             "appointments:create",
             "appointments:update",
+            "doctor_profile:view",
+            "doctor_profile:update",
+            "doctor_profile:upload_image",
+            "doctor_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "nurse": {
@@ -115,10 +139,17 @@ ROLES_DATA = {
             "nurse_handover:create",
             "nurse_handover:update",
             "nurse_handover:submit",
+            "nurse_handover:take_over",
             "emergency_alerts:view",
             "emergency_alerts:create",
             "emergency_alerts:update",
             "emergency_alerts:escalate",
+            "nurse_profile:view",
+            "nurse_profile:update",
+            "nurse_profile:upload_image",
+            "nurse_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "opd_billing": {
@@ -268,22 +299,6 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=pid))
             links_added += 1
-        target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
-
-        existing_links = (
-            db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
-        )
-        existing_perm_ids = {rp.permission_id for rp in existing_links}
-
-        for rp in existing_links:
-            if rp.permission_id not in target_perm_ids:
-                db.delete(rp)
-                links_removed += 1
-
-        for pid in target_perm_ids:
-            if pid not in existing_perm_ids:
-                db.add(RolePermission(role_id=role.id, permission_id=pid))
-                links_added += 1
 
     db.commit()
     print(

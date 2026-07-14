@@ -10,9 +10,7 @@ from Schemas.doctor_queue_next_request_schema import RequestNextPatientSchema
 from Services import doctor_helpers as h
 from Services.doctor_patient_queue_service import (
     get_today_queue_service,
-    start_consultation_service,
     complete_consultation_service,
-    get_current_consultation_service
 )
 from Services.doctor_consultation_service import save_consultation_service
 from Services.doctor_queue_next_service import request_next_patient_service
@@ -48,39 +46,6 @@ def get_today_queue(
     }
 
 # ==========================================================
-# Start Consultation
-# ==========================================================
-
-@router.put("/start/{queue_id}",
-    status_code=status.HTTP_200_OK
-)
-def start_consultation(
-
-    queue_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update"))
-):
-
-    result = start_consultation_service(
-        db=db,
-        queue_id=queue_id,
-        doctor_id=current_user.id
-    )
-
-    return {
-        "success": True,
-        "message": (
-            "Consultation started successfully"
-        ),
-        "waiting_minutes": result[
-            "waiting_minutes"
-        ],
-        "queue": result["queue"]
-    }
-
-
-# ==========================================================
 # Complete Consultation
 # ==========================================================
 
@@ -97,7 +62,7 @@ def complete_consultation_by_appointment(
 ):
     """
     Atomic save by ``appointment_id``: ensure queue row, persist clinical fields,
-  mark appointment and queue completed (from scheduled/waiting/in_progress).
+  mark appointment and queue completed (from scheduled).
     """
     return save_consultation_service(
         db=db,
@@ -137,31 +102,6 @@ def complete_consultation(
         if result.get("appointment")
         else None,
     }
-
-# ==========================================================
-# Get Current Consultation
-# ==========================================================
-
-@router.get("/current",
-    status_code=status.HTTP_200_OK
-)
-def get_current_consultation(
-
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
-):
-
-    queue = get_current_consultation_service(
-        db=db,
-        doctor_id=current_user.id
-    )
-
-    return {
-        "success": True,
-        "queue": queue
-    }
-
 
 # ==========================================================
 # Request Next Patient (notify receptionist)

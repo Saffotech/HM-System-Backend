@@ -8,6 +8,7 @@ from pydantic import BaseModel
 class ReceptionistAppointmentStatus(str, Enum):
     scheduled = "scheduled"
     completed = "completed"
+    cancelled = "cancelled"
 
 
 class ReceptionistDashboardData(BaseModel):
@@ -33,8 +34,8 @@ class QueueItemOut(BaseModel):
     doctor_id: int
     status: ReceptionistAppointmentStatus
     payment_status: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
     checked_in_at: Optional[datetime] = None
-    called_at: Optional[datetime] = None
     consultation_started_at: Optional[datetime] = None
     consultation_completed_at: Optional[datetime] = None
     queue_date: Optional[date] = None
@@ -79,21 +80,23 @@ class TodayQueueResponse(BaseModel):
 class DoctorScheduleItem(BaseModel):
     doctor_id: int
     doctor_name: str
-    department: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
     specialization: Optional[str] = None
-    schedule_date: date
-    shift_start: Optional[str] = None
-    shift_end: Optional[str] = None
-    total_slots: int = 0
-    booked_slots: int = 0
-    available_slots: int = 0
-    status: str
+    shift_name: Optional[str] = None
+    shift_start_time: Optional[str] = None
+    shift_end_time: Optional[str] = None
+    appointments_count: int = 0
+    scheduled_count: int = 0
+    completed_count: int = 0
+    cancelled_count: int = 0
+    is_available: bool = True
 
 
-class DoctorScheduleListResponse(BaseModel):
+class DoctorsScheduleResponse(BaseModel):
     success: bool = True
-    total_records: int
-    total_pages: int
-    current_page: int
+    date: date
+    total: int
+    page: int
     page_size: int
-    items: list[DoctorScheduleItem]
+    doctors: list[DoctorScheduleItem]

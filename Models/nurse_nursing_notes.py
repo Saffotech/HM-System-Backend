@@ -49,7 +49,7 @@ class NursingNote(Base):
     appointment_id = Column(
         Integer,
         ForeignKey("appointments.id"),
-        nullable=False,
+        nullable=True,
         index=True
     )
 
