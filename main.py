@@ -12,8 +12,8 @@ from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
 from Models.doctor_profile import DoctorProfile  # noqa: F401
-from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
 from Models.nurse_profile import NurseProfile  # noqa: F401
+from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
 from Models.nurse_emergency_alert import EmergencyAlert  # noqa: F401
 from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
@@ -37,6 +37,10 @@ from Routers.doctor_profile_router import router as doctor_profile_router
 from Routers.doctor_notification_router import router as doctor_notification_router
 from Routers.nurse_notification_router import router as nurse_notification_router
 from Routers.nurse_profile_router import router as nurse_profile_router
+from Routers.receptionist_notification_router import (
+    router as receptionist_notification_router,
+)
+from Routers.receptionist_profile_router import router as receptionist_profile_router
 from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router,
@@ -112,6 +116,8 @@ app.include_router(pharmacy_router)
 app.include_router(lab_router)
 app.include_router(super_admin_router)
 app.include_router(receptionist_router)
+app.include_router(receptionist_profile_router)
+app.include_router(receptionist_notification_router)
 
 # Serve uploaded files (doctor photos, lab reports, etc.)
 # DB stores paths like "uploads/doctor_image/uuid.jpg"
@@ -120,6 +126,7 @@ _uploads_dir = Path("uploads")
 _uploads_dir.mkdir(parents=True, exist_ok=True)
 (_uploads_dir / "doctor_image").mkdir(parents=True, exist_ok=True)
 (_uploads_dir / "nurse_image").mkdir(parents=True, exist_ok=True)
+(_uploads_dir / "receptionist_image").mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 

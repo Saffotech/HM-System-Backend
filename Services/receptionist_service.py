@@ -19,6 +19,7 @@ from Services.queue_helpers import (
     is_visit_paid_sql,
     status_value,
 )
+from Utils.shift_time import format_shift_time
 
 IST = opd_helpers.IST
 
@@ -653,8 +654,12 @@ def get_doctors_schedule(
                 "department_name": dept.name if dept else None,
                 "specialization": doctor.specialization,
                 "shift_name": profile.shift_name if profile else None,
-                "shift_start_time": profile.shift_start_time if profile else None,
-                "shift_end_time": profile.shift_end_time if profile else None,
+                "shift_start_time": (
+                    format_shift_time(profile.shift_start_time) if profile else None
+                ),
+                "shift_end_time": (
+                    format_shift_time(profile.shift_end_time) if profile else None
+                ),
                 "appointments_count": stats["appointments_count"],
                 "scheduled_count": stats["scheduled_count"],
                 "completed_count": stats["completed_count"],

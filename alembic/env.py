@@ -17,8 +17,8 @@ from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.doctor_profile import DoctorProfile  # noqa: F401
-from Models.doctor_queue_next_request import DoctorQueueNextRequest
 from Models.nurse_profile import NurseProfile  # noqa: F401
+from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
 from Models.nurse_emergency_alert import EmergencyAlert
 from Models.nurse_medication_administration import MedicationAdministration
 from Models.nurse_nursing_notes import NursingNote

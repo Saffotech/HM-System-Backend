@@ -6,14 +6,12 @@ from dependencies import get_current_user,PermissionChecker
 from Models.user import User
 from Schemas.doctor_consultation_schema import SaveConsultationRequest, SaveConsultationResponse
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
-from Schemas.doctor_queue_next_request_schema import RequestNextPatientSchema
 from Services import doctor_helpers as h
 from Services.doctor_patient_queue_service import (
     get_today_queue_service,
     complete_consultation_service,
 )
 from Services.doctor_consultation_service import save_consultation_service
-from Services.doctor_queue_next_service import request_next_patient_service
 
 
 router = APIRouter(
@@ -101,31 +99,4 @@ def complete_consultation(
         "appointment": h.appointment_to_dict(db, result["appointment"])
         if result.get("appointment")
         else None,
-    }
-
-# ==========================================================
-# Request Next Patient (notify receptionist)
-# ==========================================================
-
-@router.post(
-    "/request-next",
-    status_code=status.HTTP_201_CREATED,
-)
-def request_next_patient(
-
-    body: RequestNextPatientSchema = Body(default_factory=RequestNextPatientSchema),
-
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:update")),
-):
-    request_row = request_next_patient_service(
-        db=db,
-        doctor_id=current_user.id,
-        appointment_id=body.appointment_id,
-    )
-    return {
-        "success": True,
-        "message": "Next patient request sent to reception",
-        "request": request_row,
     }

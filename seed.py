@@ -13,6 +13,7 @@ from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — required for User.doctor_profile relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.nurse_profile import NurseProfile  # noqa: F401 — required for User.nurse_profile relationship
+from Models.receptionist_profile import ReceptionistProfile  # noqa: F401 — User.receptionist_profile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -74,6 +75,10 @@ PERMISSIONS_LIST = [
     "nurse_profile:update",
     "nurse_profile:upload_image",
     "nurse_profile:delete_image",
+    "receptionist_profile:view",
+    "receptionist_profile:update",
+    "receptionist_profile:upload_image",
+    "receptionist_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "receptionist:view_doctor_schedule",
@@ -194,6 +199,12 @@ ROLES_DATA = {
             "patients:view",
             "opd:view",
             "receptionist:view_doctor_schedule",
+            "receptionist_profile:view",
+            "receptionist_profile:update",
+            "receptionist_profile:upload_image",
+            "receptionist_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
 }

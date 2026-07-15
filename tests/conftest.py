@@ -1,8 +1,10 @@
 """Shared fixtures for appointment list tests (SQLite in-memory)."""
 import pytest
 from sqlalchemy import create_engine
+from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
+from sqlalchemy.sql.functions import Function
 
 from database import Base
 from Models.department import Department
@@ -10,6 +12,14 @@ from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import Patient
 from Models.user import User
 from Services import opd_helpers as h
+
+
+@compiles(Function, "sqlite")
+def _compile_sqlite_function(element, compiler, **kw):
+    """Postgres timezone() is unavailable in SQLite test DBs."""
+    if element.name.lower() == "timezone":
+        return f"date({compiler.process(element.clauses.clauses[1])})"
+    return compiler.visit_function(element)
 
 
 @pytest.fixture

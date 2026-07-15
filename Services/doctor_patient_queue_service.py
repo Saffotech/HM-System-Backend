@@ -1,5 +1,4 @@
-from datetime import date, datetime
-from typing import Optional
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -60,28 +59,6 @@ def _notify_paid_appointment_in_queue(
         created_by=created_by,
         created_by_name=_staff_name(db, created_by),
     )
-
-
-def reactivate_queue_for_appointment_service(
-    db: Session,
-    queue: PatientQueue,
-    appointment: Appointment,
-    *,
-    set_appointment_scheduled: bool = True,
-) -> PatientQueue:
-    """Allow the same appointment to re-enter the queue after completion or reschedule."""
-    queue.status = QueueStatus.SCHEDULED
-    queue.queue_date = date.today()
-    queue.queue_entered_at = datetime.now(IST)
-    queue.consultation_started_at = None
-    queue.consultation_completed_at = None
-    queue.is_current = False
-    queue.token_number = generate_token_number_service(db, appointment.doctor_id)
-    if set_appointment_scheduled:
-        appointment.status = AppointmentStatus.scheduled
-    db.commit()
-    db.refresh(queue)
-    return queue
 
 
 def _today():

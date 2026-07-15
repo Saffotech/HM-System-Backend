@@ -332,10 +332,6 @@ def test_queue_and_consultation_flow(client, seed):
     assert r.status_code == 200, r.text
     assert r.json()["total_queue"] >= 1
 
-    r = client.post("/queue/request-next", json={"appointment_id": appt_id})
-    assert r.status_code == 201, r.text
-    assert r.json()["success"] is True
-
     r = client.get(f"/consultations/appointment/{appt_id}")
     assert r.status_code == 200, r.text
     assert r.json()["appointment"]["id"] == appt_id

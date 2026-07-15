@@ -6,16 +6,10 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from Models.doctor_patient_queue import PatientQueue, QueueStatus
-from Models.doctor_queue_next_request import NextRequestStatus
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit
 
-# Active queue rows ready for doctor work (not terminal).
-READY_FOR_DOCTOR = frozenset({QueueStatus.SCHEDULED})
-NO_SHOW_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
 COMPLETE_CONSULTATION_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
-
-REQUEST_NEXT_APPOINTMENT_STATUSES = frozenset({AppointmentStatus.scheduled})
 
 TERMINAL_APPOINTMENT_STATUSES = frozenset(
     {
@@ -27,18 +21,13 @@ TERMINAL_APPOINTMENT_STATUSES = frozenset(
 
 __all__ = [
     "AppointmentStatus",
-    "NextRequestStatus",
     "QueueStatus",
-    "READY_FOR_DOCTOR",
-    "NO_SHOW_ELIGIBLE",
     "COMPLETE_CONSULTATION_ELIGIBLE",
-    "REQUEST_NEXT_APPOINTMENT_STATUSES",
     "TERMINAL_APPOINTMENT_STATUSES",
     "status_value",
     "appointment_status_value",
     "is_queue_status",
     "is_appointment_status",
-    "queue_status_from_query",
     "persist",
     "is_visit_paid",
     "is_appointment_active",
@@ -72,19 +61,6 @@ def is_queue_status(status, allowed: frozenset[QueueStatus]) -> bool:
 def is_appointment_status(status, allowed: frozenset[AppointmentStatus]) -> bool:
     raw = appointment_status_value(status)
     return any(raw == item.value for item in allowed)
-
-
-def queue_status_from_query(value: str | None) -> QueueStatus | None:
-    if value is None:
-        return None
-    try:
-        return QueueStatus(value)
-    except ValueError as exc:
-        allowed = ", ".join(s.value for s in QueueStatus)
-        raise HTTPException(
-            status_code=422,
-            detail=f"Invalid queue status '{value}'. Use one of: {allowed}",
-        ) from exc
 
 
 def persist(db: Session, *, commit: bool = True) -> None:

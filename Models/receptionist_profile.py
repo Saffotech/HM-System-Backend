@@ -1,4 +1,4 @@
-"""Nurse professional profile (1:1 with users)."""
+"""Receptionist professional profile (1:1 with users)."""
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    Time
+    Time,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -23,8 +23,8 @@ def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class NurseProfile(Base):
-    __tablename__ = "nurse_profiles"
+class ReceptionistProfile(Base):
+    __tablename__ = "receptionist_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(
@@ -35,9 +35,8 @@ class NurseProfile(Base):
         index=True,
     )
 
-    qualification = Column(String(255), nullable=True)
-    registration_number = Column(String(100), nullable=True)
     employee_id = Column(String(50), nullable=True, unique=True)
+    qualification = Column(String(255), nullable=True)
     experience_years = Column(Integer, nullable=True)
     joining_date = Column(Date, nullable=True)
     bio = Column(Text, nullable=True)
@@ -58,4 +57,4 @@ class NurseProfile(Base):
         nullable=False,
     )
 
-    user = relationship("User", back_populates="nurse_profile")
+    user = relationship("User", back_populates="receptionist_profile")

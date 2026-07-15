@@ -12,6 +12,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Time
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -46,10 +47,10 @@ class DoctorProfile(Base):
     profile_image = Column(String(500), nullable=True)
     is_profile_completed = Column(Boolean, nullable=False, default=False)
 
-    # Admin-owned shift (stored as strings; no shifts master table)
+    # Admin-owned shift (no shifts master table)
     shift_name = Column(String(100), nullable=True)
-    shift_start_time = Column(String(10), nullable=True)  # e.g. "08:00"
-    shift_end_time = Column(String(10), nullable=True)  # e.g. "16:00"
+    shift_start_time = Column(Time, nullable=True)
+    shift_end_time = Column(Time, nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(

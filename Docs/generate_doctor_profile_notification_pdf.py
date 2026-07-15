@@ -1,4 +1,7 @@
-"""Generator: Doctor Profile & Notifications - Frontend Developer Documentation PDF."""
+"""Generator: Doctor Profile & Notifications - Frontend Developer Documentation PDF.
+
+Content aligned with doctor-profile-notifications-frontend-guide.docx (v2.0).
+"""
 from pathlib import Path
 
 from fpdf import FPDF
@@ -57,9 +60,15 @@ class DocPDF(FPDF):
         self.set_fill_color(245, 245, 245)
         usable = self.w - self.l_margin - self.r_margin
         for line in text.strip().splitlines():
-            # Wrap long lines for code blocks
             while len(line) > 95:
-                self.cell(usable, 4.5, "  " + line[:95], new_x="LMARGIN", new_y="NEXT", fill=True)
+                self.cell(
+                    usable,
+                    4.5,
+                    "  " + line[:95],
+                    new_x="LMARGIN",
+                    new_y="NEXT",
+                    fill=True,
+                )
                 line = line[95:]
             self.cell(usable, 4.5, "  " + line, new_x="LMARGIN", new_y="NEXT", fill=True)
         self.ln(2)
@@ -69,14 +78,12 @@ class DocPDF(FPDF):
         if widths is None:
             widths = [usable / len(cols)] * len(cols)
         self.set_font("Helvetica", "B" if bold else "", 8)
-        # Check page break for multi-line-ish rows
         if self.get_y() > self.h - 25:
             self.add_page()
         x_start = self.l_margin
         y_start = self.get_y()
         row_h = 6
         max_h = row_h
-        # Measure wrapped height
         for i, col in enumerate(cols):
             lines = max(1, (len(col) // max(1, int(widths[i] / 1.7))) + 1)
             max_h = max(max_h, lines * 4.5)
@@ -101,9 +108,10 @@ def build_pdf() -> None:
     pdf.multi_cell(
         0,
         6,
-        "Version: 1.0  |  Date: July 2026  |  Audience: Frontend developers\n"
+        "Version: 2.0  |  Date: July 2026  |  Audience: Frontend developers\n"
         "Backend: HM-System (FastAPI)  |  Auth: JWT Bearer token\n"
-        "Modules: /doctor/profile  +  /doctor/notifications",
+        "Modules: /doctor/profile  +  /doctor/notifications\n"
+        "Matches current nested API schemas (address, emergency_contact, department, role, shift).",
     )
     pdf.ln(4)
 
@@ -111,15 +119,15 @@ def build_pdf() -> None:
     pdf.section_title("1. Purpose & Scope")
     pdf.body(
         "This document describes the Doctor Profile and Doctor Notifications APIs so frontend "
-        "developers can implement the doctor UI correctly. Both modules are fully implemented "
-        "on the backend. Use this guide as the source of truth for endpoints, payloads, "
-        "validation, permissions, and UI behaviour."
+        "developers can implement the doctor UI correctly. Use this guide as the source of truth "
+        "for endpoints, payloads, validation, permissions, and UI behaviour."
     )
 
     pdf.sub_title("What this covers")
     pdf.bullet("Doctor self-service profile: view, update, upload/delete profile image")
     pdf.bullet("Which fields doctors can edit vs which are admin-only (read-only in UI)")
-    pdf.bullet("Profile completion rules and image upload constraints")
+    pdf.bullet("Nested payload shapes (address, emergency_contact, department, role, shift)")
+    pdf.bullet("Profile completion boolean + completion percentage")
     pdf.bullet("In-app doctor notifications: list, unread badge, mark one/all as read")
     pdf.bullet("Notification types, priorities, filters, and deep-link hints")
     pdf.bullet("Suggested TypeScript types and frontend implementation checklist")
@@ -143,8 +151,9 @@ def build_pdf() -> None:
         "Tag: Doctor Profile"
     )
     pdf.body(
-        "Only users with role name \"doctor\" can use these endpoints. Admins manage "
-        "license, fee, specialization, and department via /users - not via /doctor/profile."
+        'Only users with role name "doctor" can use these endpoints. Admins manage '
+        "license, fee, specialization, department, employee_id, joining_date, and "
+        "shift via /users - not via /doctor/profile."
     )
 
     pdf.sub_title("2.1 Endpoint summary")
@@ -157,7 +166,7 @@ def build_pdf() -> None:
 
     # ---------------------------------------------------------
     pdf.sub_title("2.2 GET /doctor/profile")
-    pdf.body("Request body: none. Returns DoctorProfileResponse.")
+    pdf.body("Request body: none. Returns DoctorProfileResponse (nested objects).")
     pdf.code_block(
         """{
   "user_id": 12,
@@ -165,23 +174,41 @@ def build_pdf() -> None:
   "last_name": "Mehta",
   "email": "asha.mehta@hospital.com",
   "phone": "9876543210",
-  "address": "12 MG Road",
-  "city": "Pune",
-  "state": "Maharashtra",
+  "phone_code": "+91",
+  "address": {
+    "line": "12 MG Road",
+    "city": "Pune",
+    "state": "Maharashtra"
+  },
   "date_of_birth": "1985-04-12",
   "gender": 2,
-  "emergency_contact_phone": "9123456780",
-  "is_active": true,
-  "department": "Cardiology",
+  "emergency_contact": {
+    "name": "Raj Mehta",
+    "phone": "9123456780"
+  },
+  "department": { "id": 3, "name": "Cardiology" },
+  "role": { "id": 5, "name": "doctor" },
   "specialization": "Interventional Cardiology",
   "qualification": "MD, DM Cardiology",
   "medical_license_number": "MH-MED-12345",
+  "employee_id": "DOC-0012",
   "experience_years": 12,
+  "joining_date": "2018-06-01",
   "consultation_fee": 800.0,
   "bio": "Consultant cardiologist with 12 years experience.",
   "languages": ["English", "Hindi", "Marathi"],
+  "shift": {
+    "name": "Morning",
+    "start_time": "09:00",
+    "end_time": "13:00"
+  },
   "profile_image_url": "/uploads/doctor_image/a1b2c3d4.jpg",
-  "is_profile_completed": true
+  "is_profile_completed": true,
+  "profile_completion_percentage": 86,
+  "is_active": true,
+  "last_login": "2026-07-15T09:00:00+05:30",
+  "created_at": "2026-01-10T10:00:00+05:30",
+  "updated_at": "2026-07-14T18:20:00+05:30"
 }"""
     )
 
@@ -193,23 +220,29 @@ def build_pdf() -> None:
     pdf.table_row(["last_name", "string | null", "Read-only for doctor"], wf)
     pdf.table_row(["email", "string (email)", "Read-only for doctor"], wf)
     pdf.table_row(["phone", "string | null", "Editable"], wf)
-    pdf.table_row(["address", "string | null", "Editable"], wf)
-    pdf.table_row(["city", "string | null", "Editable"], wf)
-    pdf.table_row(["state", "string | null", "Editable"], wf)
+    pdf.table_row(["phone_code", "string | null", "Editable (e.g. +91)"], wf)
+    pdf.table_row(["address", "object", "{ line, city, state } - editable"], wf)
     pdf.table_row(["date_of_birth", "string | null", "YYYY-MM-DD, editable"], wf)
     pdf.table_row(["gender", "number | null", "1-4, see Gender codes"], wf)
-    pdf.table_row(["emergency_contact_phone", "string | null", "Editable"], wf)
-    pdf.table_row(["is_active", "boolean", "Account status"], wf)
-    pdf.table_row(["department", "string | null", "Dept NAME (not id). Read-only"], wf)
+    pdf.table_row(["emergency_contact", "object", "{ name, phone } - editable"], wf)
+    pdf.table_row(["department", "object | null", "{ id, name } - read-only"], wf)
+    pdf.table_row(["role", "object | null", "{ id, name } - read-only"], wf)
     pdf.table_row(["specialization", "string | null", "Admin-owned. Read-only"], wf)
     pdf.table_row(["qualification", "string | null", "Editable"], wf)
     pdf.table_row(["medical_license_number", "string | null", "Admin-owned. Read-only"], wf)
+    pdf.table_row(["employee_id", "string | null", "Admin-owned. Read-only"], wf)
     pdf.table_row(["experience_years", "number | null", "Editable, 0-60"], wf)
+    pdf.table_row(["joining_date", "string | null", "Admin-owned. Read-only"], wf)
     pdf.table_row(["consultation_fee", "number | null", "Admin-owned. Read-only"], wf)
     pdf.table_row(["bio", "string | null", "Editable"], wf)
     pdf.table_row(["languages", "string[]", "Editable, default []"], wf)
-    pdf.table_row(["profile_image_url", "string | null", "Relative path under /uploads"], wf)
-    pdf.table_row(["is_profile_completed", "boolean", "Computed server-side"], wf)
+    pdf.table_row(["shift", "object | null", "{ name, start_time, end_time } - read-only"], wf)
+    pdf.table_row(["profile_image_url", "string | null", "Public path under /uploads"], wf)
+    pdf.table_row(["is_profile_completed", "boolean", "Computed server-side (strict)"], wf)
+    pdf.table_row(["profile_completion_percentage", "number", "0-100 progress bar value"], wf)
+    pdf.table_row(["is_active", "boolean", "Account status"], wf)
+    pdf.table_row(["last_login", "datetime | null", "ISO-8601"], wf)
+    pdf.table_row(["created_at / updated_at", "datetime | null", "Profile timestamps"], wf)
 
     pdf.sub_title("Gender codes (integer, not label)")
     pdf.bullet("1 = Male")
@@ -221,15 +254,15 @@ def build_pdf() -> None:
     pdf.sub_title("Errors")
     pdf.bullet("401 - Missing/invalid JWT")
     pdf.bullet("403 - Missing permission, inactive account, or role is not doctor")
-    pdf.bullet("404 - User/profile not found (\"Doctor profile not found. Contact admin.\")")
+    pdf.bullet('404 - User/profile not found ("Doctor profile not found. Contact admin.")')
 
     # ---------------------------------------------------------
     pdf.sub_title("2.3 PUT /doctor/profile")
     pdf.body(
-        "Content-Type: application/json. Schema: DoctorProfileUpdate with extra=\"forbid\". "
+        'Content-Type: application/json. Schema: DoctorProfileUpdate with extra="forbid". '
         "Unknown/admin-only fields cause 422. At least one field is required; empty body -> 400."
     )
-    pdf.body("All fields optional; send only what changed:")
+    pdf.body("All fields optional; send only what changed. Nested objects are partial (merge by key):")
     pdf.code_block(
         """{
   "qualification": "MD, DM Cardiology",
@@ -237,40 +270,72 @@ def build_pdf() -> None:
   "bio": "Consultant cardiologist...",
   "languages": ["English", "Hindi", "Marathi"],
   "phone": "9876543210",
-  "address": "12 MG Road",
-  "city": "Pune",
-  "state": "Maharashtra",
+  "phone_code": "+91",
+  "address": {
+    "line": "12 MG Road",
+    "city": "Pune",
+    "state": "Maharashtra"
+  },
   "date_of_birth": "1985-04-12",
   "gender": 2,
-  "emergency_contact_phone": "9123456780"
+  "emergency_contact": {
+    "name": "Raj Mehta",
+    "phone": "9123456780"
+  }
 }"""
     )
 
     pdf.body("Validation rules:")
     pdf.bullet("qualification: max 255 chars")
     pdf.bullet("experience_years: integer, >= 0 and <= 60")
-    pdf.bullet("phone / emergency_contact_phone: max 20 chars")
-    pdf.bullet("city / state: max 100 chars")
+    pdf.bullet("phone / emergency_contact.phone: max 20 chars")
+    pdf.bullet("phone_code: max 10 chars")
+    pdf.bullet("address.city / address.state: max 100 chars")
+    pdf.bullet("emergency_contact.name: max 120 chars")
     pdf.bullet("gender: integer 1-4")
     pdf.bullet("languages: trimmed; empties dropped; case-insensitive dedupe")
+    pdf.bullet("Do NOT send flat city/state/address strings - use nested address object")
     pdf.bullet(
-        "Do NOT send: first_name, last_name, email, department, specialization, "
-        "medical_license_number, consultation_fee, profile_image_url, is_profile_completed"
+        "Do NOT send: first_name, last_name, email, department, role, specialization, "
+        "medical_license_number, employee_id, joining_date, consultation_fee, shift, "
+        "profile_image_url, is_profile_completed, profile_completion_percentage"
     )
 
-    pdf.body("Response: same DoctorProfileResponse as GET. Side effect: is_profile_completed recomputed.")
+    pdf.body(
+        "Response: same DoctorProfileResponse as GET. "
+        "Side effect: is_profile_completed and profile_completion_percentage recomputed."
+    )
 
-    pdf.sub_title("Profile completion rule")
+    pdf.sub_title("Profile completion rules")
     pdf.body(
         "is_profile_completed is true only when ALL of these are set: "
         "qualification (truthy), experience_years (not null - 0 counts), bio (truthy). "
-        "Image, languages, phone, license, and fee are NOT required for completion."
+        "Image, languages, phone, license, and fee are NOT required for this boolean."
+    )
+    pdf.body(
+        "profile_completion_percentage (0-100) is a separate progress metric based on "
+        "14 checks: phone, phone_code, address line, city, state, DOB, gender, "
+        "emergency name, emergency phone, qualification, experience_years, bio, "
+        "languages (non-empty), profile image. Use this for a progress bar; use "
+        "is_profile_completed for the incomplete banner / gate."
     )
 
     pdf.sub_title("UI field ownership (important)")
-    pdf.bullet("EDITABLE by doctor: qualification, experience_years, bio, languages, phone, address, city, state, date_of_birth, gender, emergency_contact_phone, profile image")
-    pdf.bullet("READ-ONLY display: first_name, last_name, email, department, specialization, medical_license_number, consultation_fee, is_active, is_profile_completed")
-    pdf.bullet("Show a short note that license / fee / specialization / department are managed by admin")
+    pdf.bullet(
+        "EDITABLE by doctor: qualification, experience_years, bio, languages, phone, "
+        "phone_code, address.{line,city,state}, date_of_birth, gender, "
+        "emergency_contact.{name,phone}, profile image"
+    )
+    pdf.bullet(
+        "READ-ONLY display: first_name, last_name, email, department, role, "
+        "specialization, medical_license_number, employee_id, joining_date, "
+        "consultation_fee, shift, is_active, is_profile_completed, "
+        "profile_completion_percentage"
+    )
+    pdf.bullet(
+        "Show a short note that license / fee / specialization / department / shift "
+        "are managed by admin"
+    )
 
     # ---------------------------------------------------------
     pdf.sub_title("2.4 POST /doctor/profile/image")
@@ -279,7 +344,10 @@ def build_pdf() -> None:
     pdf.bullet("Max size: 5 MB")
     pdf.bullet("Empty file rejected")
     pdf.bullet("Replaces previous image (old file deleted on server)")
-    pdf.bullet("Image upload does NOT affect is_profile_completed")
+    pdf.bullet(
+        "Image upload does NOT flip is_profile_completed by itself "
+        "(but does raise profile_completion_percentage if image was missing)"
+    )
 
     pdf.code_block(
         """// Example (fetch)
@@ -288,6 +356,7 @@ form.append("file", selectedFile);
 await fetch(`${API_BASE}/doctor/profile/image`, {
   method: "POST",
   headers: { Authorization: `Bearer ${token}` },
+  // Do NOT set Content-Type manually - browser sets multipart boundary
   body: form
 });
 
@@ -315,21 +384,47 @@ await fetch(`${API_BASE}/doctor/profile/image`, {
   "profile_image_url": null
 }"""
     )
-    pdf.bullet("404 - \"No profile image to delete\" or profile missing")
+    pdf.bullet('404 - "No profile image to delete" or profile missing')
 
     # ---------------------------------------------------------
     pdf.sub_title("2.6 Suggested Profile UI screens")
-    pdf.bullet("Profile Overview: avatar, name, department, specialization, fee (read-only), completion badge")
+    pdf.bullet(
+        "Profile Overview: avatar, name, department.name, specialization, fee, "
+        "shift, completion badge + progress bar"
+    )
     pdf.bullet("Edit Professional: qualification, experience_years, bio, languages (tag input)")
-    pdf.bullet("Edit Contact: phone, address, city, state, DOB, gender select, emergency phone")
+    pdf.bullet(
+        "Edit Contact: phone + phone_code, address fields, DOB, gender select, "
+        "emergency name + phone"
+    )
     pdf.bullet("Avatar: crop/preview optional; enforce type + 5 MB client-side before upload")
-    pdf.bullet("On load: GET profile once; show spinner; if 404 show \"Contact admin\"")
-    pdf.bullet("On save: PUT only dirty fields; refresh form from response")
+    pdf.bullet("On load: GET profile once; show spinner; if 404 show Contact admin")
+    pdf.bullet("On save: PUT only dirty fields (nested partial OK); refresh form from response")
     pdf.bullet("Show incomplete banner when is_profile_completed === false")
+    pdf.bullet("Bind progress bar to profile_completion_percentage")
 
     pdf.sub_title("2.7 TypeScript types (Profile)")
     pdf.code_block(
         """export type GenderCode = 1 | 2 | 3 | 4;
+
+export interface AddressInfo {
+  line: string | null;
+  city: string | null;
+  state: string | null;
+}
+
+export interface EmergencyContactInfo {
+  name: string | null;
+  phone: string | null;
+}
+
+export interface DepartmentInfo { id: number; name: string; }
+export interface RoleInfo { id: number; name: string; }
+export interface ShiftInfo {
+  name: string | null;
+  start_time: string | null; // "HH:MM"
+  end_time: string | null;
+}
 
 export interface DoctorProfile {
   user_id: number;
@@ -337,23 +432,30 @@ export interface DoctorProfile {
   last_name: string | null;
   email: string;
   phone: string | null;
-  address: string | null;
-  city: string | null;
-  state: string | null;
+  phone_code: string | null;
+  address: AddressInfo;
   date_of_birth: string | null; // YYYY-MM-DD
   gender: GenderCode | null;
-  emergency_contact_phone: string | null;
-  is_active: boolean;
-  department: string | null;
+  emergency_contact: EmergencyContactInfo;
+  department: DepartmentInfo | null;
+  role: RoleInfo | null;
   specialization: string | null;
   qualification: string | null;
   medical_license_number: string | null;
+  employee_id: string | null;
   experience_years: number | null;
+  joining_date: string | null;
   consultation_fee: number | null;
   bio: string | null;
   languages: string[];
+  shift: ShiftInfo | null;
   profile_image_url: string | null;
   is_profile_completed: boolean;
+  profile_completion_percentage: number;
+  is_active: boolean;
+  last_login: string | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface DoctorProfileUpdate {
@@ -362,12 +464,11 @@ export interface DoctorProfileUpdate {
   bio?: string | null;
   languages?: string[] | null;
   phone?: string | null;
-  address?: string | null;
-  city?: string | null;
-  state?: string | null;
+  phone_code?: string | null;
+  address?: Partial<AddressInfo> | null;
   date_of_birth?: string | null;
   gender?: GenderCode | null;
-  emergency_contact_phone?: string | null;
+  emergency_contact?: Partial<EmergencyContactInfo> | null;
 }
 
 export interface DoctorProfileImageResponse {
@@ -476,7 +577,7 @@ export interface DoctorProfileImageResponse {
     pdf.sub_title("3.4 PATCH /doctor/notifications/{notification_id}/read")
     pdf.body("Body: none. Returns full NotificationResponse. Idempotent if already read.")
     pdf.bullet("Sets is_read=true and read_at=now (Asia/Kolkata) on first mark")
-    pdf.bullet("404 - \"Notification not found\" (wrong id or not owned by current user)")
+    pdf.bullet('404 - "Notification not found" (wrong id or not owned by current user)')
 
     # ---------------------------------------------------------
     pdf.sub_title("3.5 PATCH /doctor/notifications/read-all")
@@ -489,40 +590,47 @@ export interface DoctorProfileImageResponse {
     pdf.body("NotificationPriority: NORMAL | HIGH | CRITICAL")
     pdf.body("Default priority by type:")
     pdf.bullet("NEW_APPOINTMENT -> NORMAL")
-    pdf.bullet("LAB_REPORT_READY, APPOINTMENT_CANCELLED, APPOINTMENT_RESCHEDULED, ADMIN_UPDATE -> HIGH")
+    pdf.bullet(
+        "LAB_REPORT_READY, APPOINTMENT_CANCELLED, APPOINTMENT_RESCHEDULED, "
+        "ADMIN_UPDATE, HANDOVER_TAKEN_OVER, SHIFT_UPDATED -> HIGH"
+    )
     pdf.bullet("EMERGENCY_ALERT -> CRITICAL")
 
-    pdf.body("NotificationType (values that currently appear in data):")
+    pdf.body("NotificationType (values that currently appear for doctors):")
     wt = [48, 122]
     pdf.table_row(["Type", "When created"], wt, bold=True)
     pdf.table_row(["NEW_APPOINTMENT", "Paid patient added to doctor queue (check-in)"], wt)
     pdf.table_row(["APPOINTMENT_CANCELLED", "Appointment cancelled AND visit paid"], wt)
     pdf.table_row(["APPOINTMENT_RESCHEDULED", "scheduled_at changed, not cancelled, paid"], wt)
     pdf.table_row(["LAB_REPORT_READY", "Lab report uploaded / first file report created"], wt)
-    pdf.table_row(["EMERGENCY_ALERT", "Critical auto-alert or nurse escalate"], wt)
-    pdf.table_row(["ADMIN_UPDATE", "Admin dept change / deactivate / delete doctor"], wt)
+    pdf.table_row(["ADMIN_UPDATE", "Admin dept change / deactivate / delete / admin edits"], wt)
 
-    pdf.body("Reserved enum values (exist but not produced yet - may use in filters/UI labels):")
+    pdf.body("Reserved / other enum values (exist; may appear in filters or future flows):")
     pdf.bullet("PATIENT_CHECKED_IN, LAB_REPORT_UPDATED, PRESCRIPTION_CREATED, PRESCRIPTION_UPDATED")
+    pdf.bullet("EMERGENCY_ALERT (mainly nurse flows; doctors may still receive in some cases)")
+    pdf.bullet("HANDOVER_TAKEN_OVER, SHIFT_UPDATED (primarily nurse; include in TS union)")
 
-    pdf.body("SourceModule: OPD_BILLING | LAB | NURSE | ADMIN (active). Reserved: RECEPTIONIST, PHARMACY, SYSTEM")
+    pdf.body(
+        "SourceModule: OPD_BILLING | LAB | NURSE | ADMIN (active for doctors). "
+        "Also defined: RECEPTIONIST, PHARMACY, SYSTEM"
+    )
     pdf.body("ReferenceType (deep-link):")
     pdf.bullet("APPOINTMENT + reference_id -> appointment / queue / calendar screen")
     pdf.bullet("LAB_ORDER + reference_id -> lab order detail")
     pdf.bullet("PATIENT + reference_id -> patient chart / emergency context")
     pdf.bullet("USER + reference_id -> profile / account notice (admin updates)")
-    pdf.bullet("Reserved: PRESCRIPTION, BILL, SCHEDULE, LEAVE")
+    pdf.bullet("Also defined: PRESCRIPTION, BILL, SCHEDULE, LEAVE, HANDOVER, ALERT")
 
     # ---------------------------------------------------------
     pdf.sub_title("3.7 Notification trigger details (for UI copy)")
-    pdf.bullet("NEW_APPOINTMENT title: \"Paid Appointment Confirmed\" - patient, time, token")
-    pdf.bullet("APPOINTMENT_CANCELLED title: \"Appointment Cancelled\" - patient + time")
-    pdf.bullet("APPOINTMENT_RESCHEDULED title: \"Appointment Rescheduled\" - patient + new time")
-    pdf.bullet("LAB_REPORT_READY title: \"Lab Report Ready\" - \"{test} - {patient}\"")
-    pdf.bullet("EMERGENCY_ALERT - priority CRITICAL; reference PATIENT")
-    pdf.bullet("ADMIN_UPDATE - e.g. \"Department reassigned\", \"Account disabled by admin\"")
+    pdf.bullet('NEW_APPOINTMENT title: "Paid Appointment Confirmed" - patient, time, token')
+    pdf.bullet('APPOINTMENT_CANCELLED title: "Appointment Cancelled" - patient + time')
+    pdf.bullet('APPOINTMENT_RESCHEDULED title: "Appointment Rescheduled" - patient + new time')
+    pdf.bullet('LAB_REPORT_READY title: "Lab Report Ready" - "{test} - {patient}"')
+    pdf.bullet("ADMIN_UPDATE - e.g. Department reassigned, Account disabled by admin")
     pdf.bullet("Unpaid appointments do NOT notify on cancel/reschedule")
     pdf.bullet("Replacing an existing lab file report does NOT create another notification")
+    pdf.bullet("Message often contains newlines (\\n) - render with white-space: pre-line")
 
     # ---------------------------------------------------------
     pdf.sub_title("3.8 Suggested Notifications UI")
@@ -530,7 +638,7 @@ export interface DoctorProfileImageResponse {
     pdf.bullet("Inbox list: title, message (multiline), priority chip, type, relative time, unread style")
     pdf.bullet("Filters: Unread / All, type chips, date range, search box")
     pdf.bullet("Actions: click row -> mark read + navigate via reference_type/reference_id")
-    pdf.bullet("Toolbar: \"Mark all as read\"")
+    pdf.bullet('Toolbar: "Mark all as read"')
     pdf.bullet("Empty state when total === 0")
     pdf.bullet("Visual priority: CRITICAL red, HIGH amber, NORMAL default")
     pdf.bullet("Do not invent delete/archive/preferences UI until backend supports it")
@@ -549,7 +657,9 @@ export type NotificationType =
   | "PRESCRIPTION_CREATED"
   | "PRESCRIPTION_UPDATED"
   | "EMERGENCY_ALERT"
-  | "ADMIN_UPDATE";
+  | "ADMIN_UPDATE"
+  | "HANDOVER_TAKEN_OVER"
+  | "SHIFT_UPDATED";
 
 export type SourceModule =
   | "OPD_BILLING" | "LAB" | "RECEPTIONIST" | "NURSE"
@@ -557,7 +667,8 @@ export type SourceModule =
 
 export type ReferenceType =
   | "APPOINTMENT" | "LAB_ORDER" | "PRESCRIPTION" | "BILL"
-  | "PATIENT" | "USER" | "SCHEDULE" | "LEAVE";
+  | "PATIENT" | "USER" | "SCHEDULE" | "LEAVE"
+  | "HANDOVER" | "ALERT";
 
 export interface Notification {
   id: number;
@@ -593,7 +704,7 @@ export interface UnreadCountResponse {
     pdf.section_title("4. Error Handling Cheat Sheet")
     we = [22, 148]
     pdf.table_row(["HTTP", "When / Frontend action"], we, bold=True)
-    pdf.table_row(["400", "Empty profile PUT; bad image upload - show field/toast message from detail"], we)
+    pdf.table_row(["400", "Empty profile PUT; bad image upload - show toast from detail"], we)
     pdf.table_row(["401", "Redirect to login; clear token"], we)
     pdf.table_row(["403", "Permission denied / inactive / not doctor - show access denied"], we)
     pdf.table_row(["404", "Profile missing (contact admin); notification not found; no image"], we)
@@ -601,7 +712,7 @@ export interface UnreadCountResponse {
     pdf.table_row(["500", "Image save failure - retry later"], we)
 
     pdf.body(
-        "FastAPI usually returns { \"detail\": \"...\" } or a validation array for 422. "
+        'FastAPI usually returns { "detail": "..." } or a validation array for 422. '
         "Surface detail in toasts; map 422 to form fields when possible."
     )
 
@@ -611,13 +722,16 @@ export interface UnreadCountResponse {
     pdf.bullet("[ ] Route/page: Doctor Profile under authenticated doctor layout")
     pdf.bullet("[ ] GET /doctor/profile on mount")
     pdf.bullet("[ ] Separate editable vs read-only sections visually")
+    pdf.bullet("[ ] Bind nested address + emergency_contact correctly (not flat strings)")
     pdf.bullet("[ ] Gender select mapped to 1-4")
     pdf.bullet("[ ] Languages as chip/tag input")
-    pdf.bullet("[ ] PUT with only changed fields; handle 400/422")
-    pdf.bullet("[ ] Avatar upload via FormData field \"file\"; preview + 5 MB client check")
+    pdf.bullet("[ ] PUT with only changed fields; nested partial objects OK")
+    pdf.bullet('[ ] Avatar upload via FormData field "file"; preview + 5 MB client check')
     pdf.bullet("[ ] Avatar delete + clear preview")
     pdf.bullet("[ ] Show is_profile_completed banner / CTA until true")
+    pdf.bullet("[ ] Progress bar from profile_completion_percentage")
     pdf.bullet("[ ] Image URL = API_BASE + profile_image_url")
+    pdf.bullet("[ ] Display shift, employee_id, joining_date as read-only if present")
 
     pdf.sub_title("Notifications")
     pdf.bullet("[ ] Bell in doctor header with unread badge")
@@ -681,9 +795,8 @@ OpenAPI: /docs when backend is running"""
     pdf.multi_cell(
         0,
         5,
-        "End of document. For live schema details, run the backend and open /docs "
-        "(Hospital Management API). Keep this PDF next to frontend tickets for Profile "
-        "and Notifications implementation.",
+        "End of document (v2.0). Same content as doctor-profile-notifications-frontend-guide.docx. "
+        "Regenerate: python Docs/generate_doctor_profile_notification_pdf.py",
     )
 
     pdf.output(str(OUT))

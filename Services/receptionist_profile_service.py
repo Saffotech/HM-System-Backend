@@ -1,4 +1,4 @@
-"""Nurse profile service — GET/PUT profile and image upload/delete."""
+"""Receptionist profile service — GET/PUT profile and image upload/delete."""
 import logging
 import os
 import shutil
@@ -11,15 +11,15 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
-from Models.nurse_profile import NurseProfile
+from Models.receptionist_profile import ReceptionistProfile
 from Utils.shift_time import format_shift_time
 from Models.user import User
-from Schemas.nurse_profile_schema import (
+from Schemas.receptionist_profile_schema import (
     AddressInfo,
     DepartmentInfo,
     EmergencyContactInfo,
-    NurseProfileResponse,
-    NurseProfileUpdate,
+    ReceptionistProfileResponse,
+    ReceptionistProfileUpdate,
     RoleInfo,
     ShiftInfo,
 )
@@ -27,7 +27,7 @@ from Schemas.nurse_profile_schema import (
 logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
-NURSE_ROLE = "nurse"
+RECEPTIONIST_ROLE = "receptionist"
 
 ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
@@ -38,7 +38,9 @@ def _now():
 
 
 def _get_upload_dir() -> Path:
-    upload_dir = Path(os.getenv("NURSE_PROFILE_UPLOAD_DIR", "uploads/nurse_image"))
+    upload_dir = Path(
+        os.getenv("RECEPTIONIST_PROFILE_UPLOAD_DIR", "uploads/receptionist_image")
+    )
     upload_dir.mkdir(parents=True, exist_ok=True)
     return upload_dir
 
@@ -64,12 +66,12 @@ def _resolve_image_path(stored_path: str) -> Path:
     return candidate
 
 
-def _assert_nurse(user: User) -> None:
+def _assert_receptionist(user: User) -> None:
     role_name = user.role_obj.name if user.role_obj else None
-    if role_name != NURSE_ROLE:
+    if role_name != RECEPTIONIST_ROLE:
         raise HTTPException(
             status_code=403,
-            detail="Only nurses can access this endpoint",
+            detail="Only receptionists can access this endpoint",
         )
 
 
@@ -99,7 +101,7 @@ def to_profile_image_url(stored_path: Optional[str]) -> Optional[str]:
     return "/" + stored_path.replace("\\", "/").lstrip("/")
 
 
-def compute_profile_completed(profile: NurseProfile) -> bool:
+def compute_profile_completed(profile: ReceptionistProfile) -> bool:
     return bool(
         profile.qualification
         and profile.experience_years is not None
@@ -107,7 +109,9 @@ def compute_profile_completed(profile: NurseProfile) -> bool:
     )
 
 
-def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> int:
+def compute_profile_completion_percentage(
+    user: User, profile: ReceptionistProfile
+) -> int:
     languages = profile.languages if isinstance(profile.languages, list) else []
     checks = [
         bool(user.phone),
@@ -130,34 +134,34 @@ def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> 
     return int(round(100 * sum(1 for ok in checks if ok) / len(checks)))
 
 
-def _get_nurse_user(db: Session, user_id: int) -> User:
+def _get_receptionist_user(db: Session, user_id: int) -> User:
     user = (
         db.query(User)
         .options(
             joinedload(User.role_obj),
             joinedload(User.department),
-            joinedload(User.nurse_profile),
+            joinedload(User.receptionist_profile),
         )
         .filter(User.id == user_id, User.deleted_at.is_(None))
         .first()
     )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    _assert_nurse(user)
+    _assert_receptionist(user)
     return user
 
 
-def _get_profile_or_404(user: User) -> NurseProfile:
-    profile = user.nurse_profile
+def _get_profile_or_404(user: User) -> ReceptionistProfile:
+    profile = user.receptionist_profile
     if not profile:
         raise HTTPException(
             status_code=404,
-            detail="Nurse profile not found. Contact admin.",
+            detail="Receptionist profile not found. Contact admin.",
         )
     return profile
 
 
-def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
+def _to_response(user: User, profile: ReceptionistProfile) -> ReceptionistProfileResponse:
     languages = profile.languages if isinstance(profile.languages, list) else []
 
     department = None
@@ -176,7 +180,7 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
             end_time=format_shift_time(profile.shift_end_time),
         )
 
-    return NurseProfileResponse(
+    return ReceptionistProfileResponse(
         user_id=user.id,
         first_name=user.first_name,
         last_name=user.last_name,
@@ -196,9 +200,8 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
         ),
         department=department,
         role=role,
-        qualification=profile.qualification,
-        registration_number=profile.registration_number,
         employee_id=profile.employee_id,
+        qualification=profile.qualification,
         experience_years=profile.experience_years,
         joining_date=profile.joining_date,
         bio=profile.bio,
@@ -216,18 +219,20 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
     )
 
 
-def get_nurse_profile(db: Session, current_user: User) -> NurseProfileResponse:
-    user = _get_nurse_user(db, current_user.id)
+def get_receptionist_profile(
+    db: Session, current_user: User
+) -> ReceptionistProfileResponse:
+    user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
     return _to_response(user, profile)
 
 
-def update_nurse_profile(
+def update_receptionist_profile(
     db: Session,
     current_user: User,
-    data: NurseProfileUpdate,
-) -> NurseProfileResponse:
-    user = _get_nurse_user(db, current_user.id)
+    data: ReceptionistProfileUpdate,
+) -> ReceptionistProfileResponse:
+    user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
     updates = data.model_dump(exclude_unset=True)
 
@@ -273,10 +278,10 @@ def update_nurse_profile(
     profile.updated_at = _now()
 
     db.commit()
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
-    logger.info("Nurse %s updated profile", current_user.id)
+    logger.info("Receptionist %s updated profile", current_user.id)
     return _to_response(user, profile)
 
 
@@ -285,11 +290,13 @@ def upload_profile_image(
     current_user: User,
     file: UploadFile,
 ) -> dict:
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
     if not file.filename:
-        raise HTTPException(status_code=400, detail="Uploaded file must include a filename")
+        raise HTTPException(
+            status_code=400, detail="Uploaded file must include a filename"
+        )
 
     extension = Path(file.filename).suffix.lower()
     if extension not in ALLOWED_EXTENSIONS:
@@ -322,7 +329,9 @@ def upload_profile_image(
         with open(absolute_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
     except OSError as exc:
-        logger.exception("Failed to save profile image for nurse %s", current_user.id)
+        logger.exception(
+            "Failed to save profile image for receptionist %s", current_user.id
+        )
         raise HTTPException(status_code=500, detail="Failed to save file") from exc
 
     profile.profile_image = stored_path
@@ -337,7 +346,9 @@ def upload_profile_image(
             try:
                 absolute_path.unlink()
             except OSError:
-                logger.warning("Could not remove orphaned profile image %s", absolute_path)
+                logger.warning(
+                    "Could not remove orphaned profile image %s", absolute_path
+                )
         raise
 
     if old_file_path and old_file_path.exists():
@@ -346,7 +357,7 @@ def upload_profile_image(
         except OSError:
             logger.warning("Could not remove old profile image %s", old_file_path)
 
-    logger.info("Nurse %s uploaded profile image", current_user.id)
+    logger.info("Receptionist %s uploaded profile image", current_user.id)
     return {
         "message": "Profile image uploaded successfully",
         "profile_image_url": to_profile_image_url(profile.profile_image),
@@ -354,7 +365,7 @@ def upload_profile_image(
 
 
 def delete_profile_image(db: Session, current_user: User) -> dict:
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
     if not profile.profile_image:
@@ -376,23 +387,20 @@ def delete_profile_image(db: Session, current_user: User) -> dict:
         except OSError:
             logger.warning("Could not remove profile image file %s", old_path)
 
-    logger.info("Nurse %s deleted profile image", current_user.id)
+    logger.info("Receptionist %s deleted profile image", current_user.id)
     return {
         "message": "Profile image deleted successfully",
         "profile_image_url": None,
     }
 
 
-def create_empty_nurse_profile(
+def create_empty_receptionist_profile(
     db: Session,
     user_id: int,
-    *,
-    registration_number: Optional[str] = None,
-) -> NurseProfile:
-    """Create empty nurse_profiles row (used during registration). Caller commits."""
-    profile = NurseProfile(
+) -> ReceptionistProfile:
+    """Create empty receptionist_profiles row (used during registration). Caller commits."""
+    profile = ReceptionistProfile(
         user_id=user_id,
-        registration_number=registration_number,
         languages=[],
         is_profile_completed=False,
     )

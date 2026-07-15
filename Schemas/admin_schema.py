@@ -50,7 +50,7 @@ class StaffUpdateRequest(BaseModel):
     specialization: Optional[str] = None
     medical_license_number: Optional[str] = None
     consultation_fee: Optional[float] = Field(None, ge=0)
-    # Admin-owned nurse shift fields
+    # Admin-owned shift fields (doctor / nurse / receptionist profiles)
     shift_name: Optional[str] = Field(None, max_length=100)
     shift_start_time: Optional[str] = Field(None, max_length=10)
     shift_end_time: Optional[str] = Field(None, max_length=10)

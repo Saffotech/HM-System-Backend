@@ -12,6 +12,7 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_profile import DoctorProfile
+from Utils.shift_time import format_shift_time
 from Models.user import User
 from Schemas.doctor_profile_schema import (
     AddressInfo,
@@ -172,8 +173,8 @@ def _to_response(user: User, profile: DoctorProfile) -> DoctorProfileResponse:
     if profile.shift_name or profile.shift_start_time or profile.shift_end_time:
         shift = ShiftInfo(
             name=profile.shift_name,
-            start_time=profile.shift_start_time,
-            end_time=profile.shift_end_time,
+            start_time=format_shift_time(profile.shift_start_time),
+            end_time=format_shift_time(profile.shift_end_time),
         )
 
     return DoctorProfileResponse(
