@@ -74,6 +74,21 @@ def _request_to_dict(db: Session, req: DoctorQueueNextRequest) -> dict:
     }
 
 
+def _doctor_has_active_consultation(db: Session, doctor_id: int) -> bool:
+    """True if doctor already has a current (started, not completed) consultation today."""
+    return (
+        db.query(PatientQueue)
+        .filter(
+            PatientQueue.doctor_id == doctor_id,
+            PatientQueue.queue_date == _today(),
+            PatientQueue.status == QueueStatus.SCHEDULED,
+            PatientQueue.is_current.is_(True),
+        )
+        .first()
+        is not None
+    )
+
+
 def _next_ready_queue_row(db: Session, doctor_id: int) -> PatientQueue | None:
     return (
         db.query(PatientQueue)
@@ -91,10 +106,16 @@ def _next_ready_queue_row(db: Session, doctor_id: int) -> PatientQueue | None:
 def request_next_patient_service(
     db: Session, doctor_id: int, appointment_id: int | None = None
 ) -> dict:
+    if _doctor_has_active_consultation(db, doctor_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Complete the current consultation before requesting the next patient",
+        )
+
     if appointment_id is None:
         queue = _next_ready_queue_row(db, doctor_id)
         if not queue:
-            raise HTTPException(status_code=404, detail="No scheduled patients in queue")
+            raise HTTPException(status_code=404, detail="No waiting patients in queue")
         appointment_id = queue.appointment_id
 
     apt = (
@@ -129,7 +150,7 @@ def request_next_patient_service(
         raise HTTPException(
             status_code=400,
             detail=(
-                "Next patient must be scheduled "
+                "Next patient must be scheduled in queue "
                 f"(current: {status_value(existing_queue.status)})"
             ),
         )
@@ -184,7 +205,7 @@ def fulfill_call_patient(
     *,
     require_pending_request: bool = True,
 ) -> PatientQueue:
-    """Fulfill doctor's next-patient request; appointment/queue stay scheduled."""
+    """Reception calls patient to doctor room: sets called_at, called_by, and called status."""
     queue = (
         db.query(PatientQueue)
         .filter(PatientQueue.id == queue_id)
@@ -197,7 +218,7 @@ def fulfill_call_patient(
     if not is_queue_status(queue.status, READY_FOR_DOCTOR):
         raise HTTPException(
             status_code=400,
-            detail=f"Cannot fulfill next-patient request when queue status is {status_value(queue.status)}",
+            detail=f"Cannot call patient when queue status is {status_value(queue.status)}",
         )
 
     pending_req = (
@@ -222,7 +243,28 @@ def fulfill_call_patient(
             detail="Queue entry does not match the doctor's pending next-patient request",
         )
 
+    other_active = (
+        db.query(PatientQueue)
+        .filter(
+            PatientQueue.doctor_id == queue.doctor_id,
+            PatientQueue.queue_date == queue.queue_date,
+            PatientQueue.is_current.is_(True),
+            PatientQueue.status == QueueStatus.SCHEDULED,
+            PatientQueue.id != queue.id,
+        )
+        .first()
+    )
+    if other_active:
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor already has a patient in consultation",
+        )
+
     now = datetime.now(IST)
+    # Appointment stays scheduled until doctor completes (no waiting/in_progress).
+    queue.is_current = True
+    if queue.consultation_started_at is None:
+        queue.consultation_started_at = now
     queue.updated_by = handled_by
 
     if pending_req:
@@ -261,15 +303,12 @@ def send_in_patient_service(db: Session, appointment_id: int, handled_by: int) -
     )
     if existing_queue and status_value(existing_queue.status) in (
         QueueStatus.COMPLETED.value,
-        QueueStatus.NO_SHOW.value,
         QueueStatus.CANCELLED.value,
+        QueueStatus.NO_SHOW.value,
     ):
         raise HTTPException(
             status_code=400,
-            detail=(
-                "Patient consultation already finished "
-                f"(queue status: {status_value(existing_queue.status)})"
-            ),
+            detail="Patient consultation already completed or closed",
         )
 
     if existing_queue and is_queue_status(existing_queue.status, READY_FOR_DOCTOR):

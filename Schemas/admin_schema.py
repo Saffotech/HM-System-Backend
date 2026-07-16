@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr
 
 
 class StaffListItem(BaseModel):
@@ -28,13 +28,6 @@ class StaffListResponse(BaseModel):
 class StaffDetailOut(StaffListItem):
     phone: Optional[str] = None
     login_count: int = 0
-    specialization: Optional[str] = None
-    medical_license_number: Optional[str] = None
-    consultation_fee: Optional[float] = None
-    is_profile_completed: Optional[bool] = None
-    shift_name: Optional[str] = None
-    shift_start_time: Optional[str] = None
-    shift_end_time: Optional[str] = None
 
 
 class StaffActivateRequest(BaseModel):
@@ -47,13 +40,6 @@ class StaffUpdateRequest(BaseModel):
     role_id: Optional[int] = None
     department_id: Optional[int] = None
     phone: Optional[str] = None
-    specialization: Optional[str] = None
-    medical_license_number: Optional[str] = None
-    consultation_fee: Optional[float] = Field(None, ge=0)
-    # Admin-owned nurse shift fields
-    shift_name: Optional[str] = Field(None, max_length=100)
-    shift_start_time: Optional[str] = Field(None, max_length=10)
-    shift_end_time: Optional[str] = Field(None, max_length=10)
 
 
 class StaffActionResponse(BaseModel):

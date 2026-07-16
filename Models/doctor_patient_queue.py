@@ -33,7 +33,7 @@ class QueueStatus(str, enum.Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
-
+ 
 
 # ==========================================================
 # PRIORITY

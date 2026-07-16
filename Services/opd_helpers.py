@@ -4,7 +4,7 @@ from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 
 from Models.department import Department
 from Models.opd_billing import BillItem, PaymentTransaction
@@ -101,7 +101,6 @@ def list_doctors_in_department(db: Session, department_id: int) -> Tuple[Departm
     dept = get_department(db, department_id)
     doctors = (
         db.query(User)
-        .options(joinedload(User.doctor_profile))
         .join(Role, User.role_id == Role.id)
         .filter(
             User.department_id == department_id,

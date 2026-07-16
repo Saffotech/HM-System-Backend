@@ -365,6 +365,79 @@ def get_today_queue_service(db: Session, doctor_id: int) -> list[PatientQueue]:
     return q.order_by(PatientQueue.priority.desc(), PatientQueue.token_number.asc()).all()
 
 
+def start_consultation_service(
+    db: Session,
+    queue_id: int,
+    doctor_id: int,
+) -> dict:
+    """Mark consultation started for a scheduled queue row (no separate in_progress status)."""
+    queue = (
+        db.query(PatientQueue)
+        .filter(PatientQueue.id == queue_id, PatientQueue.doctor_id == doctor_id)
+        .with_for_update()
+        .first()
+    )
+    if not queue:
+        raise HTTPException(status_code=404, detail="Queue not found")
+
+    if not is_queue_status(queue.status, COMPLETE_CONSULTATION_ELIGIBLE):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Consultation can only be started from scheduled "
+                f"(current: {status_value(queue.status)})"
+            ),
+        )
+
+    now = datetime.now(IST)
+    db.query(PatientQueue).filter(
+        PatientQueue.doctor_id == doctor_id,
+        PatientQueue.queue_date == _today(),
+        PatientQueue.is_current.is_(True),
+        PatientQueue.id != queue.id,
+    ).update({"is_current": False}, synchronize_session=False)
+
+    queue.is_current = True
+    if queue.consultation_started_at is None:
+        queue.consultation_started_at = now
+    queue.updated_by = doctor_id
+    persist(db)
+    db.refresh(queue)
+
+    waiting_minutes = 0
+    if queue.queue_entered_at:
+        entered = queue.queue_entered_at
+        if entered.tzinfo is None:
+            entered = entered.replace(tzinfo=IST)
+        waiting_minutes = max(int((now - entered).total_seconds() // 60), 0)
+
+    return {
+        "waiting_minutes": waiting_minutes,
+        "queue": queue_to_summary(queue),
+    }
+
+
+def get_current_consultation_service(
+    db: Session,
+    doctor_id: int,
+) -> dict | None:
+    """Return today's current consultation for the doctor, if any."""
+    queue = (
+        db.query(PatientQueue)
+        .filter(
+            PatientQueue.doctor_id == doctor_id,
+            PatientQueue.queue_date == _today(),
+            PatientQueue.is_current.is_(True),
+            PatientQueue.status == QueueStatus.SCHEDULED,
+        )
+        .order_by(PatientQueue.consultation_started_at.desc().nullslast())
+        .first()
+    )
+    if not queue:
+        return None
+    return queue_to_summary(queue)
+
+
 def complete_consultation_service(
     db: Session,
     queue_id: int,

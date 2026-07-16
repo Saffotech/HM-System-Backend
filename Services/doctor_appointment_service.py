@@ -18,9 +18,9 @@ from Services.queue_helpers import persist, status_value
 
 IST = opd_helpers.IST
 
-# Doctor / frontend-facing transitions only (no_show is system-managed in DB).
+# Doctor may only complete. Cancel is OPD; no_show is system-managed.
 VALID_TRANSITIONS = {
-    "scheduled": ["completed", "cancelled"],
+    "scheduled": ["completed"],
     "completed": [],
     "cancelled": [],
     "no_show": [],

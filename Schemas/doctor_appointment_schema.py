@@ -6,11 +6,9 @@ from pydantic import BaseModel
 
 
 class DoctorAppointmentStatusUpdate(str, Enum):
-    """Statuses doctors may set via API — no_show is system/DB only."""
+    """Doctor may only complete consultation. Cancel = OPD; no_show = system."""
 
-    scheduled = "scheduled"
     completed = "completed"
-    cancelled = "cancelled"
 
 
 class AppointmentStatusUpdate(BaseModel):
