@@ -42,6 +42,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    lab_technician_profile = relationship(
+        "LabTechnicianProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     specialization = Column(String(120), nullable=True)
 

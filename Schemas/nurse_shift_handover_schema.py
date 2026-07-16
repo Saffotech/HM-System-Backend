@@ -237,7 +237,7 @@ class ShiftHandoverPaginatedResponse(BaseModel):
 
     page: int
 
-    limit: int
+    page_size: int
 
     data: List[ShiftHandoverListResponse]
 

@@ -16,6 +16,10 @@ from Schemas.doctor_lab_test_schema import (
 )
 from Schemas.lab_schema import ReportSource
 from Services import doctor_helpers as h
+from Services.lab_notification_helpers import (
+    notify_lab_order_cancelled,
+    notify_lab_order_created,
+)
 from Services.lab_service import (
     EXTENSION_MEDIA_TYPES,
     _apply_report_source_filter,
@@ -85,6 +89,7 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
     db.add(lab_test)
     db.commit()
     db.refresh(lab_test)
+    notify_lab_order_created(db, lab_test, doctor_id)
     return _serialize_lab_test_response(lab_test)
 
 
@@ -256,6 +261,7 @@ def cancel_lab_test_service(db: Session, test_id: int, doctor_id: int):
     test.status = LabTestStatus.CANCELLED
     db.commit()
     db.refresh(test)
+    notify_lab_order_cancelled(db, test, doctor_id)
     return {"message": "Lab test cancelled successfully"}
 
 

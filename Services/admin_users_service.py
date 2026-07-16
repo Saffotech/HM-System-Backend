@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session, joinedload
 from Enums.notification import NotificationType, ReferenceType
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile
+from Models.lab_technician_profile import LabTechnicianProfile
 from Models.nurse_profile import NurseProfile
 from Models.receptionist_profile import ReceptionistProfile
 from Models.role import Role
@@ -39,11 +40,18 @@ STAFF_NOTIFY_PROFILE_FIELDS = frozenset({"department_id"})
 SHIFT_FIELDS = frozenset(
     {"shift_name", "shift_start_time", "shift_end_time"}
 )
-DEPARTMENT_NOTIFY_ROLES = frozenset({"doctor", "nurse", "receptionist"})
-SHIFT_NOTIFY_ROLES = frozenset({"doctor", "nurse", "receptionist"})
-ACCOUNT_NOTIFY_ROLES = frozenset({"doctor", "nurse", "receptionist"})
-# Shift fields still write only to doctor / nurse / receptionist profiles.
-SHIFT_ELIGIBLE_ROLES = frozenset({"doctor", "nurse", "receptionist"})
+DEPARTMENT_NOTIFY_ROLES = frozenset(
+    {"doctor", "nurse", "receptionist", "lab_technician"}
+)
+SHIFT_NOTIFY_ROLES = frozenset(
+    {"doctor", "nurse", "receptionist", "lab_technician"}
+)
+ACCOUNT_NOTIFY_ROLES = frozenset(
+    {"doctor", "nurse", "receptionist", "lab_technician"}
+)
+SHIFT_ELIGIBLE_ROLES = frozenset(
+    {"doctor", "nurse", "receptionist", "lab_technician"}
+)
 
 
 def _role_name(user: User) -> str:
@@ -100,6 +108,23 @@ def _require_receptionist_profile(
     return profile
 
 
+def _require_lab_technician_profile(
+    db: Session, user: User
+) -> LabTechnicianProfile:
+    if _role_name(user) != "lab_technician":
+        raise HTTPException(
+            status_code=400,
+            detail="Lab technician profile required",
+        )
+    profile = user.lab_technician_profile
+    if profile is None:
+        profile = LabTechnicianProfile(user_id=user.id)
+        db.add(profile)
+        db.flush()
+        user.lab_technician_profile = profile
+    return profile
+
+
 def _apply_shift_fields(db: Session, user: User, updates: dict) -> None:
     """Write admin shift fields onto staff profile tables."""
     role = _role_name(user)
@@ -109,10 +134,15 @@ def _apply_shift_fields(db: Session, user: User, updates: dict) -> None:
         profile = _require_nurse_profile(db, user)
     elif role == "receptionist":
         profile = _require_receptionist_profile(db, user)
+    elif role == "lab_technician":
+        profile = _require_lab_technician_profile(db, user)
     else:
         raise HTTPException(
             status_code=400,
-            detail="Shift fields apply only to doctors, nurses, and receptionists",
+            detail=(
+                "Shift fields apply only to doctors, nurses, "
+                "receptionists, and lab technicians"
+            ),
         )
     for field in SHIFT_FIELDS:
         if field not in updates:
@@ -172,6 +202,7 @@ def _to_detail(user: User) -> StaffDetailOut:
     doctor_profile = user.doctor_profile
     nurse_profile = user.nurse_profile
     receptionist_profile = user.receptionist_profile
+    lab_technician_profile = user.lab_technician_profile
     role_name = user.role_obj.name if user.role_obj else None
 
     shift_profile = None
@@ -181,6 +212,8 @@ def _to_detail(user: User) -> StaffDetailOut:
         shift_profile = nurse_profile
     elif role_name == "receptionist" and receptionist_profile:
         shift_profile = receptionist_profile
+    elif role_name == "lab_technician" and lab_technician_profile:
+        shift_profile = lab_technician_profile
 
     is_profile_completed = None
     if role_name == "doctor" and doctor_profile:
@@ -189,6 +222,8 @@ def _to_detail(user: User) -> StaffDetailOut:
         is_profile_completed = bool(nurse_profile.is_profile_completed)
     elif role_name == "receptionist" and receptionist_profile:
         is_profile_completed = bool(receptionist_profile.is_profile_completed)
+    elif role_name == "lab_technician" and lab_technician_profile:
+        is_profile_completed = bool(lab_technician_profile.is_profile_completed)
 
     return StaffDetailOut(
         **base.model_dump(),
@@ -225,6 +260,7 @@ def _base_query(db: Session):
             joinedload(User.doctor_profile),
             joinedload(User.nurse_profile),
             joinedload(User.receptionist_profile),
+            joinedload(User.lab_technician_profile),
         )
         .filter(User.deleted_at.is_(None))
     )

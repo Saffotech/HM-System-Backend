@@ -1,18 +1,12 @@
 from datetime import datetime
 from typing import Optional
 
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, ConfigDict, model_validator
 
-
-# ==========================================================
-#  CREATE VITALS
-# ==========================================================
 
 class VitalCreate(BaseModel):
-
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
-
     temperature: Optional[float] = None
     blood_pressure: Optional[str] = None
     heart_rate: Optional[int] = None
@@ -30,77 +24,50 @@ class VitalCreate(BaseModel):
             raise ValueError("Provide appointment_id or patient_id")
         return self
 
-# ==========================================================
-# UPDATE VITAL
-# ==========================================================
 
 class VitalUpdate(BaseModel):
-
     temperature: Optional[float] = None
-
     blood_pressure: Optional[str] = None
-
     heart_rate: Optional[int] = None
-
     respiratory_rate: Optional[int] = None
-
     oxygen_saturation: Optional[int] = None
-
     blood_sugar: Optional[float] = None
-
     weight: Optional[float] = None
-
     pain_level: Optional[int] = None
-
     observation_notes: Optional[str] = None
-
     mark_critical: Optional[bool] = False
+    status: Optional[str] = None
 
-# ==========================================================
-# VITALS Response
-# ==========================================================
 
 class VitalResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
-
     appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
     recorded_by: int
-
-    temperature: Optional[float]
-    blood_pressure: Optional[str]
-    heart_rate: Optional[int]
-    respiratory_rate: Optional[int]
-    oxygen_saturation: Optional[int]
-    blood_sugar: Optional[float]
-    weight: Optional[float]
-    pain_level: Optional[int]
-    observation_notes: Optional[str]
-
+    recorded_by_name: Optional[str] = None
+    temperature: Optional[float] = None
+    blood_pressure: Optional[str] = None
+    heart_rate: Optional[int] = None
+    respiratory_rate: Optional[int] = None
+    oxygen_saturation: Optional[int] = None
+    blood_sugar: Optional[float] = None
+    weight: Optional[float] = None
+    pain_level: Optional[int] = None
+    observation_notes: Optional[str] = None
     status: Optional[str] = None
     recorded_at: datetime
 
-    class Config:
-        from_attributes = True
-
-
-# ==========================================================
-# CREATE NURSING NOTE
-# ==========================================================
 
 class NursingNoteCreate(BaseModel):
-
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
-
     symptoms: Optional[str] = None
-
     treatment_response: Optional[str] = None
-
     additional_notes: Optional[str] = None
 
     @model_validator(mode="after")
@@ -110,66 +77,26 @@ class NursingNoteCreate(BaseModel):
         return self
 
 
-# ==========================================================
-# UPDATE NURSING NOTE
-# ==========================================================
-
 class NursingNoteUpdate(BaseModel):
-
     symptoms: Optional[str] = None
-
     treatment_response: Optional[str] = None
-
     additional_notes: Optional[str] = None
+    status: Optional[str] = None
 
-
-# ==========================================================
-# RESPONSE
-# ==========================================================
 
 class NursingNoteResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
     id: int
-
     appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
     nurse_id: int
-
-    symptoms: Optional[str]
-    treatment_response: Optional[str]
-    additional_notes: Optional[str]
-
+    nurse_name: Optional[str] = None
+    symptoms: Optional[str] = None
+    treatment_response: Optional[str] = None
+    additional_notes: Optional[str] = None
     status: Optional[str] = None
     created_at: datetime
-
-    class Config:
-        from_attributes = True
-
-
-# ==========================================================
-#  Search Response
-# ==========================================================
-
-class SearchResponse(BaseModel):
-
-    appointment_id: Optional[int] = None
-
-    patient_id: int
-
-    patient_uid: str
-
-    first_name: str
-
-    last_name: str | None = None
-
-    phone: str
-
-    status: str
-
-    scheduled_at: Optional[datetime] = None
-
-    class Config:
-        from_attributes = True

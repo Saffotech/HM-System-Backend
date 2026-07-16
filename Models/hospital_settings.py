@@ -25,7 +25,7 @@ class HospitalSettings(Base):
     website = Column(String(300), nullable=True)
     gstin = Column(String(20), nullable=True)
     pan = Column(String(20), nullable=True)
-    registration_number = Column(String(100), nullable=True)
+    license_number = Column(String(100), nullable=True)
     default_registration_fee = Column(Float, nullable=False, default=0.0)
     default_consultation_fee = Column(Float, nullable=False, default=0.0)
     default_gst_percent = Column(Float, nullable=False, default=0.0)

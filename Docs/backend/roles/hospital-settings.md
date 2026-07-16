@@ -102,7 +102,7 @@ OPD staff can also **pre-fill** default fees when registering or billing a patie
 |--------|------|---------|---------|
 | `gstin` | string, optional | 27AAAAA0000A1Z5 | GST on bills |
 | `pan` | string, optional | AAAAA0000A | Invoice / compliance |
-| `registration_number` | string, optional | State reg. no. | Optional license id |
+| `license_number` | string, optional | State license no. | Optional license id |
 
 #### OPD billing defaults
 
@@ -170,7 +170,7 @@ Hospital Admin must get **403** on both endpoints.
   "website": "",
   "gstin": "27AAAAA0000A1Z5",
   "pan": "",
-  "registration_number": "",
+  "license_number": "",
   "default_registration_fee": 100,
   "default_consultation_fee": 500,
   "default_gst_percent": 0,

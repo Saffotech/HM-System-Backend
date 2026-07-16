@@ -1,4 +1,4 @@
-"""Nurse profile service — GET/PUT profile and image upload/delete."""
+"""Lab technician profile service — GET/PUT profile and image upload/delete."""
 import logging
 import os
 from datetime import datetime
@@ -8,7 +8,17 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
-from Models.nurse_profile import NurseProfile
+from Models.lab_technician_profile import LabTechnicianProfile
+from Models.user import User
+from Schemas.lab_technician_profile_schema import (
+    AddressInfo,
+    DepartmentInfo,
+    EmergencyContactInfo,
+    LabTechnicianProfileResponse,
+    LabTechnicianProfileUpdate,
+    RoleInfo,
+    ShiftInfo,
+)
 from Utils.profile_image import (
     delete_profile_image_file,
     remove_orphan_profile_image,
@@ -16,35 +26,27 @@ from Utils.profile_image import (
     to_profile_image_url,
 )
 from Utils.shift_time import format_shift_time
-from Models.user import User
-from Schemas.nurse_profile_schema import (
-    AddressInfo,
-    DepartmentInfo,
-    EmergencyContactInfo,
-    NurseProfileResponse,
-    NurseProfileUpdate,
-    RoleInfo,
-    ShiftInfo,
-)
 
 logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
-NURSE_ROLE = "nurse"
-NURSE_UPLOAD_DIR = os.getenv("NURSE_PROFILE_UPLOAD_DIR", "uploads/nurse_image")
+LAB_TECHNICIAN_ROLE = "lab_technician"
+LAB_TECH_UPLOAD_DIR = os.getenv(
+    "LAB_TECHNICIAN_PROFILE_UPLOAD_DIR",
+    "uploads/lab_technician_image",
+)
 
 
 def _now():
-    from Services.nurse_helpers import now_ist
-    return now_ist()
+    return datetime.now(IST)
 
 
-def _assert_nurse(user: User) -> None:
+def _assert_lab_technician(user: User) -> None:
     role_name = user.role_obj.name if user.role_obj else None
-    if role_name != NURSE_ROLE:
+    if role_name != LAB_TECHNICIAN_ROLE:
         raise HTTPException(
             status_code=403,
-            detail="Only nurses can access this endpoint",
+            detail="Only lab technicians can access this endpoint",
         )
 
 
@@ -67,7 +69,7 @@ def _normalize_languages(languages: Optional[List[str]]) -> List[str]:
     return cleaned
 
 
-def compute_profile_completed(profile: NurseProfile) -> bool:
+def compute_profile_completed(profile: LabTechnicianProfile) -> bool:
     return bool(
         profile.qualification
         and profile.experience_years is not None
@@ -75,7 +77,10 @@ def compute_profile_completed(profile: NurseProfile) -> bool:
     )
 
 
-def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> int:
+def compute_profile_completion_percentage(
+    user: User,
+    profile: LabTechnicianProfile,
+) -> int:
     languages = profile.languages if isinstance(profile.languages, list) else []
     checks = [
         bool(user.phone),
@@ -83,6 +88,8 @@ def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> 
         bool(user.address),
         bool(user.city),
         bool(user.state),
+        bool(getattr(user, "country", None)),
+        bool(getattr(user, "postal_code", None)),
         user.date_of_birth is not None,
         user.gender is not None,
         bool(user.emergency_contact_name),
@@ -90,6 +97,7 @@ def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> 
         bool(profile.qualification),
         profile.experience_years is not None,
         bool(profile.bio),
+        bool(profile.license_number),
         bool(languages),
         bool(profile.profile_image),
     ]
@@ -98,34 +106,37 @@ def compute_profile_completion_percentage(user: User, profile: NurseProfile) -> 
     return int(round(100 * sum(1 for ok in checks if ok) / len(checks)))
 
 
-def _get_nurse_user(db: Session, user_id: int) -> User:
+def _get_lab_technician_user(db: Session, user_id: int) -> User:
     user = (
         db.query(User)
         .options(
             joinedload(User.role_obj),
             joinedload(User.department),
-            joinedload(User.nurse_profile),
+            joinedload(User.lab_technician_profile),
         )
         .filter(User.id == user_id, User.deleted_at.is_(None))
         .first()
     )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    _assert_nurse(user)
+    _assert_lab_technician(user)
     return user
 
 
-def _get_profile_or_404(user: User) -> NurseProfile:
-    profile = user.nurse_profile
+def _get_profile_or_404(user: User) -> LabTechnicianProfile:
+    profile = user.lab_technician_profile
     if not profile:
         raise HTTPException(
             status_code=404,
-            detail="Nurse profile not found. Contact admin.",
+            detail="Lab technician profile not found. Contact admin.",
         )
     return profile
 
 
-def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
+def _to_response(
+    user: User,
+    profile: LabTechnicianProfile,
+) -> LabTechnicianProfileResponse:
     languages = profile.languages if isinstance(profile.languages, list) else []
 
     department = None
@@ -144,7 +155,7 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
             end_time=format_shift_time(profile.shift_end_time),
         )
 
-    return NurseProfileResponse(
+    return LabTechnicianProfileResponse(
         user_id=user.id,
         first_name=user.first_name,
         last_name=user.last_name,
@@ -155,6 +166,8 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
             line=user.address,
             city=user.city,
             state=user.state,
+            country=getattr(user, "country", None),
+            postal_code=getattr(user, "postal_code", None),
         ),
         date_of_birth=user.date_of_birth,
         gender=user.gender,
@@ -184,25 +197,33 @@ def _to_response(user: User, profile: NurseProfile) -> NurseProfileResponse:
     )
 
 
-def get_nurse_profile(db: Session, current_user: User) -> NurseProfileResponse:
-    user = _get_nurse_user(db, current_user.id)
+def get_lab_technician_profile(
+    db: Session,
+    current_user: User,
+) -> LabTechnicianProfileResponse:
+    user = _get_lab_technician_user(db, current_user.id)
     profile = _get_profile_or_404(user)
     return _to_response(user, profile)
 
 
-def update_nurse_profile(
+def update_lab_technician_profile(
     db: Session,
     current_user: User,
-    data: NurseProfileUpdate,
-) -> NurseProfileResponse:
-    user = _get_nurse_user(db, current_user.id)
+    data: LabTechnicianProfileUpdate,
+) -> LabTechnicianProfileResponse:
+    user = _get_lab_technician_user(db, current_user.id)
     profile = _get_profile_or_404(user)
     updates = data.model_dump(exclude_unset=True)
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    profile_fields = ("qualification", "experience_years", "bio")
+    profile_fields = (
+        "qualification",
+        "experience_years",
+        "bio",
+        "license_number",
+    )
     user_fields = (
         "phone",
         "phone_code",
@@ -229,6 +250,10 @@ def update_nurse_profile(
             user.city = address["city"]
         if "state" in address:
             user.state = address["state"]
+        if "country" in address:
+            user.country = address["country"]
+        if "postal_code" in address:
+            user.postal_code = address["postal_code"]
 
     if "emergency_contact" in updates and updates["emergency_contact"] is not None:
         contact = updates["emergency_contact"]
@@ -241,10 +266,10 @@ def update_nurse_profile(
     profile.updated_at = _now()
 
     db.commit()
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_lab_technician_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
-    logger.info("Nurse %s updated profile", current_user.id)
+    logger.info("Lab technician %s updated profile", current_user.id)
     return _to_response(user, profile)
 
 
@@ -253,12 +278,12 @@ def upload_profile_image(
     current_user: User,
     file: UploadFile,
 ) -> dict:
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_lab_technician_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
     old_stored_path = profile.profile_image
     stored_path, absolute_path = save_profile_image_from_upload(
-        file, NURSE_UPLOAD_DIR
+        file, LAB_TECH_UPLOAD_DIR
     )
 
     profile.profile_image = stored_path
@@ -272,9 +297,9 @@ def upload_profile_image(
         remove_orphan_profile_image(absolute_path)
         raise
 
-    delete_profile_image_file(NURSE_UPLOAD_DIR, old_stored_path)
+    delete_profile_image_file(LAB_TECH_UPLOAD_DIR, old_stored_path)
 
-    logger.info("Nurse %s uploaded profile image", current_user.id)
+    logger.info("Lab technician %s uploaded profile image", current_user.id)
     return {
         "message": "Profile image uploaded successfully",
         "profile_image_url": to_profile_image_url(profile.profile_image),
@@ -282,7 +307,7 @@ def upload_profile_image(
 
 
 def delete_profile_image(db: Session, current_user: User) -> dict:
-    user = _get_nurse_user(db, current_user.id)
+    user = _get_lab_technician_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
     if not profile.profile_image:
@@ -293,23 +318,23 @@ def delete_profile_image(db: Session, current_user: User) -> dict:
     profile.updated_at = _now()
     db.commit()
 
-    delete_profile_image_file(NURSE_UPLOAD_DIR, old_stored_path)
+    delete_profile_image_file(LAB_TECH_UPLOAD_DIR, old_stored_path)
 
-    logger.info("Nurse %s deleted profile image", current_user.id)
+    logger.info("Lab technician %s deleted profile image", current_user.id)
     return {
         "message": "Profile image deleted successfully",
         "profile_image_url": None,
     }
 
 
-def create_empty_nurse_profile(
+def create_empty_lab_technician_profile(
     db: Session,
     user_id: int,
     *,
     license_number: Optional[str] = None,
-) -> NurseProfile:
-    """Create empty nurse_profiles row (used during registration). Caller commits."""
-    profile = NurseProfile(
+) -> LabTechnicianProfile:
+    """Create empty lab_technician_profiles row (used during registration). Caller commits."""
+    profile = LabTechnicianProfile(
         user_id=user_id,
         license_number=license_number,
         languages=[],

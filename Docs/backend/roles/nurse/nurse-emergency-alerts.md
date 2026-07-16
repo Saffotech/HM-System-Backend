@@ -19,25 +19,30 @@ Also used in:
 
 ---
 
-## Permissions (add in seed.py)
+## Permissions
 
-**Already in seed:**
 ```
-patients:view, opd:view, lab:view
-```
-
-**Add when you build emergency alert APIs:**
-```
-emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergency_alerts:escalate
+nurse_alerts:view
+nurse_alerts:create
+nurse_alerts:update
+nurse_alerts:escalate
 ```
 
-Assign all four to role `nurse`.
+Assigned to role `nurse` in `seed.py` (renamed from `emergency_alerts:*`).
 
 ---
 
-## APIs to build
+## APIs (built)
 
 | Step | What | Method | URL |
+|------|------|--------|-----|
+| 1 | List alerts | GET | `/nurse/alerts` |
+| 2 | Summary | GET | `/nurse/alerts/summary` |
+| 3 | Create alert | POST | `/nurse/alerts` |
+| 4 | Alert detail | GET | `/nurse/alerts/{alert_id}` |
+| 5 | Assign | PUT | `/nurse/alerts/{alert_id}/assign` |
+| 6 | Resolve | PUT | `/nurse/alerts/{alert_id}/resolve` |
+| 7 | Escalate | PUT | `/nurse/alerts/{alert_id}/escalate` |
 |------|------|--------|-----|
 | 1 | List alerts | GET | `/nurse/alerts` |
 | 2 | Dashboard summary | GET | `/nurse/alerts/summary` |

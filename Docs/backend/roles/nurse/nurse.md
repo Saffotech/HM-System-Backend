@@ -1,26 +1,27 @@
 # Nurse (`nurse`)
 
-Nurse records vitals, nursing notes, helps with patient care. Does **not** do billing or prescriptions.
-
-**Source:** `_extracted_fields_requirements.txt` (Word file: `Fieds and Requirements.docx`)
+Nurse records vitals, nursing notes, medications, shift handovers, and emergency alerts.
+Does **not** do billing or prescriptions.
 
 ---
 
-## Permissions (already in seed)
+## Permissions (seed)
 
 ```
-patients:view, opd:view, lab:view
+patients:view
+opd:view
+lab:view
+nurse_vitals:view|create|update
+nurse_notes:view|create|update
+nurse_medication:view|create|update
+nurse_handover:view|create|update|submit|take_over
+nurse_alerts:view|create|update|escalate
+nurse_profile:view|update|upload_image|delete_image
+notifications:view|update
 ```
 
-**Add when you build nurse APIs:**
-
-```
-vitals:create, vitals:view
-nursing_notes:create, nursing_notes:view
-medications:create, medications:view
-handover:create, handover:view, handover:update
-emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergency_alerts:escalate
-```
+> Note: alert permissions were renamed from `emergency_alerts:*` to `nurse_alerts:*`.
+> Run alembic migration `u9v0w1x2y3z4` then `python seed.py`.
 
 ---
 
@@ -33,115 +34,65 @@ emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergen
 | first_name, email, password, role_id | Yes |
 | department_id | **Yes** — ward/department |
 
-**Profile fields (not same as doctor):**
+---
 
-| Field | Required |
-|-------|----------|
-| phone | Yes |
-| nursing_license_no | Yes |
-| qualification | Yes — e.g. BSc Nursing |
+## API map (current)
+
+| Area | Method | URL | Permission |
+|------|--------|-----|------------|
+| Dashboard stats | GET | `/nurse/dashboard/stats` | `opd:view` |
+| Today queue | GET | `/nurse/queue/today` | `opd:view` |
+| Bed patients | GET | `/nurse/beds/patients` | `opd:view` |
+| Bed summary | GET | `/nurse/beds/patients/summary` | `opd:view` |
+| Patient overview | GET | `/nurse/patients/{id}/overview` | `patients:view` |
+| Profile | GET/PUT | `/nurse/profile` | `nurse_profile:*` |
+| Profile image | POST/DELETE | `/nurse/profile/image` | `nurse_profile:*` |
+| Vitals create | POST | `/nurse/vitals` | `nurse_vitals:create` |
+| Vitals update | PUT | `/nurse/vitals/{vital_id}` | `nurse_vitals:update` |
+| Vitals list | GET | `/nurse/vitals` | `nurse_vitals:view` |
+| Vitals search | GET | `/nurse/vitals/search` | `nurse_vitals:view` |
+| Vital detail | GET | `/nurse/vitals/{vital_id}` | `nurse_vitals:view` |
+| Notes create | POST | `/nurse/notes` | `nurse_notes:create` |
+| Notes update | PUT | `/nurse/notes/{note_id}` | `nurse_notes:update` |
+| Notes list | GET | `/nurse/notes` | `nurse_notes:view` |
+| Notes search | GET | `/nurse/notes/search` | `nurse_notes:view` |
+| Note detail | GET | `/nurse/notes/{note_id}` | `nurse_notes:view` |
+| Med patients | GET | `/nurse/medications/patients` | `nurse_medication:view` |
+| Patient meds | GET | `/nurse/medications/patient/{patient_id}` | `nurse_medication:view` |
+| Administer | POST | `/nurse/medications/administer` | `nurse_medication:create` |
+| Update admin | PUT | `/nurse/medications/administer/{id}` | `nurse_medication:update` |
+| Med history | GET | `/nurse/medications/history` | `nurse_medication:view` |
+| Patient history | GET | `/nurse/medications/history/{patient_id}` | `nurse_medication:view` |
+| Handover create | POST | `/nurse/handover` | `nurse_handover:create` |
+| Handover update | PUT | `/nurse/handover/{id}` | `nurse_handover:update` |
+| Add patients | POST | `/nurse/handover/{id}/patients` | `nurse_handover:update` |
+| Update patient row | PUT | `/nurse/handover/patients/{id}` | `nurse_handover:update` |
+| Delete patient row | DELETE | `/nurse/handover/patients/{id}` | `nurse_handover:update` |
+| Submit | PUT | `/nurse/handover/{id}/submit` | `nurse_handover:submit` |
+| Take over | PUT | `/nurse/handover/{id}/take-over` | `nurse_handover:take_over` |
+| Handover list | GET | `/nurse/handover` | `nurse_handover:view` |
+| Handover detail | GET | `/nurse/handover/{id}` | `nurse_handover:view` |
+| Alerts list | GET | `/nurse/alerts` | `nurse_alerts:view` |
+| Alerts summary | GET | `/nurse/alerts/summary` | `nurse_alerts:view` |
+| Alert create | POST | `/nurse/alerts` | `nurse_alerts:create` |
+| Alert detail | GET | `/nurse/alerts/{id}` | `nurse_alerts:view` |
+| Assign | PUT | `/nurse/alerts/{id}/assign` | `nurse_alerts:update` |
+| Resolve | PUT | `/nurse/alerts/{id}/resolve` | `nurse_alerts:update` |
+| Escalate | PUT | `/nurse/alerts/{id}/escalate` | `nurse_alerts:escalate` |
+| Notifications | * | `/nurse/notifications` | `notifications:*` |
 
 ---
 
-## Phase 1 — APIs (built)
+## Vitals / notes identity rules
 
-| Step | What | Method | URL |
-|------|------|--------|-----|
-| 1 | Today's queue | GET | `/nurse/queue/today` |
-| 2 | Record vitals | POST | `/nurse/vitals` |
-| 3 | Vitals history | GET | `/nurse/vitals/patient/{patient_id}` |
-| 4 | Add nursing note | POST | `/nurse/notes` |
-| 5 | List notes | GET | `/nurse/notes/patient/{patient_id}` |
+- Provide **`appointment_id`** (OPD) **or** **`patient_id`** for a patient currently on an occupied bed (IPD).
+- Responses include `patient_name`, `patient_uid`, and `bed_number` when available.
+- Vitals update may set `status` to `recorded` / `reviewed`.
+- Notes update may set `status` to `active` / `archived`.
 
 ---
 
-## Phase 2 — APIs
+## Module docs
 
-| Module | Status | Doc |
-|--------|--------|-----|
-| Medication administration | Done | `/nurse/medications` |
-| Shift handover | To build | [nurse-handover.md](./nurse-handover.md) |
-| Emergency alerts | To build | [nurse-emergency-alerts.md](./nurse-emergency-alerts.md) |
-
----
-
-## Record vitals (Word file View 4)
-
-**POST** `/nurse/vitals`
-
-| Field | Required | Example |
-|-------|----------|---------|
-| patient_id | Yes | 1 |
-| temperature | No | 98.6 |
-| blood_pressure | No | 120/80 |
-| heart_rate | No | 72 |
-| respiratory_rate | No | 18 |
-| oxygen_saturation | No | 98 |
-| blood_sugar | No | |
-| weight | No | |
-| pain_level | No | 1–10 |
-| observation_notes | No | text |
-| status | No | recorded / reviewed |
-
-`recorded_by` = logged-in nurse (from token).  
-`recorded_at` = auto now.
-
----
-
-## Nursing note (Word file View 6)
-
-**POST** `/nurse/notes`
-
-| Field | Required |
-|-------|----------|
-| patient_id | Yes |
-| symptoms | No |
-| treatment_response | No |
-| additional_notes | No |
-
----
-
-## Medication administration (Word file View 5) — Done
-
-| Step | What | Method | URL |
-|------|------|--------|-----|
-| 1 | Medication patients list | GET | `/nurse/medications/patients` |
-| 2 | Patient medications | GET | `/nurse/medications/patient/{patient_id}` |
-| 3 | Administer medication | POST | `/nurse/medications/administer` |
-| 4 | Update administration | PUT | `/nurse/medications/administer/{administration_id}` |
-| 5 | Medication history | GET | `/nurse/medications/history` |
-| 6 | Patient medication history | GET | `/nurse/medications/history/{patient_id}` |
-
----
-
-## Tables (Phase 1)
-
-### patient_vitals
-```
-id, patient_id, appointment_id, recorded_by (user id),
-temperature, blood_pressure, heart_rate,
-respiratory_rate, oxygen_saturation,
-blood_sugar, weight, pain_level,
-observation_notes, status, recorded_at
-```
-
-### nursing_notes
-```
-id, patient_id, nurse_id,
-symptoms, treatment_response, additional_notes,
-status, created_at
-```
-
-### medication_administrations
-```
-id, prescription_item_id, patient_id, administered_by,
-medicine_name, dosage, frequency, bed_number, ward_name,
-scheduled_time, status, remarks, administered_at
-```
-
----
-
-## Phase 2 docs (read next)
-
-- [Shift Handover](./nurse-handover.md) — Word file View 7
-- [Emergency Alerts](./nurse-emergency-alerts.md) — Word file View 8
+- [Shift Handover](./nurse-handover.md)
+- [Emergency Alerts](./nurse-emergency-alerts.md)

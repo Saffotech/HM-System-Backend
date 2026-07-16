@@ -12,6 +12,7 @@ from database import SessionLocal
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — required for User.doctor_profile relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401
 from Models.nurse_profile import NurseProfile  # noqa: F401 — required for User.nurse_profile relationship
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401 — User.receptionist_profile
 from Models.role import Permission, Role, RolePermission
@@ -63,10 +64,10 @@ PERMISSIONS_LIST = [
     "nurse_handover:update",
     "nurse_handover:submit",
     "nurse_handover:take_over",
-    "emergency_alerts:view",
-    "emergency_alerts:create",
-    "emergency_alerts:update",
-    "emergency_alerts:escalate",
+    "nurse_alerts:view",
+    "nurse_alerts:create",
+    "nurse_alerts:update",
+    "nurse_alerts:escalate",
     "doctor_profile:view",
     "doctor_profile:update",
     "doctor_profile:upload_image",
@@ -79,6 +80,10 @@ PERMISSIONS_LIST = [
     "receptionist_profile:update",
     "receptionist_profile:upload_image",
     "receptionist_profile:delete_image",
+    "lab_technician_profile:view",
+    "lab_technician_profile:update",
+    "lab_technician_profile:upload_image",
+    "lab_technician_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "receptionist:view_doctor_schedule",
@@ -146,10 +151,10 @@ ROLES_DATA = {
             "nurse_handover:update",
             "nurse_handover:submit",
             "nurse_handover:take_over",
-            "emergency_alerts:view",
-            "emergency_alerts:create",
-            "emergency_alerts:update",
-            "emergency_alerts:escalate",
+            "nurse_alerts:view",
+            "nurse_alerts:create",
+            "nurse_alerts:update",
+            "nurse_alerts:escalate",
             "nurse_profile:view",
             "nurse_profile:update",
             "nurse_profile:upload_image",
@@ -192,6 +197,12 @@ ROLES_DATA = {
             "lab:create",
             "lab:update",
             "lab:upload_report",
+            "lab_technician_profile:view",
+            "lab_technician_profile:update",
+            "lab_technician_profile:upload_image",
+            "lab_technician_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "receptionist": {

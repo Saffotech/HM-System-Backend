@@ -25,6 +25,8 @@ from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverPatientsBulkCreate,
     ShiftHandoverPatientUpdate,
     ShiftHandoverTakeOver,
+    ShiftHandoverPaginatedResponse,
+    ShiftHandoverDetailResponse,
 )
 
 from Services.nurse_shift_handover_service import (
@@ -294,7 +296,7 @@ def take_over_handover(
 # HANDOVER LIST
 # ==========================================================
 
-@router.get("")
+@router.get("", response_model=ShiftHandoverPaginatedResponse)
 def get_handovers(
 
     handover_uid: str | None = None,
@@ -396,7 +398,7 @@ def get_handovers(
 # HANDOVER DETAIL
 # ==========================================================
 
-@router.get("/{handover_id}")
+@router.get("/{handover_id}", response_model=ShiftHandoverDetailResponse)
 def get_handover_detail(
 
     handover_id: int = Path(

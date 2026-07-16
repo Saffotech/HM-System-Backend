@@ -56,7 +56,7 @@ Enable nurses to:
 | **Role name (API)** | `nurse` |
 | **Responsibilities** | Queue monitoring, vitals, nursing notes, medication administration, shift handover |
 | **Seed permissions** | `patients:view`, `opd:view`, `lab:view` |
-| **API enforcement** | Nurse endpoints use `get_current_user` (JWT valid). **PermissionChecker is NOT applied** on nurse routers today |
+| **API enforcement** | Nurse endpoints use `get_current_user` (JWT) **and** `PermissionChecker` on each route |
 
 ### Allowed screens
 

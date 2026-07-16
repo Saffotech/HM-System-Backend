@@ -14,23 +14,21 @@ Outgoing nurse summarizes patient condition, pending tasks, and warnings for the
 
 ---
 
-## Permissions (add in seed.py)
+## Permissions
 
-**Already in seed:**
 ```
-patients:view, opd:view, lab:view
-```
-
-**Add when you build handover APIs:**
-```
-handover:create, handover:view, handover:update
+nurse_handover:view
+nurse_handover:create
+nurse_handover:update
+nurse_handover:submit
+nurse_handover:take_over
 ```
 
-Assign all three to role `nurse`.
+Assigned to role `nurse` in `seed.py`.
 
 ---
 
-## APIs to build
+## APIs (built)
 
 | Step | What | Method | URL |
 |------|------|--------|-----|
@@ -38,6 +36,11 @@ Assign all three to role `nurse`.
 | 2 | Add patient summary | POST | `/nurse/handover/{handover_id}/patients` |
 | 3 | Submit handover | PUT | `/nurse/handover/{handover_id}/submit` |
 | 4 | List handovers | GET | `/nurse/handover` |
+| 5 | Take over | PUT | `/nurse/handover/{handover_id}/take-over` |
+| 6 | Detail | GET | `/nurse/handover/{handover_id}` |
+| 7 | Update handover | PUT | `/nurse/handover/{handover_id}` |
+| 8 | Update patient row | PUT | `/nurse/handover/patients/{patient_summary_id}` |
+| 9 | Delete patient row | DELETE | `/nurse/handover/patients/{patient_summary_id}` |
 | 5 | Handover detail | GET | `/nurse/handover/{handover_id}` |
 | 6 | Incoming nurse acknowledge | PUT | `/nurse/handover/{handover_id}/acknowledge` |
 | 7 | Mark shift complete | PUT | `/nurse/handover/{handover_id}/complete` |

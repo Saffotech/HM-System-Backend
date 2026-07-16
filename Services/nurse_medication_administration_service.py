@@ -1,17 +1,19 @@
-from datetime import datetime,date,time
-from zoneinfo import ZoneInfo
+from datetime import datetime, date, time
+
 from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
+
 from Models.patient import Patient
 from Models.opd_billing import Bed
-from Models.doctor_prescriptions import Prescription,PrescriptionItem
+from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.nurse_medication_administration import MedicationAdministration
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate,
     MedicationAdministrationResponse,
 )
+from Services import nurse_helpers as nh
 from Services.nurse_emergency_alert_triggers import (
     process_medication_missed_alert,
 )
@@ -61,22 +63,12 @@ def get_medication_patients_service(
         )
 
     query = (
-        db.query(
-            Prescription,
-            Patient,
-            Bed
-        )
-        .join(
-            Patient,
-            Patient.id == Prescription.patient_id
-        )
-        .join(
-            Bed,
-            Bed.patient_id == Patient.id
-        )
+        db.query(Prescription, Patient, Bed)
+        .join(Patient, Patient.id == Prescription.patient_id)
+        .join(Bed, Bed.patient_id == Patient.id)
         .filter(
             Bed.status == "occupied",
-            Patient.is_active == True
+            Patient.is_active.is_(True),
         )
     )
 
@@ -147,24 +139,12 @@ def get_medication_patients_service(
         )
  
         result.append({
-
             "patient_id": patient.id,
-
-            "patient_name":
-                f"{patient.first_name} "
-                f"{patient.last_name or ''}".strip(),
-
-            "patient_uid":
-                patient.patient_uid,
-
-            "bed_number":
-                bed.bed_number,
-
-            "ward_name":
-                bed.ward_name,
-
-            "medicine_count":
-                medicine_count
+            "patient_name": nh.patient_display_name(patient) or "",
+            "patient_uid": patient.patient_uid,
+            "bed_number": bed.bed_number,
+            "ward_name": bed.ward_name,
+            "medicine_count": medicine_count,
         })
 
     return result
@@ -210,30 +190,13 @@ def get_patient_medications_service(
         .all()
     )
 
-    bed = (
-        db.query(Bed)
-        .filter(
-            Bed.patient_id == patient_id,
-            Bed.status == "occupied"
-        ).order_by(Bed.admitted_at.desc())
-         .first()
-    )
+    bed = nh.occupied_bed_for_patient(db, patient_id)
     return {
         "patient_id": patient.id,
         "patient_uid": patient.patient_uid,
-
-        "patient_name":
-            f"{patient.first_name} "
-            f"{patient.last_name or ''}".strip(),
-
-        "patient_uid": patient.patient_uid,
-
-        "bed_number":
-            bed.bed_number if bed else None,
-
-        "ward_name":
-            bed.ward_name if bed else None,
-
+        "patient_name": nh.patient_display_name(patient) or "",
+        "bed_number": bed.bed_number if bed else None,
+        "ward_name": bed.ward_name if bed else None,
         "medications": [
             {
                 "prescription_item_id": item.id,
@@ -297,15 +260,7 @@ def administer_medication_service(
             detail="Patient not found or inactive"
         )
 
-    bed = (
-        db.query(Bed)
-        .filter(
-            Bed.patient_id == prescription.patient_id,
-            Bed.status == "occupied"
-        )
-        .order_by(Bed.admitted_at.desc())
-        .first()
-    )
+    bed = nh.occupied_bed_for_patient(db, prescription.patient_id)
 
     administration = MedicationAdministration(
         prescription_item_id=item.id,

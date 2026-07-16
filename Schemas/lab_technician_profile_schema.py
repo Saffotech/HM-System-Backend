@@ -8,6 +8,8 @@ class AddressInfo(BaseModel):
     line: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    country: Optional[str] = None
+    postal_code: Optional[str] = None
 
 
 class EmergencyContactInfo(BaseModel):
@@ -31,7 +33,7 @@ class ShiftInfo(BaseModel):
     end_time: Optional[str] = None
 
 
-class NurseProfileResponse(BaseModel):
+class LabTechnicianProfileResponse(BaseModel):
     user_id: int
     first_name: str
     last_name: Optional[str] = None
@@ -73,6 +75,8 @@ class AddressUpdate(BaseModel):
     line: Optional[str] = None
     city: Optional[str] = Field(None, max_length=100)
     state: Optional[str] = Field(None, max_length=100)
+    country: Optional[str] = Field(None, max_length=100)
+    postal_code: Optional[str] = Field(None, max_length=20)
 
     model_config = ConfigDict(extra="forbid")
 
@@ -84,13 +88,14 @@ class EmergencyContactUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class NurseProfileUpdate(BaseModel):
-    """Nurse-editable fields only. Admin fields are rejected by schema."""
+class LabTechnicianProfileUpdate(BaseModel):
+    """Lab technician-editable fields only. Admin fields are rejected by schema."""
 
     qualification: Optional[str] = Field(None, max_length=255)
     experience_years: Optional[int] = Field(None, ge=0, le=60)
     bio: Optional[str] = None
     languages: Optional[List[str]] = None
+    license_number: Optional[str] = Field(None, max_length=100)
 
     phone: Optional[str] = Field(None, max_length=20)
     phone_code: Optional[str] = Field(None, max_length=10)
@@ -102,6 +107,6 @@ class NurseProfileUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class NurseProfileImageResponse(BaseModel):
+class LabTechnicianProfileImageResponse(BaseModel):
     message: str
     profile_image_url: Optional[str] = None

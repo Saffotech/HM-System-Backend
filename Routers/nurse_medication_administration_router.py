@@ -20,7 +20,10 @@ from Models.user import User
 
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
-    MedicationAdministrationUpdate
+    MedicationAdministrationUpdate,
+    MedicationAdministrationResponse,
+    PatientMedicationResponse,
+    MedicationPatientListItem,
 )
 
 from Services.nurse_medication_administration_service import (
@@ -42,7 +45,7 @@ router = APIRouter(
 # GET MEDICATION PATIENTS
 # ==========================================================
 
-@router.get("/patients")
+@router.get("/patients", response_model=list[MedicationPatientListItem])
 def get_medication_patients(
 
     patient_id: int | None = Query(
@@ -95,7 +98,7 @@ def get_medication_patients(
 # GET PATIENT MEDICATIONS
 # ==========================================================
 
-@router.get("/patient/{patient_id}")
+@router.get("/patient/{patient_id}", response_model=PatientMedicationResponse)
 def get_patient_medications(
 
     patient_id: int = Path(
@@ -129,6 +132,7 @@ def get_patient_medications(
 
 @router.post(
     "/administer",
+    response_model=MedicationAdministrationResponse,
     status_code=status.HTTP_201_CREATED
 )
 def administer_medication(
@@ -159,7 +163,10 @@ def administer_medication(
 # UPDATE MEDICATION ADMINISTRATION
 # ==========================================================
 
-@router.put("/administer/{administration_id}")
+@router.put(
+    "/administer/{administration_id}",
+    response_model=MedicationAdministrationResponse,
+)
 def update_medication_administration(
     medication_data: MedicationAdministrationUpdate,
     administration_id: int = Path(..., ge=1),

@@ -22,6 +22,8 @@ IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_PRIORITY_BY_TYPE: dict[NotificationType, NotificationPriority] = {
     NotificationType.NEW_APPOINTMENT: NotificationPriority.NORMAL,
     NotificationType.LAB_REPORT_READY: NotificationPriority.HIGH,
+    NotificationType.LAB_ORDER_CREATED: NotificationPriority.NORMAL,
+    NotificationType.LAB_ORDER_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_RESCHEDULED: NotificationPriority.HIGH,
     NotificationType.EMERGENCY_ALERT: NotificationPriority.CRITICAL,

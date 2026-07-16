@@ -1,8 +1,8 @@
-"""Create nurse_profiles table and backfill existing nurses.
+"""Create lab_technician_profiles if missing + lab order notification types.
 
-Revision ID: l0f1a2b3c4d5
-Revises: k9e0f1a2b3c4
-Create Date: 2026-07-13
+Revision ID: t8u9v0w1x2y3
+Revises: s7t8u9v0w1x2
+Create Date: 2026-07-16
 """
 from typing import Sequence, Union
 
@@ -10,8 +10,8 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects import postgresql
 
-revision: str = "l0f1a2b3c4d5"
-down_revision: Union[str, Sequence[str], None] = "k9e0f1a2b3c4"
+revision: str = "t8u9v0w1x2y3"
+down_revision: Union[str, Sequence[str], None] = "s7t8u9v0w1x2"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -20,9 +20,9 @@ def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
 
-    if "nurse_profiles" not in inspector.get_table_names():
+    if "lab_technician_profiles" not in inspector.get_table_names():
         op.create_table(
-            "nurse_profiles",
+            "lab_technician_profiles",
             sa.Column("id", sa.Integer(), nullable=False),
             sa.Column("user_id", sa.Integer(), nullable=False),
             sa.Column("qualification", sa.String(length=255), nullable=True),
@@ -45,8 +45,8 @@ def upgrade() -> None:
                 server_default=sa.false(),
             ),
             sa.Column("shift_name", sa.String(length=100), nullable=True),
-            sa.Column("shift_start_time", sa.String(length=10), nullable=True),
-            sa.Column("shift_end_time", sa.String(length=10), nullable=True),
+            sa.Column("shift_start_time", sa.Time(), nullable=True),
+            sa.Column("shift_end_time", sa.Time(), nullable=True),
             sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
             sa.ForeignKeyConstraint(["user_id"], ["users.id"], ondelete="CASCADE"),
@@ -54,38 +54,55 @@ def upgrade() -> None:
             sa.UniqueConstraint("user_id"),
             sa.UniqueConstraint("employee_id"),
         )
-        op.create_index(op.f("ix_nurse_profiles_id"), "nurse_profiles", ["id"], unique=False)
         op.create_index(
-            op.f("ix_nurse_profiles_user_id"),
-            "nurse_profiles",
+            op.f("ix_lab_technician_profiles_id"),
+            "lab_technician_profiles",
+            ["id"],
+            unique=False,
+        )
+        op.create_index(
+            op.f("ix_lab_technician_profiles_user_id"),
+            "lab_technician_profiles",
             ["user_id"],
             unique=False,
         )
 
-    # Backfill empty profiles for existing nurse users
-    op.execute(
-        sa.text(
-            """
-            INSERT INTO nurse_profiles (
-                user_id, languages, is_profile_completed, created_at, updated_at
+        op.execute(
+            sa.text(
+                """
+                INSERT INTO lab_technician_profiles (
+                    user_id, languages, is_profile_completed, created_at, updated_at
+                )
+                SELECT u.id, '[]'::jsonb, false, NOW(), NOW()
+                FROM users u
+                JOIN roles r ON r.id = u.role_id
+                WHERE r.name = 'lab_technician'
+                  AND u.deleted_at IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1 FROM lab_technician_profiles lp WHERE lp.user_id = u.id
+                  )
+                """
             )
-            SELECT u.id, '[]'::jsonb, false, NOW(), NOW()
-            FROM users u
-            JOIN roles r ON r.id = u.role_id
-            WHERE r.name = 'nurse'
-              AND u.deleted_at IS NULL
-              AND NOT EXISTS (
-                  SELECT 1 FROM nurse_profiles np WHERE np.user_id = u.id
-              )
-            """
         )
+
+    op.execute(
+        "ALTER TYPE notificationtype ADD VALUE IF NOT EXISTS 'LAB_ORDER_CREATED'"
+    )
+    op.execute(
+        "ALTER TYPE notificationtype ADD VALUE IF NOT EXISTS 'LAB_ORDER_CANCELLED'"
     )
 
 
 def downgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
-    if "nurse_profiles" in inspector.get_table_names():
-        op.drop_index(op.f("ix_nurse_profiles_user_id"), table_name="nurse_profiles")
-        op.drop_index(op.f("ix_nurse_profiles_id"), table_name="nurse_profiles")
-        op.drop_table("nurse_profiles")
+    if "lab_technician_profiles" in inspector.get_table_names():
+        op.drop_index(
+            op.f("ix_lab_technician_profiles_user_id"),
+            table_name="lab_technician_profiles",
+        )
+        op.drop_index(
+            op.f("ix_lab_technician_profiles_id"),
+            table_name="lab_technician_profiles",
+        )
+        op.drop_table("lab_technician_profiles")

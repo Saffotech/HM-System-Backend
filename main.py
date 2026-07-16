@@ -21,6 +21,7 @@ from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 from Models.lab_result import LabResult,LabResultParameter  # noqa: F401
+from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401
 from Models.notification import Notification  # noqa: F401
 from Routers import auth
 from Routers.admin_reports_router import router as admin_reports_router
@@ -41,6 +42,12 @@ from Routers.receptionist_notification_router import (
     router as receptionist_notification_router,
 )
 from Routers.receptionist_profile_router import router as receptionist_profile_router
+from Routers.lab_technician_notification_router import (
+    router as lab_technician_notification_router,
+)
+from Routers.lab_technician_profile_router import (
+    router as lab_technician_profile_router,
+)
 from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router,
@@ -114,6 +121,8 @@ app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 app.include_router(lab_router)
+app.include_router(lab_technician_profile_router)
+app.include_router(lab_technician_notification_router)
 app.include_router(super_admin_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
@@ -127,6 +136,7 @@ _uploads_dir.mkdir(parents=True, exist_ok=True)
 (_uploads_dir / "doctor_image").mkdir(parents=True, exist_ok=True)
 (_uploads_dir / "nurse_image").mkdir(parents=True, exist_ok=True)
 (_uploads_dir / "receptionist_image").mkdir(parents=True, exist_ok=True)
+(_uploads_dir / "lab_technician_image").mkdir(parents=True, exist_ok=True)
 app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
 
 

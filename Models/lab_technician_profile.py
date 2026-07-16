@@ -1,4 +1,4 @@
-"""Nurse professional profile (1:1 with users)."""
+"""Lab technician professional profile (1:1 with users)."""
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -11,7 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
-    Time
+    Time,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
@@ -23,8 +23,8 @@ def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class NurseProfile(Base):
-    __tablename__ = "nurse_profiles"
+class LabTechnicianProfile(Base):
+    __tablename__ = "lab_technician_profiles"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(
@@ -58,4 +58,4 @@ class NurseProfile(Base):
         nullable=False,
     )
 
-    user = relationship("User", back_populates="nurse_profile")
+    user = relationship("User", back_populates="lab_technician_profile")

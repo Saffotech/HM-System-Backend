@@ -37,7 +37,7 @@ def upgrade() -> None:
         sa.Column("website", sa.String(length=300), nullable=True),
         sa.Column("gstin", sa.String(length=20), nullable=True),
         sa.Column("pan", sa.String(length=20), nullable=True),
-        sa.Column("registration_number", sa.String(length=100), nullable=True),
+        sa.Column("license_number", sa.String(length=100), nullable=True),
         sa.Column("default_registration_fee", sa.Float(), nullable=False),
         sa.Column("default_consultation_fee", sa.Float(), nullable=False),
         sa.Column("default_gst_percent", sa.Float(), nullable=False),

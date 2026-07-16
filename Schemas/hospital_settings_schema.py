@@ -18,7 +18,7 @@ class HospitalSettingsOut(BaseModel):
     website: Optional[str] = None
     gstin: Optional[str] = None
     pan: Optional[str] = None
-    registration_number: Optional[str] = None
+    license_number: Optional[str] = None
     default_registration_fee: float
     default_consultation_fee: float
     default_gst_percent: float
@@ -41,7 +41,7 @@ class HospitalSettingsUpdate(BaseModel):
     website: Optional[str] = Field(None, max_length=300)
     gstin: Optional[str] = Field(None, max_length=20)
     pan: Optional[str] = Field(None, max_length=20)
-    registration_number: Optional[str] = Field(None, max_length=100)
+    license_number: Optional[str] = Field(None, max_length=100)
     default_registration_fee: Optional[float] = Field(None, ge=0)
     default_consultation_fee: Optional[float] = Field(None, ge=0)
     default_gst_percent: Optional[float] = Field(None, ge=0, le=100)

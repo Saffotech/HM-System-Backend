@@ -162,7 +162,7 @@ def build_pdf() -> None:
     )
     pdf.body(
         "Only users with role \"nurse\" can call these endpoints. Admins manage "
-        "registration_number, employee_id, joining_date, department, and shift via admin staff APIs - "
+        "license_number, employee_id, joining_date, department, and shift via admin staff APIs - "
         "not via /nurse/profile."
     )
 
@@ -199,7 +199,7 @@ def build_pdf() -> None:
   "department": { "id": 3, "name": "General Ward" },
   "role": { "id": 4, "name": "nurse" },
   "qualification": "BSc Nursing",
-  "registration_number": "NRC-44521",
+  "license_number": "NRC-44521",
   "employee_id": "NUR-102",
   "experience_years": 6,
   "joining_date": "2020-03-01",
@@ -236,7 +236,7 @@ def build_pdf() -> None:
     pdf.table_row(["department", "object | null", "{ id, name } - admin-owned, read-only"], wf)
     pdf.table_row(["role", "object | null", "{ id, name } - read-only"], wf)
     pdf.table_row(["qualification", "string | null", "Editable"], wf)
-    pdf.table_row(["registration_number", "string | null", "Admin-owned, read-only"], wf)
+    pdf.table_row(["license_number", "string | null", "Admin-owned, read-only"], wf)
     pdf.table_row(["employee_id", "string | null", "Admin-owned, read-only"], wf)
     pdf.table_row(["experience_years", "number | null", "Editable, 0-60"], wf)
     pdf.table_row(["joining_date", "string | null", "Admin-owned, read-only"], wf)
@@ -316,7 +316,7 @@ def build_pdf() -> None:
     pdf.table_row(["gender", "Yes", "Select 1-4"], we)
     pdf.table_row(["emergency_contact", "Yes", "name max 120, phone max 20"], we)
     pdf.table_row(["first_name, last_name, email", "No", "Display only"], we)
-    pdf.table_row(["registration_number", "No", "Admin-owned"], we)
+    pdf.table_row(["license_number", "No", "Admin-owned"], we)
     pdf.table_row(["employee_id", "No", "Admin-owned"], we)
     pdf.table_row(["joining_date", "No", "Admin-owned"], we)
     pdf.table_row(["department / role", "No", "Display only"], we)
@@ -324,7 +324,7 @@ def build_pdf() -> None:
     pdf.table_row(["profile_image_url", "No in PUT", "Use image upload/delete endpoints"], we)
 
     pdf.body(
-        "Do NOT send name, email, registration_number, employee_id, joining_date, "
+        "Do NOT send name, email, license_number, employee_id, joining_date, "
         "department, role, shift, profile_image_url, is_profile_completed, or "
         "profile_completion_percentage in PUT."
     )
@@ -583,7 +583,7 @@ interface NurseProfile {
   department?: { id: number; name: string } | null;
   role?: { id: number; name: string } | null;
   qualification?: string | null;
-  registration_number?: string | null;
+  license_number?: string | null;
   employee_id?: string | null;
   experience_years?: number | null;
   joining_date?: string | null;
