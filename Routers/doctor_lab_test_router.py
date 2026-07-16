@@ -22,7 +22,7 @@ from Schemas.doctor_lab_test_schema import (
     DoctorLabReportDetailResponse,
 )
 
-from Schemas.lab_schema import ReportSource
+from Schemas.lab_schema import ReportSource, LabTestCategoryItem
 
 from Services.doctor_lab_test_service import (
     create_lab_test_service,
@@ -34,6 +34,8 @@ from Services.doctor_lab_test_service import (
     get_doctor_lab_report_by_test_service,
     get_doctor_lab_report_file_by_test_service,
 )
+
+from Services.lab_service import get_lab_test_categories
 
 from dependencies import get_current_user, PermissionChecker
 
@@ -136,6 +138,18 @@ def get_doctor_lab_reports(
         page=page,
         page_size=page_size,
     )
+
+
+# ==========================================================
+# Lab Test Categories (dropdown)
+# ==========================================================
+
+@router.get("/categories", response_model=list[LabTestCategoryItem])
+def list_lab_test_categories(
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("lab:view")),
+):
+    return get_lab_test_categories()
 
 
 # ==========================================================

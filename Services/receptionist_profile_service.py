@@ -1,10 +1,7 @@
 """Receptionist profile service — GET/PUT profile and image upload/delete."""
 import logging
 import os
-import shutil
-import uuid
 from datetime import datetime
-from pathlib import Path
 from typing import List, Optional
 from zoneinfo import ZoneInfo
 
@@ -12,6 +9,12 @@ from fastapi import HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from Models.receptionist_profile import ReceptionistProfile
+from Utils.profile_image import (
+    delete_profile_image_file,
+    remove_orphan_profile_image,
+    save_profile_image_from_upload,
+    to_profile_image_url,
+)
 from Utils.shift_time import format_shift_time
 from Models.user import User
 from Schemas.receptionist_profile_schema import (
@@ -28,42 +31,13 @@ logger = logging.getLogger(__name__)
 
 IST = ZoneInfo("Asia/Kolkata")
 RECEPTIONIST_ROLE = "receptionist"
-
-ALLOWED_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
-MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
+RECEPTIONIST_UPLOAD_DIR = os.getenv(
+    "RECEPTIONIST_PROFILE_UPLOAD_DIR", "uploads/receptionist_image"
+)
 
 
 def _now():
     return datetime.now(IST)
-
-
-def _get_upload_dir() -> Path:
-    upload_dir = Path(
-        os.getenv("RECEPTIONIST_PROFILE_UPLOAD_DIR", "uploads/receptionist_image")
-    )
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    return upload_dir
-
-
-def _stored_image_path(filename: str) -> str:
-    absolute = (_get_upload_dir() / filename).resolve()
-    try:
-        return absolute.relative_to(Path.cwd().resolve()).as_posix()
-    except ValueError:
-        return absolute.as_posix()
-
-
-def _resolve_image_path(stored_path: str) -> Path:
-    upload_dir = _get_upload_dir().resolve()
-    candidate = Path(stored_path)
-    if not candidate.is_absolute():
-        candidate = (Path.cwd() / candidate).resolve()
-    else:
-        candidate = candidate.resolve()
-
-    if upload_dir not in candidate.parents and candidate != upload_dir:
-        raise HTTPException(status_code=400, detail="Invalid profile image path")
-    return candidate
 
 
 def _assert_receptionist(user: User) -> None:
@@ -92,13 +66,6 @@ def _normalize_languages(languages: Optional[List[str]]) -> List[str]:
         seen.add(key)
         cleaned.append(value)
     return cleaned
-
-
-def to_profile_image_url(stored_path: Optional[str]) -> Optional[str]:
-    """Map DB filesystem path to a public URL for the frontend."""
-    if not stored_path:
-        return None
-    return "/" + stored_path.replace("\\", "/").lstrip("/")
 
 
 def compute_profile_completed(profile: ReceptionistProfile) -> bool:
@@ -293,46 +260,10 @@ def upload_profile_image(
     user = _get_receptionist_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
-    if not file.filename:
-        raise HTTPException(
-            status_code=400, detail="Uploaded file must include a filename"
-        )
-
-    extension = Path(file.filename).suffix.lower()
-    if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Only JPG, JPEG, PNG and WEBP images are allowed",
-        )
-
-    file.file.seek(0, os.SEEK_END)
-    file_size = file.file.tell()
-    file.file.seek(0)
-
-    if file_size <= 0:
-        raise HTTPException(status_code=400, detail="Uploaded file is empty")
-    if file_size > MAX_FILE_SIZE:
-        raise HTTPException(status_code=400, detail="File size exceeds 5 MB")
-
-    old_file_path = None
-    if profile.profile_image:
-        try:
-            old_file_path = _resolve_image_path(profile.profile_image)
-        except HTTPException:
-            old_file_path = None
-
-    unique_name = f"{uuid.uuid4()}{extension}"
-    stored_path = _stored_image_path(unique_name)
-    absolute_path = _get_upload_dir() / unique_name
-
-    try:
-        with open(absolute_path, "wb") as buffer:
-            shutil.copyfileobj(file.file, buffer)
-    except OSError as exc:
-        logger.exception(
-            "Failed to save profile image for receptionist %s", current_user.id
-        )
-        raise HTTPException(status_code=500, detail="Failed to save file") from exc
+    old_stored_path = profile.profile_image
+    stored_path, absolute_path = save_profile_image_from_upload(
+        file, RECEPTIONIST_UPLOAD_DIR
+    )
 
     profile.profile_image = stored_path
     profile.updated_at = _now()
@@ -342,20 +273,10 @@ def upload_profile_image(
         db.refresh(profile)
     except Exception:
         db.rollback()
-        if absolute_path.exists():
-            try:
-                absolute_path.unlink()
-            except OSError:
-                logger.warning(
-                    "Could not remove orphaned profile image %s", absolute_path
-                )
+        remove_orphan_profile_image(absolute_path)
         raise
 
-    if old_file_path and old_file_path.exists():
-        try:
-            old_file_path.unlink()
-        except OSError:
-            logger.warning("Could not remove old profile image %s", old_file_path)
+    delete_profile_image_file(RECEPTIONIST_UPLOAD_DIR, old_stored_path)
 
     logger.info("Receptionist %s uploaded profile image", current_user.id)
     return {
@@ -371,21 +292,12 @@ def delete_profile_image(db: Session, current_user: User) -> dict:
     if not profile.profile_image:
         raise HTTPException(status_code=404, detail="No profile image to delete")
 
-    old_path = None
-    try:
-        old_path = _resolve_image_path(profile.profile_image)
-    except HTTPException:
-        old_path = None
-
+    old_stored_path = profile.profile_image
     profile.profile_image = None
     profile.updated_at = _now()
     db.commit()
 
-    if old_path and old_path.exists():
-        try:
-            old_path.unlink()
-        except OSError:
-            logger.warning("Could not remove profile image file %s", old_path)
+    delete_profile_image_file(RECEPTIONIST_UPLOAD_DIR, old_stored_path)
 
     logger.info("Receptionist %s deleted profile image", current_user.id)
     return {

@@ -88,3 +88,79 @@ def mark_notification_read(
     _: bool = Depends(PermissionChecker("notifications:update")),
 ):
     return service.mark_as_read(db, current_user.id, notification_id)
+
+
+def register_notification_routes(target_router: APIRouter) -> None:
+    """
+    Register the same notifications routes on a different router/prefix.
+
+    Used to avoid maintaining 3 near-identical router implementations
+    (doctor/nurse/receptionist).
+    """
+
+    @target_router.get(
+        "/unread-count",
+        response_model=UnreadCountResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def get_unread_count(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _: bool = Depends(PermissionChecker("notifications:view")),
+    ):
+        return {"count": service.get_unread_count(db, current_user.id)}
+
+    @target_router.patch(
+        "/read-all",
+        status_code=status.HTTP_200_OK,
+    )
+    def mark_all_notifications_read(
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _: bool = Depends(PermissionChecker("notifications:update")),
+    ):
+        return service.mark_all_as_read(db, current_user.id)
+
+    @target_router.get(
+        "",
+        response_model=NotificationListResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def list_notifications(
+        page: int = Query(1, ge=1),
+        limit: int = Query(20, ge=1, le=100),
+        search: Optional[str] = Query(None, min_length=1),
+        is_read: Optional[bool] = Query(None),
+        source_module: Optional[SourceModule] = Query(None),
+        notification_type: Optional[NotificationType] = Query(None),
+        start_date: Optional[date] = Query(None),
+        end_date: Optional[date] = Query(None),
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _: bool = Depends(PermissionChecker("notifications:view")),
+    ):
+        return service.get_notifications(
+            db,
+            current_user.id,
+            page=page,
+            limit=limit,
+            search=search,
+            is_read=is_read,
+            source_module=source_module,
+            notification_type=notification_type,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+    @target_router.patch(
+        "/{notification_id}/read",
+        response_model=NotificationResponse,
+        status_code=status.HTTP_200_OK,
+    )
+    def mark_notification_read(
+        notification_id: int,
+        db: Session = Depends(get_db),
+        current_user: User = Depends(get_current_user),
+        _: bool = Depends(PermissionChecker("notifications:update")),
+    ):
+        return service.mark_as_read(db, current_user.id, notification_id)

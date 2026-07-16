@@ -9,16 +9,17 @@ HMS has **four different “queue” concepts**. Using the wrong URL is a common
 | Who | What you need | Correct API | Data source |
 |-----|---------------|-------------|-------------|
 | **OPD billing** | Today’s registered visits, bills, payment status | `GET /opd/visits/today` | `opd_visits` |
-| **Receptionist** | **All doctors** — checked in today | `GET /receptionist/today-queue` | `patient_queue` |
-| **Receptionist** | One doctor — live waiting room / tokens | `GET /receptionist/doctor-queue/{doctor_id}` | `patient_queue` |
-| **Receptionist** | Queue history (reporting) | `GET /receptionist/queue-history` | `patient_queue` |
+| **Receptionist** | **All doctors** — today appointments | `GET /receptionist/today-queue` | `appointments` (+ optional `patient_queue` timestamps) |
+| **Receptionist** | One doctor — today appointments | `GET /receptionist/doctor-queue/{doctor_id}` | `appointments` (+ optional `patient_queue` timestamps) |
+| **Receptionist** | Queue history (reporting) | `GET /receptionist/queue-history` | `appointments` (+ optional `patient_queue` timestamps) |
 | **Doctor** | My patients today in queue | `GET /queue/today` | `patient_queue` |
 | **Nurse** | Vitals queue view | `GET /nurse/queue/today` | `patient_queue` (+ vitals flags) |
 
 **Receptionist is view-only** — no arrivals, check-in, pending-calls, call-patient, no-show, rejoin, or CSV export on `/receptionist/*`.
 
-**`today-queue` filters:** `doctor_id`, `doctor_name`, `patient_id`, `status`, `search`, `page`, `limit`.  
-**Sort:** priority (high first) → `called` / `waiting` → token.
+**`today-queue` filters:** `doctor_id`, `doctor_name`, `patient_id`, `status`, `payment_status`, `search`, `page`, `limit`.  
+**Canonicalization:** one row per patient for the selected date (paid visit > linked visit > latest `scheduled_at` > highest appointment id).  
+Returned ordering for pagination is based on the same canonical selection (server-side pagination).
 
 ---
 
@@ -31,12 +32,11 @@ HMS has **four different “queue” concepts**. Using the wrong URL is a common
 - **Shows:** Bill number, billing token, payment status, fees
 - **Use for:** Billing counter
 
-### `GET /receptionist/*` — clinical queue (view)
+### `GET /receptionist/*` — receptionist boards (view)
 
 - **Role:** `receptionist`
-- **Table:** `patient_queue` (+ `appointments`)
-- **Shows:** Queue token, status, `called_at`, `called_by` (read-only)
-- **Use for:** Front desk monitoring boards
+- **Table:** `appointments` (+ optional joins to `patient_queue` for check-in / consultation timestamps)
+- **Shows:** appointment + patient details, payment status, receptionist view of appointment status
 
 ---
 

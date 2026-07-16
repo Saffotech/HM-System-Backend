@@ -2,6 +2,7 @@ from pydantic import BaseModel, Field, ConfigDict, AliasChoices
 from datetime import datetime
 from typing import List, Optional
 
+from Enums.lab_test_category import LabTestCategory
 from Schemas.common_schema import PaginatedResponse
 from Schemas.lab_schema import ReportSource
 
@@ -19,11 +20,7 @@ class LabTestCreate(BaseModel):
         max_length=255
     )
 
-    category: str = Field(
-        ...,
-        min_length=1,
-        max_length=100
-    )
+    category: LabTestCategory
 
     priority: str = Field(
         default="Normal",
@@ -46,10 +43,7 @@ class LabTestUpdate(BaseModel):
         max_length=255
     )
 
-    category: Optional[str] = Field(
-        default=None,
-        max_length=100
-    )
+    category: Optional[LabTestCategory] = None
 
     priority: Optional[str] = Field(
         default=None,

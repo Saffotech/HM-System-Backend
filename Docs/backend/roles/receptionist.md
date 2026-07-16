@@ -20,16 +20,16 @@ Doctor views GET /queue/today (paid patients in queue only)
 
 ```
 patients:view
-opd:view
+receptionist:view_queue
 receptionist:view_doctor_schedule
 ```
 
 ## What receptionist sees
 
-- All **non-cancelled** appointments for the selected date(s)
+- By default, all **non-cancelled** appointments for the selected date(s) (use `status=cancelled` to view cancelled appointments)
 - **Paid** and **unpaid** (`pending` / `partial`) patients
 - Optional filter: `payment_status=paid` or `payment_status=unpaid`
-- Appointment `status` in list responses: **`scheduled`** or **`completed`** only (not queue workflow statuses)
+- Appointment `status` in list responses: **`scheduled`**, **`completed`**, or **`cancelled`** (cancelled are hidden by default)
 
 Unpaid patients appear in receptionist lists but are **not** in the doctor's live queue until paid.
 
@@ -37,10 +37,10 @@ Unpaid patients appear in receptionist lists but are **not** in the doctor's liv
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/receptionist/dashboard` | `opd:view` |
-| GET | `/receptionist/today-queue` | `opd:view` |
-| GET | `/receptionist/doctor-queue/{doctor_id}` | `opd:view` |
-| GET | `/receptionist/queue-history` | `opd:view` |
+| GET | `/receptionist/dashboard` | `receptionist:view_queue` |
+| GET | `/receptionist/today-queue` | `receptionist:view_queue` |
+| GET | `/receptionist/doctor-queue/{doctor_id}` | `receptionist:view_queue` |
+| GET | `/receptionist/queue-history` | `receptionist:view_queue` |
 | GET | `/receptionist/doctors/schedule` | `receptionist:view_doctor_schedule` |
 
 ### Payment filter (today-queue, doctor-queue, queue-history)
@@ -57,10 +57,15 @@ Unpaid patients appear in receptionist lists but are **not** in the doctor's liv
 |-------------|--------|-------------|
 | `status` | `scheduled` | Appointment not yet completed by doctor |
 | `status` | `completed` | Doctor marked consultation completed |
-| *(omit)* | — | Both scheduled and completed |
+| `status` | `cancelled` | Cancelled appointment |
+| *(omit)* | — | Scheduled + completed only (cancelled are hidden by default) |
 
 Receptionist `status` is derived from `appointments.status`, not `patient_queue.status`.
 Doctor queue still uses `waiting`, `called`, `in_progress`, etc. internally.
+
+### Canonicalization & ordering (today-queue / doctor-queue)
+For the same patient with multiple appointments on the selected date, the API collapses to **one canonical row per patient** using:
+paid visit > linked visit > latest `scheduled_at` > highest appointment id.
 
 ### GET `/receptionist/doctors/schedule`
 

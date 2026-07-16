@@ -439,11 +439,12 @@ Patient arrived → create `patient_queue` entry.
 
 **`GET /receptionist/today-queue`**
 
-All patients checked in today across all doctors. Sorted: **priority DESC** → **called/waiting first** → **token ASC**.
+All today’s appointments across all doctors (paid and unpaid). The API collapses to **one canonical row per patient** using:
+paid visit > linked visit > latest `scheduled_at` > highest appointment id.
 
-**Query params:** `doctor_id`, `doctor_name`, `patient_id`, `status`, `search`, `page`, `limit`
+**Query params:** `doctor_id`, `doctor_name`, `patient_id`, `status` (`scheduled` | `completed` | `cancelled`), `payment_status` (`paid` | `unpaid`), `search`, `page`, `limit`
 
-**Search matches:** patient name, UHID, phone, patient id, token, appointment UID, doctor name.
+**Search matches:** patient name, UHID, phone, patient id, appointment UID, doctor name.
 
 ---
 
@@ -459,8 +460,8 @@ One doctor’s full queue for today.
 
 | Param | Type | Default | Description |
 |-------|------|---------|-------------|
-| `status` | string | — | `waiting`, `called`, `in_progress`, `completed`, `no_show` |
-| `search` | string | — | Patient name, UHID, queue number, patient id, appointment UID |
+| `status` | string | — | `scheduled`, `completed`, or `cancelled` |
+| `search` | string | — | Patient name, UHID, phone, patient id, appointment UID |
 | `date` | date | today | Queue date (IST) |
 | `page` | int | — | Optional if lists are large |
 | `limit` | int | — | Optional |
@@ -628,7 +629,7 @@ Patient returned after no-show.
 
 **`GET /receptionist/queue-history`**
 
-Read-only report from existing `patient_queue` rows. **No new table.**
+Read-only report of **appointments** for a date range (optionally enriched with `patient_queue` timestamps when available).
 
 **When to use**
 
@@ -643,8 +644,9 @@ Read-only report from existing `patient_queue` rows. **No new table.**
 | `date_from` | date | — | Range start |
 | `date_to` | date | — | Range end |
 | `doctor_id` | int | — | Filter by doctor |
-| `status` | string | — | `completed`, `no_show`, `called`, etc. |
-| `search` | string | — | Name, UHID, phone, patient id, token, **appointment_uid**, doctor name |
+| `status` | string | — | `scheduled`, `completed`, or `cancelled` |
+| `payment_status` | string | — | `paid` or `unpaid` |
+| `search` | string | — | Name, UHID, phone, patient id, **appointment_uid**, doctor name |
 | `page` | int | 1 | Required for large datasets |
 | `limit` | int | 20 | Max 100 |
 

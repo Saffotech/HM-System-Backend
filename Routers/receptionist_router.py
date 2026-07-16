@@ -30,7 +30,7 @@ def receptionist_dashboard(
     doctor_id: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("receptionist:view_queue")),
 ):
     data = receptionist_service.get_dashboard(db, doctor_id=doctor_id)
     return {"success": True, "data": data}
@@ -40,7 +40,7 @@ def receptionist_dashboard(
     "/today-queue",
     response_model=TodayQueueResponse,
     status_code=status.HTTP_200_OK,
-    summary="Today's checked-in patients (all doctors)",
+    summary="Today's appointments (all doctors)",
 )
 def receptionist_today_queue(
     doctor_id: Optional[int] = Query(None, ge=1),
@@ -60,7 +60,7 @@ def receptionist_today_queue(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("receptionist:view_queue")),
 ):
     return {
         "success": True,
@@ -102,7 +102,7 @@ def receptionist_doctor_queue(
     limit: Optional[int] = Query(None, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("receptionist:view_queue")),
 ):
     return {
         "success": True,
@@ -145,7 +145,7 @@ def receptionist_queue_history(
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("receptionist:view_queue")),
 ):
     return {
         "success": True,

@@ -452,16 +452,16 @@ See [Queue endpoints guide](../flows/queue-endpoints-guide.md) for `/receptionis
 
 # 4. Receptionist (`/receptionist`)
 
-**Role:** `receptionist` (permissions: `patients:view`, `opd:view`).
+**Role:** `receptionist` (permissions: `patients:view`, `receptionist:view_queue`, `receptionist:view_doctor_schedule`).
 
-**View-only** module: monitor dashboard, live doctor queues, and queue history.
+**View-only** module: appointment dashboard, appointment boards, and appointment history.
 
 | Method | Path | Permission | Description |
 |--------|------|------------|-------------|
-| GET | `/receptionist/dashboard` | `opd:view` | Today's queue stats (+ manager metrics); optional `doctor_id` |
-| GET | `/receptionist/today-queue` | `opd:view` | **All doctors** — patients checked in today |
-| GET | `/receptionist/doctor-queue/{doctor_id}` | `opd:view` | Live queue for one doctor |
-| GET | `/receptionist/queue-history` | `opd:view` | Historical queue report |
+| GET | `/receptionist/dashboard` | `receptionist:view_queue` | Today's queue stats (optional `doctor_id`) |
+| GET | `/receptionist/today-queue` | `receptionist:view_queue` | **All doctors** — today's appointments (paid + unpaid), 1 canonical row per patient |
+| GET | `/receptionist/doctor-queue/{doctor_id}` | `receptionist:view_queue` | Today's appointments for one doctor |
+| GET | `/receptionist/queue-history` | `receptionist:view_queue` | Appointment history for a date range (max 90 days) |
 
 #### GET `/receptionist/dashboard`
 
@@ -472,23 +472,20 @@ Optional: `?doctor_id=5`
   "success": true,
   "data": {
     "total_patients": 18,
-    "waiting": 5,
-    "called": 2,
-    "in_progress": 1,
     "completed": 10,
-    "no_show": 1,
-    "pending_doctor_requests": 2,
-    "todays_arrivals": 22,
-    "todays_checked_in": 18,
-    "todays_cancelled": 1,
-    "average_waiting_time_minutes": 15.2
+    "todays_paid_appointments": 12,
+    "todays_unpaid_appointments": 4,
+    "todays_cancelled": 1
   }
 }
 ```
 
 #### GET `/receptionist/today-queue`
 
-All patients **checked in** today across all doctors (`patient_queue`, IST date).
+Today's appointments (paid + unpaid) across all doctors.
+
+The API collapses to **one canonical row per patient** using:
+paid visit > linked visit > latest `scheduled_at` > highest appointment id.
 
 **Query params:**
 
@@ -497,19 +494,24 @@ All patients **checked in** today across all doctors (`patient_queue`, IST date)
 | `doctor_id` | int | Filter by doctor |
 | `doctor_name` | string | Partial match on doctor first/last name |
 | `patient_id` | int | Exact match on internal patient id |
-| `status` | enum | `waiting`, `called`, `in_progress`, `completed`, `no_show`, … |
-| `search` | string | Patient name, UHID, phone, patient id, token, **appointment UID**, doctor name |
+| `status` | enum | `scheduled`, `completed`, or `cancelled` (cancelled are hidden by default if omitted) |
+| `payment_status` | enum | `paid` or `unpaid` (omit to include both) |
+| `search` | string | Patient name, UHID, phone, patient id, **appointment UID**, doctor name |
 | `page`, `limit` | int | Pagination (default 1, 20; max limit 100) |
 
 **Example:**
 
 ```
-GET /receptionist/today-queue?doctor_name=sharma&search=42&status=waiting&page=1&limit=20
+GET /receptionist/today-queue?doctor_name=sharma&search=42&status=scheduled&payment_status=paid&page=1&limit=20
 ```
 
 #### GET `/receptionist/queue-history`
 
-Same filters as list view. **Search** includes appointment UID.
+Appointment history for a date range.
+
+Supports `date_from` / `date_to` (or `date`), `doctor_id`, `status` (`scheduled` / `completed` / `cancelled`), `payment_status` (`paid` / `unpaid`), `search`, `page`, `limit`.
+
+Note: `date_to - date_from` must be `<= 90` days.
 
 ---
 

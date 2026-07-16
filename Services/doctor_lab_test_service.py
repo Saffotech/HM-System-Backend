@@ -77,7 +77,7 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
         patient_uhid=patient.patient_uid,
         doctor_id=doctor_id,
         test_name=payload.test_name,
-        category=payload.category,
+        category=payload.category.value,
         priority=payload.priority,
         clinical_notes=payload.clinical_notes,
         status=LabTestStatus.ORDERED,
@@ -233,6 +233,8 @@ def update_lab_test_service(
         raise HTTPException(status_code=400, detail="No fields provided for update")
 
     for field, value in update_data.items():
+        if field == "category" and value is not None:
+            value = value.value
         setattr(test, field, value)
 
     db.commit()

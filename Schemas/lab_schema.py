@@ -17,6 +17,12 @@ class ReportSource(str, Enum):
     BOTH = "BOTH"
 
 
+class LabTestCategoryItem(BaseModel):
+    value: str
+    label: str
+    requires_sample: bool
+
+
 # =====================================================
 # Dashboard
 # =====================================================
@@ -109,6 +115,7 @@ class LabOrderListItem(BaseModel):
 
     test_name: str
     category: str
+    requires_sample: bool
     priority: str
 
     clinical_notes: Optional[str] = None
@@ -158,6 +165,7 @@ class LabOrderDetailResponse(BaseModel):
 
     test_name: str
     category: str
+    requires_sample: bool
     priority: str
 
     clinical_notes: Optional[str] = None

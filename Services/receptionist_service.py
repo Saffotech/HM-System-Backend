@@ -44,7 +44,8 @@ def _apply_receptionist_status_filter(query, status: str | None):
     # Hide system no_show from receptionist frontend boards.
     query = query.filter(Appointment.status != AppointmentStatus.no_show)
     if status is None:
-        return query
+        # Default boards should not show cancelled unless explicitly filtered.
+        return query.filter(Appointment.status != AppointmentStatus.cancelled)
     if status == "completed":
         return query.filter(Appointment.status == AppointmentStatus.completed)
     if status == "cancelled":
@@ -154,7 +155,6 @@ def _receptionist_appointments_query(
         .filter(
             Appointment.scheduled_at >= range_start,
             Appointment.scheduled_at <= range_end,
-            Appointment.status != AppointmentStatus.cancelled,
             Appointment.status != AppointmentStatus.no_show,
         )
     )
@@ -210,6 +210,15 @@ def _count_distinct_appointments(query) -> int:
     return (
         query.order_by(None)
         .with_entities(Appointment.id)
+        .distinct()
+        .count()
+    )
+
+
+def _count_distinct_patients(query) -> int:
+    return (
+        query.order_by(None)
+        .with_entities(Appointment.patient_id)
         .distinct()
         .count()
     )
@@ -279,22 +288,22 @@ def _todays_appointments_query(
 
 
 def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
-    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
-
-    mark_past_scheduled_as_no_show(db)
     all_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
+    all_q = _apply_receptionist_status_filter(all_q, None)
     paid_q, _ = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="paid")
+    paid_q = _apply_receptionist_status_filter(paid_q, None)
     unpaid_q, _ = _todays_appointments_query(
         db, doctor_id=doctor_id, payment_filter="unpaid"
     )
+    unpaid_q = _apply_receptionist_status_filter(unpaid_q, None)
     completed_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
     completed_q = _apply_receptionist_status_filter(completed_q, "completed")
 
     return {
-        "total_patients": _count_distinct_appointments(all_q),
-        "completed": _count_distinct_appointments(completed_q),
-        "todays_paid_appointments": _count_distinct_appointments(paid_q),
-        "todays_unpaid_appointments": _count_distinct_appointments(unpaid_q),
+        "total_patients": _count_distinct_patients(all_q),
+        "completed": _count_distinct_patients(completed_q),
+        "todays_paid_appointments": _count_distinct_patients(paid_q),
+        "todays_unpaid_appointments": _count_distinct_patients(unpaid_q),
         "todays_cancelled": (
             db.query(Appointment)
             .filter(
@@ -302,6 +311,8 @@ def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
                 Appointment.scheduled_at < _today_range()[1],
                 Appointment.status == AppointmentStatus.cancelled,
             )
+            .with_entities(Appointment.patient_id)
+            .distinct()
             .count()
             if not doctor_id
             else db.query(Appointment)
@@ -311,6 +322,8 @@ def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
                 Appointment.status == AppointmentStatus.cancelled,
                 Appointment.doctor_id == doctor_id,
             )
+            .with_entities(Appointment.patient_id)
+            .distinct()
             .count()
         ),
     }
@@ -329,9 +342,6 @@ def get_today_queue(
     limit: int = 20,
 ) -> dict:
     """Today's appointments (paid and unpaid); optional appointment status and payment filters."""
-    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
-
-    mark_past_scheduled_as_no_show(db)
     today = _today()
     q, Visit = _todays_appointments_query(
         db, doctor_id=doctor_id, payment_filter=payment_filter
@@ -343,13 +353,21 @@ def get_today_queue(
     q = _apply_receptionist_status_filter(q, status)
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+    total = _count_distinct_patients(q)
 
-    canonical = _canonical_rows(q, Visit)
-    rows, total, page, limit = _paginate_rows(
-        canonical,
-        page,
-        limit,
-        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+    # DB pagination: canonicalize to 1 row per patient, then apply offset/limit.
+    # (Ordering impacts which appointment is chosen as canonical per patient.)
+    rows = (
+        q.order_by(
+            Appointment.patient_id.asc(),
+            *_canonical_priority_order(Visit),
+        )
+        .distinct(Appointment.patient_id)
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
     )
     return {
         "queue_date": today,
@@ -444,6 +462,13 @@ def _queue_history_query(
         date_from = _today()
     if not date_to:
         date_to = date_from
+    if date_to < date_from:
+        raise HTTPException(status_code=422, detail="date_to must be on/after date_from")
+    if (date_to - date_from).days > 90:
+        raise HTTPException(
+            status_code=422,
+            detail="Date range too large. Maximum allowed range is 90 days.",
+        )
 
     q, Visit = _receptionist_appointments_query(
         db,
@@ -456,11 +481,6 @@ def _queue_history_query(
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
     return q, Visit, date_from, date_to
-
-
-def _unique_appointment_rows(query, Visit):
-    """History: one row per appointment across the date range."""
-    return _canonical_rows(query, Visit, partition_by_patient=False)
 
 
 def get_queue_history(
@@ -487,13 +507,14 @@ def get_queue_history(
         search=search,
     )
 
-    unique_rows = _unique_appointment_rows(q, Visit)
-    rows, total, page, limit = _paginate_rows(
-        unique_rows,
-        page,
-        limit,
-        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
-        reverse=True,
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+    total = _count_distinct_appointments(q)
+    rows = (
+        q.order_by(Appointment.scheduled_at.desc(), Appointment.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
     )
     history = [
         _appointment_row_to_dict(

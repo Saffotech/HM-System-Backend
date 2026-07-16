@@ -82,6 +82,7 @@ PERMISSIONS_LIST = [
     "notifications:view",
     "notifications:update",
     "receptionist:view_doctor_schedule",
+    "receptionist:view_queue",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -198,6 +199,7 @@ ROLES_DATA = {
         "permissions": [
             "patients:view",
             "opd:view",
+            "receptionist:view_queue",
             "receptionist:view_doctor_schedule",
             "receptionist_profile:view",
             "receptionist_profile:update",

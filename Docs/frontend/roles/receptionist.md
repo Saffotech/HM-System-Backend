@@ -45,7 +45,7 @@ Sign out
 
 ```
 patients:view
-opd:view
+receptionist:view_queue
 ```
 
 ---

@@ -11,6 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy import case, exists, func, or_
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from Enums.lab_test_category import category_requires_sample, list_lab_test_categories
 from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult, LabResultParameter, ParameterFlag
@@ -283,6 +284,7 @@ def get_orders(
             "doctor_name": doctor_name,
             "test_name": order.test_name,
             "category": order.category,
+            "requires_sample": category_requires_sample(order.category),
             "priority": order.priority,
             "clinical_notes": order.clinical_notes,
             "status": order.status.value,
@@ -343,6 +345,7 @@ def get_order_detail(db: Session, order_id: int):
         "doctor_name": doctor_name,
         "test_name": order.test_name,
         "category": order.category,
+        "requires_sample": category_requires_sample(order.category),
         "priority": order.priority,
         "clinical_notes": order.clinical_notes,
         "status": order.status.value,
@@ -352,8 +355,18 @@ def get_order_detail(db: Session, order_id: int):
     }
 
 
+def get_lab_test_categories():
+    return list_lab_test_categories()
+
+
 def mark_sample_collected(db: Session, order_id: int):
     order = get_lab_order(db=db, order_id=order_id)
+
+    if not category_requires_sample(order.category):
+        raise HTTPException(
+            status_code=400,
+            detail="This test category does not require sample collection",
+        )
 
     if order.status != LabTestStatus.ORDERED:
         raise HTTPException(
@@ -375,10 +388,16 @@ def mark_sample_collected(db: Session, order_id: int):
 def mark_processing(db: Session, order_id: int):
     order = get_lab_order(db=db, order_id=order_id)
 
-    if order.status != LabTestStatus.SAMPLE_COLLECTED:
+    if category_requires_sample(order.category):
+        if order.status != LabTestStatus.SAMPLE_COLLECTED:
+            raise HTTPException(
+                status_code=400,
+                detail="Only collected samples can be processed",
+            )
+    elif order.status != LabTestStatus.ORDERED:
         raise HTTPException(
             status_code=400,
-            detail="Only collected samples can be processed",
+            detail="Only ordered tests can be marked as in progress",
         )
 
     order.status = LabTestStatus.PROCESSING
@@ -395,10 +414,26 @@ def mark_processing(db: Session, order_id: int):
 def mark_completed(db: Session, order_id: int):
     order = get_lab_order(db=db, order_id=order_id)
 
-    if order.status != LabTestStatus.PROCESSING:
+    if category_requires_sample(order.category):
+        # Laboratory: sample_collected → completed, or via processing
+        if order.status not in (
+            LabTestStatus.SAMPLE_COLLECTED,
+            LabTestStatus.PROCESSING,
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Only sample_collected or processing tests can be completed. "
+                    "Collect the sample first."
+                ),
+            )
+    elif order.status not in (
+        LabTestStatus.ORDERED,
+        LabTestStatus.PROCESSING,
+    ):
         raise HTTPException(
             status_code=400,
-            detail="Only processing tests can be completed",
+            detail="Only ordered or in-progress tests can be completed",
         )
 
     order.status = LabTestStatus.COMPLETED

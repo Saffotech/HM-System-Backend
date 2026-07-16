@@ -31,6 +31,7 @@ from Schemas.lab_schema import (
     LabReportDetailResponse,
     StatusUpdateResponse,
     ReportSource,
+    LabTestCategoryItem,
 )
 
 from Services.lab_service import (
@@ -45,6 +46,7 @@ from Services.lab_service import (
     mark_completed,
     upload_report_file,
     get_report_file,
+    get_lab_test_categories,
 )
 
 
@@ -69,6 +71,20 @@ def dashboard(
     return get_dashboard_stats(
         db=db,
     )
+
+
+# ==========================================================
+# Test Categories (dropdown)
+# ==========================================================
+
+@router.get("/categories", response_model=list[LabTestCategoryItem])
+def list_categories(
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(
+        PermissionChecker("lab:view")
+    ),
+):
+    return get_lab_test_categories()
 
 
 # ==========================================================
