@@ -1,3 +1,5 @@
+from datetime import date
+
 from pydantic import BaseModel, EmailStr, Field
 from typing import Optional, List
 
@@ -8,6 +10,14 @@ class UserCreate(BaseModel):
     password:   str = Field(..., min_length=8)
     role_id:    int  # FK to roles table
     department_id: Optional[int] = None  # only relevant for Doctor/Nurse
+    phone: Optional[str] = Field(None, max_length=20)
+    specialization: Optional[str] = Field(None, max_length=120)
+    gender: Optional[int] = Field(None, ge=1, le=4)
+    date_of_birth: Optional[date] = None
+    emergency_contact_phone: Optional[str] = Field(None, max_length=20)
+    medical_license_number: Optional[str] = Field(None, max_length=100)
+    consultation_fee: Optional[float] = Field(None, ge=0)
+
 
 class UserLogin(BaseModel):
     email:    EmailStr

@@ -23,7 +23,8 @@ from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverCreate,
     ShiftHandoverUpdate,
     ShiftHandoverPatientsBulkCreate,
-    ShiftHandoverPatientUpdate
+    ShiftHandoverPatientUpdate,
+    ShiftHandoverTakeOver,
 )
 
 from Services.nurse_shift_handover_service import (
@@ -33,6 +34,7 @@ from Services.nurse_shift_handover_service import (
     update_handover_patient_service,
     delete_handover_patient_service,
     submit_handover_service,
+    take_over_handover_service,
     get_handover_list_service,
     get_handover_detail_service
 )
@@ -253,6 +255,42 @@ def submit_handover(
 
 
 # ==========================================================
+# TAKE OVER HANDOVER
+# ==========================================================
+
+@router.put("/{handover_id}/take-over")
+def take_over_handover(
+
+    handover_id: int = Path(
+        ...,
+        ge=1,
+        description="Handover ID"
+    ),
+
+    take_over_data: ShiftHandoverTakeOver = ShiftHandoverTakeOver(),
+
+    current_user: User = Depends(
+        get_current_user
+    ),
+
+    _: bool = Depends(
+        PermissionChecker(
+            "nurse_handover:take_over"
+        )
+    ),
+
+    db: Session = Depends(get_db)
+):
+
+    return take_over_handover_service(
+        db=db,
+        handover_id=handover_id,
+        nurse_id=current_user.id,
+        take_over_data=take_over_data,
+    )
+
+
+# ==========================================================
 # HANDOVER LIST
 # ==========================================================
 
@@ -281,6 +319,22 @@ def get_handovers(
     outgoing_nurse_id: int | None = Query(
         None,
         ge=1
+    ),
+
+    outgoing_nurse_name: str | None = Query(
+        None,
+        description="Search previous / outgoing nurse by name",
+    ),
+
+    replacement_nurse_id: int | None = Query(
+        None,
+        ge=1,
+        description="Filter handovers taken over by this nurse",
+    ),
+
+    taken_over: bool | None = Query(
+        None,
+        description="true = only taken over, false = waiting for take over",
     ),
 
     page: int = Query(
@@ -325,6 +379,12 @@ def get_handovers(
         shift_date=shift_date,
 
         outgoing_nurse_id=outgoing_nurse_id,
+
+        outgoing_nurse_name=outgoing_nurse_name,
+
+        replacement_nurse_id=replacement_nurse_id,
+
+        taken_over=taken_over,
 
         page=page,
 

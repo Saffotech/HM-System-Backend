@@ -70,7 +70,7 @@ appointments:view, appointments:create, appointments:update
 | symptoms | text |
 | diagnosis | text |
 | treatment_plan | text |
-| status | in_progress / completed |
+| status | completed (doctor finishes consultation; appointment was scheduled) |
 
 ---
 

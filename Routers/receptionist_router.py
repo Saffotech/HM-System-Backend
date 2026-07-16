@@ -10,7 +10,7 @@ from Models.user import User
 from Schemas.receptionist_schema import (
     DashboardResponse,
     DoctorQueueResponse,
-    DoctorScheduleListResponse,
+    DoctorsScheduleResponse,
     QueueHistoryResponse,
     ReceptionistAppointmentStatus,
     TodayQueueResponse,
@@ -49,7 +49,7 @@ def receptionist_today_queue(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,
@@ -90,7 +90,7 @@ def receptionist_doctor_queue(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,
@@ -134,7 +134,7 @@ def receptionist_queue_history(
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
-        description="Filter by appointment status: scheduled or completed",
+        description="Filter by appointment status: scheduled, completed, or cancelled",
     ),
     payment_status: Optional[str] = Query(
         None,
@@ -168,15 +168,20 @@ def receptionist_queue_history(
 
 @router.get(
     "/doctors/schedule",
-    response_model=DoctorScheduleListResponse,
+    response_model=DoctorsScheduleResponse,
     status_code=status.HTTP_200_OK,
-    summary="View doctor schedules and slot availability (read-only)",
+    summary="View-only doctor availability for a date",
 )
-def receptionist_doctor_schedule(
-    schedule_date: date = Query(..., alias="date", description="Schedule date (required)"),
-    doctor_id: Optional[int] = Query(None, ge=1),
-    department_id: Optional[int] = Query(None, ge=1),
-    search: Optional[str] = Query(None),
+def receptionist_doctors_schedule(
+    schedule_date: date = Query(..., alias="date", description="ISO date YYYY-MM-DD"),
+    doctor_id: Optional[int] = Query(None, ge=1, description="Filter by doctor id"),
+    department_id: Optional[int] = Query(
+        None, ge=1, description="Filter by department id"
+    ),
+    search: Optional[str] = Query(
+        None,
+        description="Search doctor name, specialization, department, or doctor id",
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -185,7 +190,7 @@ def receptionist_doctor_schedule(
 ):
     return {
         "success": True,
-        **receptionist_service.get_doctor_schedules(
+        **receptionist_service.get_doctors_schedule(
             db,
             schedule_date=schedule_date,
             doctor_id=doctor_id,

@@ -29,14 +29,11 @@ def _now():
 # ==========================================================
 
 class QueueStatus(str, enum.Enum):
-    WAITING = "waiting"
-    VITALS_COMPLETED = "vitals_completed"
-    CALLED = "called"
-    IN_PROGRESS = "in_progress"
+    SCHEDULED = "scheduled"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
-
+ 
 
 # ==========================================================
 # PRIORITY
@@ -119,15 +116,23 @@ class PatientQueue(Base):
     )
 
     status = Column(
-        Enum(QueueStatus),
+        Enum(
+            QueueStatus,
+            name="queuestatus",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
-        default=QueueStatus.WAITING
+        default=QueueStatus.SCHEDULED,
     )
 
     priority = Column(
-        Enum(QueuePriority),
+        Enum(
+            QueuePriority,
+            name="queuepriority",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
-        default=QueuePriority.NORMAL
+        default=QueuePriority.NORMAL,
     )
 
     is_current = Column(
@@ -173,14 +178,6 @@ class PatientQueue(Base):
         onupdate=_now
     )
 
-    called_at = Column(DateTime(timezone=True), nullable=True)
-
-    called_by = Column(
-        Integer,
-        ForeignKey("users.id"),
-        nullable=True,
-    )
-
     # Relationships
 
     appointment = relationship(
@@ -194,9 +191,4 @@ class PatientQueue(Base):
     doctor = relationship(
         "User",
         foreign_keys=[doctor_id],
-    )
-
-    called_by_user = relationship(
-        "User",
-        foreign_keys=[called_by],
     )  

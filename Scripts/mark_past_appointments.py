@@ -23,7 +23,7 @@ from Services.appointment_lifecycle_service import mark_past_appointments_no_sho
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Mark past scheduled/waiting appointments as no_show"
+        description="Mark past scheduled appointments as no_show"
     )
     parser.add_argument(
         "--dry-run",

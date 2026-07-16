@@ -1,14 +1,18 @@
-from datetime import date, datetime
+from datetime import date
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
-from Models.opd_billing import AppointmentStatus
+
+class DoctorAppointmentStatusUpdate(str, Enum):
+    """Doctor may only complete consultation. Cancel = OPD; no_show = system."""
+
+    completed = "completed"
 
 
 class AppointmentStatusUpdate(BaseModel):
-    status: AppointmentStatus
+    status: DoctorAppointmentStatusUpdate
 
 
 class AppointmentConsultationUpdate(BaseModel):

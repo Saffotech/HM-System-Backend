@@ -16,7 +16,7 @@ def _pk(value: object) -> int:
     return int(value)
 
 
-def _serialize_prescription(rx: Prescription) -> PrescriptionResponse:
+def serialize_prescription(rx: Prescription) -> PrescriptionResponse:
     return PrescriptionResponse.model_validate(rx).model_copy(
         update={
             "patient_uid": (
@@ -24,6 +24,10 @@ def _serialize_prescription(rx: Prescription) -> PrescriptionResponse:
             )
         }
     )
+
+
+def _serialize_prescription(rx: Prescription) -> PrescriptionResponse:
+    return serialize_prescription(rx)
 
 
 def _prescription_query(db: Session):
@@ -60,22 +64,39 @@ def _get_prescription(db: Session, prescription_id: int, doctor_id: int) -> Pres
     return rx
 
 
-def create_prescription_service(db: Session, prescription_data: PrescriptionCreate, doctor_id: int):
-    appointment = (
-        db.query(Appointment)
-        .filter(Appointment.id == prescription_data.appointment_id)
-        .first()
-    )
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
+def create_prescription_for_appointment(
+    db: Session,
+    appointment: Appointment,
+    *,
+    doctor_id: int,
+    diagnosis: str,
+    items: list[PrescriptionItemCreate],
+    notes: str | None = None,
+    require_completed: bool = True,
+    commit: bool = True,
+) -> Prescription:
+    """
+    Create a prescription for an appointment.
+    When commit=False, caller owns the transaction (atomic consultation save).
+    """
     if appointment.doctor_id != doctor_id:
-        raise HTTPException(status_code=403, detail="You can only create prescriptions for your own appointments")
-    if appointment.status != "completed":
-        raise HTTPException(status_code=400, detail="Prescription can only be created after consultation completion")
+        raise HTTPException(
+            status_code=403,
+            detail="You can only create prescriptions for your own appointments",
+        )
+    status = getattr(appointment.status, "value", appointment.status)
+    if require_completed and status != "completed":
+        raise HTTPException(
+            status_code=400,
+            detail="Prescription can only be created after consultation completion",
+        )
 
     appt_id = _pk(appointment.id)
     if db.query(Prescription).filter(Prescription.appointment_id == appt_id).first():
-        raise HTTPException(status_code=400, detail="Prescription already exists for this appointment")
+        raise HTTPException(
+            status_code=400,
+            detail="Prescription already exists for this appointment",
+        )
 
     patient = h.get_patient(db, _pk(appointment.patient_id))
     if not patient:
@@ -86,19 +107,44 @@ def create_prescription_service(db: Session, prescription_data: PrescriptionCrea
         patient_id=_pk(appointment.patient_id),
         patient_name=h.display_name(patient.first_name, patient.last_name),
         doctor_id=doctor_id,
-        diagnosis=prescription_data.diagnosis,
+        diagnosis=diagnosis,
         status="pending",
         created_by=doctor_id,
     )
-    rx.notes = prescription_data.notes
+    rx.notes = notes
     db.add(rx)
     db.flush()
-    _add_items(db, _pk(rx.id), prescription_data.items)
-    db.commit()
+    _add_items(db, _pk(rx.id), items)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     rx = (
         _prescription_query(db)
         .filter(Prescription.id == _pk(rx.id))
         .first()
+    )
+    return rx
+
+
+def create_prescription_service(db: Session, prescription_data: PrescriptionCreate, doctor_id: int):
+    appointment = (
+        db.query(Appointment)
+        .filter(Appointment.id == prescription_data.appointment_id)
+        .first()
+    )
+    if not appointment:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    rx = create_prescription_for_appointment(
+        db,
+        appointment,
+        doctor_id=doctor_id,
+        diagnosis=prescription_data.diagnosis,
+        items=prescription_data.items,
+        notes=prescription_data.notes,
+        require_completed=True,
+        commit=True,
     )
     return _serialize_prescription(rx)
 

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, Boolean, Date, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from database import Base
 from datetime import datetime
@@ -24,16 +24,31 @@ class User(Base):
     )
 
     department = relationship("Department")
+    doctor_profile = relationship(
+        "DoctorProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    nurse_profile = relationship(
+        "NurseProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     specialization = Column(String(120), nullable=True)
 
     # profile
     gender          = Column(Integer, nullable=True)
+    date_of_birth   = Column(Date, nullable=True)
     phone           = Column(String(20), nullable=True)
     phone_code      = Column(String(10), nullable=True)
     address         = Column(String, nullable=True)
     city            = Column(String(100), nullable=True)
     state           = Column(String(100), nullable=True)
+    emergency_contact_name = Column(String(120), nullable=True)
+    emergency_contact_phone = Column(String(20), nullable=True)
     profile_picture = Column(String, nullable=True)
 
     # tracking

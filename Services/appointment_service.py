@@ -569,8 +569,18 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
         raise HTTPException(status_code=404, detail="Appointment not found")
 
     updates = data.model_dump(exclude_unset=True)
-    if updates.get("scheduled_at") is not None and apt.status == "completed":
-        apt.status = "scheduled"
+    if "status" in updates and updates["status"] is not None:
+        try:
+            updates["status"] = AppointmentStatus(updates["status"])
+        except ValueError as exc:
+            allowed = ", ".join(s.value for s in AppointmentStatus)
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid appointment status. Use one of: {allowed}",
+            ) from exc
+
+    if updates.get("scheduled_at") is not None and apt.status == AppointmentStatus.completed:
+        apt.status = AppointmentStatus.scheduled
 
     for key, value in updates.items():
         setattr(apt, key, value)
@@ -582,7 +592,7 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
 
 def cancel_appointment(db: Session, appointment_id: int) -> AppointmentOut:
     return update_appointment(
-        db, appointment_id, AppointmentUpdate(status="cancelled")
+        db, appointment_id, AppointmentUpdate(status=AppointmentStatus.cancelled.value)
     )
 
 

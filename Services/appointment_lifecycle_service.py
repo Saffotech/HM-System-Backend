@@ -10,10 +10,7 @@ from Models.opd_billing import Appointment, AppointmentStatus
 from Services.opd_helpers import IST, today_ist_date
 
 # Still open after the appointment day → treat as missed (not cancelled).
-_PAST_OPEN_STATUSES = (
-    AppointmentStatus.scheduled,
-    AppointmentStatus.waiting,
-)
+_PAST_OPEN_STATUSES = (AppointmentStatus.scheduled,)
 
 
 def _day_start(day: date) -> datetime:
@@ -28,9 +25,9 @@ def mark_past_appointments_no_show(
 ) -> dict:
     """
     Set status=no_show for appointments whose scheduled day is before `as_of`
-    (default: today in Asia/Kolkata) and that are still scheduled/waiting.
+    (default: today in Asia/Kolkata) and that are still scheduled.
 
-    Does not touch completed, cancelled, in_progress, or already no_show.
+    Does not touch completed, cancelled, or already no_show.
     """
     cutoff_day = as_of or today_ist_date()
     cutoff = _day_start(cutoff_day)

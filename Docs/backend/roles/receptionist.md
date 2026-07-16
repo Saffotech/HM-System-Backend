@@ -60,7 +60,7 @@ Unpaid patients appear in receptionist lists but are **not** in the doctor's liv
 | *(omit)* | — | Both scheduled and completed |
 
 Receptionist `status` is derived from `appointments.status`, not `patient_queue.status`.
-Doctor queue still uses `waiting`, `called`, `in_progress`, etc. internally.
+Appointment and queue statuses are: `scheduled`, `completed`, `cancelled`, `no_show` only.
 
 ### GET `/receptionist/doctors/schedule`
 

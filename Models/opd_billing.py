@@ -13,9 +13,9 @@ def _now():
 
 
 class AppointmentStatus(str, enum.Enum):
+    """Appointment lifecycle — same shape as queue (no waiting/in_progress)."""
+
     scheduled = "scheduled"
-    waiting = "waiting"
-    in_progress = "in_progress"
     completed = "completed"
     cancelled = "cancelled"
     no_show = "no_show"

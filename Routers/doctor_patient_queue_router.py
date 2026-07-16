@@ -97,7 +97,7 @@ def complete_consultation_by_appointment(
 ):
     """
     Atomic save by ``appointment_id``: ensure queue row, persist clinical fields,
-  mark appointment and queue completed (from scheduled/waiting/in_progress).
+  mark appointment and queue completed (from scheduled).
     """
     return save_consultation_service(
         db=db,

@@ -8,6 +8,8 @@ from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
 from Models.hospital_settings import HospitalSettings  # noqa: F401
 from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
+from Models.doctor_profile import DoctorProfile  # noqa: F401
+from Models.nurse_profile import NurseProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401

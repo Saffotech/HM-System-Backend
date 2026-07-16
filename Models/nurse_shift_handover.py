@@ -64,6 +64,13 @@ class ShiftHandover(Base):
         index=True
     )
 
+    replacement_nurse_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=True,
+        index=True
+    )
+
     department_id = Column(
         Integer,
         ForeignKey("departments.id"),
@@ -110,6 +117,16 @@ class ShiftHandover(Base):
         nullable=True
     )
 
+    taken_over_at = Column(
+        DateTime(timezone=True),
+        nullable=True
+    )
+
+    take_over_notes = Column(
+        Text,
+        nullable=True
+    )
+
     # ======================================================
     # AUDIT FIELDS
     # ======================================================
@@ -145,6 +162,11 @@ class ShiftHandover(Base):
     outgoing_nurse = relationship(
         "User",
         foreign_keys=[outgoing_nurse_id]
+    )
+
+    replacement_nurse = relationship(
+        "User",
+        foreign_keys=[replacement_nurse_id]
     )
 
     patients = relationship(
