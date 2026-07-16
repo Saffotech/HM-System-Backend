@@ -1,4 +1,5 @@
 """Receptionist module — view-only appointment boards (scheduled / completed)."""
+from collections import defaultdict
 from datetime import date, datetime, time, timedelta
 from typing import Optional
 
@@ -70,8 +71,15 @@ def _appointment_row_to_dict(
     queue: PatientQueue | None,
     *,
     doctor_name: str | None = None,
+    department_id: int | None = None,
+    department: str | None = None,
     queue_date: date | None = None,
 ) -> dict:
+    resolved_department_id = (
+        department_id
+        if department_id is not None
+        else getattr(appointment, "department_id", None)
+    )
     data = {
         "appointment_id": appointment.id,
         "appointment_uid": appointment.appointment_uid,
@@ -80,8 +88,11 @@ def _appointment_row_to_dict(
         "patient_uid": patient.patient_uid,
         "patient_phone": patient.phone,
         "doctor_id": appointment.doctor_id,
+        "department_id": resolved_department_id,
+        "department": department,
         "status": _receptionist_display_status(appointment),
         "payment_status": _resolve_payment_status(visit),
+        "scheduled_at": appointment.scheduled_at,
         "scheduled_at": appointment.scheduled_at,
         "checked_in_at": queue.queue_entered_at if queue else None,
         "consultation_started_at": queue.consultation_started_at if queue else None,
@@ -91,6 +102,95 @@ def _appointment_row_to_dict(
     if doctor_name is not None:
         data["doctor_name"] = doctor_name
     return data
+
+
+def _to_ist(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
+def _canonical_group_key(appointment: Appointment) -> tuple:
+    day = _to_ist(appointment.scheduled_at).date() if appointment.scheduled_at else None
+    return (appointment.patient_id, appointment.doctor_id, day)
+
+
+def _canonical_rank(appointment: Appointment, visit: OpdVisit | None) -> tuple:
+    """Higher rank wins for REC-2 duplicate collapse."""
+    paid = 1 if visit is not None and is_visit_paid(visit) else 0
+    linked = 1 if visit is not None else 0
+    ts = _to_ist(appointment.scheduled_at).timestamp() if appointment.scheduled_at else 0.0
+    return (paid, linked, ts, appointment.id)
+
+
+def _pick_canonical_row(rows: list[tuple]) -> tuple:
+    return max(rows, key=lambda row: _canonical_rank(row[0], row[2]))
+
+
+def _dedupe_canonical_rows(rows: list[tuple]) -> list[tuple]:
+    """One row per (patient_id, doctor_id, IST day)."""
+    groups: dict[tuple, list[tuple]] = defaultdict(list)
+    for row in rows:
+        appointment = row[0]
+        groups[_canonical_group_key(appointment)].append(row)
+
+    canonical: list[tuple] = []
+    for group in groups.values():
+        by_apt: dict[int, tuple] = {}
+        for row in group:
+            apt_id = row[0].id
+            existing = by_apt.get(apt_id)
+            if existing is None:
+                by_apt[apt_id] = row
+                continue
+            # Prefer the row whose queue_date matches the appointment's IST day
+            apt_day = (
+                _to_ist(row[0].scheduled_at).date() if row[0].scheduled_at else None
+            )
+            existing_q = existing[3]
+            new_q = row[3]
+            if (
+                new_q is not None
+                and apt_day is not None
+                and new_q.queue_date == apt_day
+                and (existing_q is None or existing_q.queue_date != apt_day)
+            ):
+                by_apt[apt_id] = row
+                continue
+            if row[2] is not None and existing[2] is None:
+                by_apt[apt_id] = row
+            elif row[3] is not None and existing[3] is None:
+                by_apt[apt_id] = row
+        unique_rows = list(by_apt.values())
+        canonical.append(_pick_canonical_row(unique_rows))
+    return canonical
+
+
+def _filter_canonical_rows(
+    rows: list[tuple],
+    *,
+    status: str | None = None,
+    payment_filter: Optional[str] = None,
+) -> list[tuple]:
+    out = rows
+    if status == "completed":
+        out = [r for r in out if status_value(r[0].status) == AppointmentStatus.completed.value]
+    elif status == "scheduled":
+        out = [r for r in out if status_value(r[0].status) != AppointmentStatus.completed.value]
+
+    if payment_filter == "paid":
+        out = [r for r in out if r[2] is not None and is_visit_paid(r[2])]
+    elif payment_filter == "unpaid":
+        out = [r for r in out if r[2] is None or not is_visit_paid(r[2])]
+    return out
+
+
+def _paginate_list(items: list, page: int, limit: int):
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+    total = len(items)
+    start = (page - 1) * limit
+    return items[start : start + limit], total, page, limit
 
 
 def _latest_visit_subquery(db: Session):
@@ -150,6 +250,7 @@ def _receptionist_appointments_query(
         )
         .outerjoin(Queue, Queue.id == latest_queue.c.queue_id)
         .outerjoin(User, Appointment.doctor_id == User.id)
+        .outerjoin(Department, Appointment.department_id == Department.id)
         .filter(
             Appointment.scheduled_at >= range_start,
             Appointment.scheduled_at <= range_end,
@@ -261,20 +362,53 @@ def _doctor_name_filter(doctor_name: str):
     )
 
 
-def _todays_appointments_query(
+def _load_canonical_rows(
     db: Session,
     *,
+    date_from: date,
+    date_to: date | None = None,
     doctor_id: Optional[int] = None,
+    doctor_name: Optional[str] = None,
+    patient_id: Optional[int] = None,
+    status: str | None = None,
     payment_filter: Optional[str] = None,
-):
-    today = _today()
-    return _receptionist_appointments_query(
+    search: Optional[str] = None,
+    include_doctor_search: bool = False,
+    order_desc: bool = False,
+) -> list[tuple]:
+    q = _receptionist_appointments_query(
         db,
-        date_from=today,
-        date_to=today,
+        date_from=date_from,
+        date_to=date_to or date_from,
         doctor_id=doctor_id,
-        payment_filter=payment_filter,
     )
+    if doctor_name:
+        q = q.filter(_doctor_name_filter(doctor_name))
+    if patient_id is not None:
+        q = q.filter(Appointment.patient_id == patient_id)
+    if search:
+        q = q.filter(
+            _appointment_search_filter(search, include_doctor=include_doctor_search)
+        )
+    if order_desc:
+        q = q.order_by(Appointment.scheduled_at.desc())
+    else:
+        q = q.order_by(*_appointment_list_order())
+
+    rows = q.all()
+    canonical = _dedupe_canonical_rows(rows)
+    filtered = _filter_canonical_rows(
+        canonical, status=status, payment_filter=payment_filter
+    )
+    reverse = order_desc
+    filtered.sort(
+        key=lambda r: (
+            _to_ist(r[0].scheduled_at) if r[0].scheduled_at else datetime.min.replace(tzinfo=IST),
+            r[0].id,
+        ),
+        reverse=reverse,
+    )
+    return filtered
 
 
 def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
@@ -366,9 +500,11 @@ def get_today_queue(
                 )
                 if doc
                 else None,
+                department_id=appointment.department_id,
+                department=dept.name if dept else None,
                 queue_date=today,
             )
-            for appointment, patient, visit, queue, doc in rows
+            for appointment, patient, visit, queue, doc, dept in page_rows
         ],
     }
 
@@ -390,6 +526,7 @@ def get_doctor_queue(
         date_from=target_date,
         date_to=target_date,
         doctor_id=doctor_id,
+        status=status,
         payment_filter=payment_filter,
     )
     q = _apply_receptionist_status_filter(q, status)
@@ -419,9 +556,11 @@ def get_doctor_queue(
                 patient,
                 visit,
                 queue,
+                department_id=appointment.department_id,
+                department=dept.name if dept else None,
                 queue_date=target_date,
             )
-            for appointment, patient, visit, queue, _doc in rows
+            for appointment, patient, visit, queue, _doc, dept in page_rows
         ],
     }
 
@@ -484,6 +623,8 @@ def get_queue_history(
         status=status,
         payment_filter=payment_filter,
         search=search,
+        include_doctor_search=True,
+        order_desc=True,
     )
 
     unique_rows = _unique_appointment_rows(q, Visit)
@@ -511,7 +652,7 @@ def get_queue_history(
                 else appointment.scheduled_at.astimezone(IST).date()
             ),
         )
-        for appointment, patient, visit, queue, doc in rows
+        for appointment, patient, visit, queue, doc, dept in page_rows
     ]
     return {
         "date_from": date_from,

@@ -3,6 +3,8 @@ from typing import Optional
 
 from pydantic import BaseModel, model_validator
 
+from pydantic import BaseModel, model_validator
+
 
 # ==========================================================
 #  CREATE VITALS
@@ -65,11 +67,13 @@ class VitalResponse(BaseModel):
     id: int
 
     appointment_id: Optional[int] = None
+    appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
     recorded_by: int
+    recorded_by_name: Optional[str] = None
 
     temperature: Optional[float]
     blood_pressure: Optional[str]
@@ -94,6 +98,8 @@ class VitalResponse(BaseModel):
 
 class NursingNoteCreate(BaseModel):
 
+    appointment_id: Optional[int] = None
+    patient_id: Optional[int] = None
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
 
@@ -132,11 +138,14 @@ class NursingNoteResponse(BaseModel):
     id: int
 
     appointment_id: Optional[int] = None
+    appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
     nurse_id: int
+    nurse_name: Optional[str] = None
+    created_by_name: Optional[str] = None
 
     symptoms: Optional[str]
     treatment_response: Optional[str]

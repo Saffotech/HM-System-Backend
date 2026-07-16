@@ -1,7 +1,7 @@
 from datetime import date
-from typing import Any, Optional
+from typing import Any, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Schemas.doctor_prescription_schema import PrescriptionItemCreate
@@ -49,6 +49,7 @@ class SaveConsultationResponse(BaseModel):
     message: str = "Consultation saved"
     appointment: dict[str, Any]
     queue: dict[str, Any]
+    prescription: Optional[dict[str, Any]] = None
     prescription: Optional[dict[str, Any]] = None
 
 

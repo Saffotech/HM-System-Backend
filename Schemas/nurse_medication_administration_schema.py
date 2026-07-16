@@ -54,6 +54,9 @@ class MedicationAdministrationResponse(BaseModel):
 
     administered_at: datetime
 
+    administered_by: Optional[int] = None
+    administered_by_name: Optional[str] = None
+
     class Config:
         from_attributes = True
 
@@ -112,4 +115,6 @@ class MedicationHistoryResponse(BaseModel):
 
     administered_at: datetime
 
+    administered_by: Optional[int] = None
+    administered_by_name: Optional[str] = None
 

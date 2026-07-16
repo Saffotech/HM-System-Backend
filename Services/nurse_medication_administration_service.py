@@ -7,6 +7,7 @@ from Models.patient import Patient
 from Models.opd_billing import Bed
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
 from Models.nurse_medication_administration import MedicationAdministration
+from Models.user import User
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate,
@@ -16,9 +17,63 @@ from Services.nurse_emergency_alert_triggers import (
     process_medication_missed_alert,
 )
 
+def _user_display_name(user: User | None) -> str | None:
+    if not user:
+        return None
+    return f"{user.first_name} {user.last_name or ''}".strip()
+
+
+def _enrich_administration(
+    db: Session,
+    administration: MedicationAdministration,
+) -> MedicationAdministration:
+    nurse = getattr(administration, "nurse", None)
+    if nurse is None and administration.administered_by:
+        nurse = (
+            db.query(User)
+            .filter(User.id == administration.administered_by)
+            .first()
+        )
+    if nurse:
+        administration.administered_by_name = _user_display_name(nurse)
+    return administration
+
+
+def _enrich_administrations_batch(
+    db: Session,
+    administrations: list[MedicationAdministration],
+) -> list[MedicationAdministration]:
+    if not administrations:
+        return administrations
+
+    nurse_ids = {
+        record.administered_by
+        for record in administrations
+        if record.administered_by
+    }
+    nurses = {
+        user.id: user
+        for user in db.query(User)
+        .filter(User.id.in_(nurse_ids))
+        .all()
+    }
+
+    for record in administrations:
+        nurse = getattr(record, "nurse", None) or nurses.get(record.administered_by)
+        if nurse:
+            record.administered_by_name = _user_display_name(nurse)
+
+    return administrations
+
+
 def _serialize_administration(
     administration: MedicationAdministration,
 ) -> MedicationAdministrationResponse:
+    nurse = getattr(administration, "nurse", None)
+    administered_by_name = (
+        getattr(administration, "administered_by_name", None)
+        or _user_display_name(nurse)
+    )
     return MedicationAdministrationResponse.model_validate(
         administration
     ).model_copy(
@@ -26,14 +81,16 @@ def _serialize_administration(
             "patient_uid": (
                 administration.patient.patient_uid
                 if administration.patient else None
-            )
+            ),
+            "administered_by_name": administered_by_name,
         }
     )
 
 
 def _administration_query(db: Session):
     return db.query(MedicationAdministration).options(
-        joinedload(MedicationAdministration.patient)
+        joinedload(MedicationAdministration.patient),
+        joinedload(MedicationAdministration.nurse),
     )
 
 
@@ -351,7 +408,9 @@ def administer_medication_service(
         db.rollback()
         raise
 
-    return _serialize_administration(administration)
+    return _serialize_administration(
+        _enrich_administration(db, administration)
+    )
 
 
 def update_medication_administration_service(
@@ -418,7 +477,9 @@ def update_medication_administration_service(
         db.rollback()
         raise
 
-    return _serialize_administration(administration)
+    return _serialize_administration(
+        _enrich_administration(db, administration)
+    )
 
 def get_patient_medication_history_service(
     db: Session,
@@ -471,9 +532,10 @@ def get_patient_medication_history_service(
         .all()
     )
 
+    enriched = _enrich_administrations_batch(db, history)
     return [
         _serialize_administration(record)
-        for record in history
+        for record in enriched
     ]
 
 
@@ -590,7 +652,8 @@ def get_medication_history_service(
         .all()
     )
 
+    enriched = _enrich_administrations_batch(db, records)
     return [
         _serialize_administration(record)
-        for record in records
+        for record in enriched
     ]

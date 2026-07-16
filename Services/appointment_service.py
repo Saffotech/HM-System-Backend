@@ -1,5 +1,5 @@
 """OPD appointment booking."""
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Optional
 
 from fastapi import HTTPException
@@ -21,6 +21,12 @@ _OPD_LIST_STATUSES = (
     AppointmentStatus.scheduled,
     AppointmentStatus.completed,
     AppointmentStatus.cancelled,
+)
+# Active slots that may be reused for the same patient+doctor+dept+day.
+_ACTIVE_REUSE_STATUSES = (
+    AppointmentStatus.scheduled,
+    AppointmentStatus.waiting,
+    AppointmentStatus.in_progress,
 )
 
 
@@ -53,22 +59,168 @@ def _payment_from_visit(visit: OpdVisit | None) -> dict:
     }
 
 
+def _to_ist(dt: datetime) -> datetime:
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=h.IST)
+    return dt.astimezone(h.IST)
+
+
+def _day_window(scheduled_at: datetime) -> tuple[datetime, datetime]:
+    day = _to_ist(scheduled_at).date()
+    start = datetime.combine(day, time.min, tzinfo=h.IST)
+    end = start + timedelta(days=1)
+    return start, end
+
+
+def iso_scheduled_at(dt: Optional[datetime]) -> Optional[str]:
+    if dt is None:
+        return None
+    return _to_ist(dt).isoformat()
+
+
+def find_active_appointment_same_day(
+    db: Session,
+    *,
+    patient_id: int,
+    doctor_id: int,
+    department_id: int,
+    scheduled_at: datetime,
+) -> Optional[Appointment]:
+    """Return the newest active appointment for patient+doctor+dept on that IST day."""
+    start, end = _day_window(scheduled_at)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.patient_id == patient_id,
+            Appointment.doctor_id == doctor_id,
+            Appointment.department_id == department_id,
+            Appointment.scheduled_at >= start,
+            Appointment.scheduled_at < end,
+            Appointment.status.in_(_ACTIVE_REUSE_STATUSES),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
+
+
+def resolve_appointment_for_visit(
+    db: Session,
+    *,
+    patient_id: int,
+    doctor_id: int,
+    department_id: int,
+    created_by: int,
+    scheduled_at: Optional[datetime] = None,
+    appointment_id: Optional[int] = None,
+    reason: Optional[str] = None,
+    notes: Optional[str] = None,
+    appointment_type: str = "opd",
+) -> Appointment:
+    """
+    Single source of truth for registration/revisit appointment linking.
+
+    Reuses an active appointment for the same patient + doctor + department + day.
+    Creates one new row only when none exists. Never auto-creates a second slot.
+    """
+    h.get_patient(db, patient_id)
+    h.get_department(db, department_id)
+    h.get_doctor_in_department(db, doctor_id, department_id)
+
+    slot = _to_ist(scheduled_at) if scheduled_at is not None else h.now_ist()
+
+    if appointment_id is not None:
+        apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+        if not apt:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        if apt.patient_id != patient_id:
+            raise HTTPException(
+                status_code=400,
+                detail="Appointment does not belong to this patient",
+            )
+        if apt.status == AppointmentStatus.cancelled:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot bill a cancelled appointment",
+            )
+        if scheduled_at is not None and apt.status != AppointmentStatus.completed:
+            apt.scheduled_at = slot
+        if reason and not apt.reason:
+            apt.reason = reason
+        if notes and not apt.notes:
+            apt.notes = notes
+        db.flush()
+        return apt
+
+    existing = find_active_appointment_same_day(
+        db,
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        scheduled_at=slot,
+    )
+    if existing is not None:
+        if scheduled_at is not None and existing.status != AppointmentStatus.completed:
+            existing.scheduled_at = slot
+        if reason and not existing.reason:
+            existing.reason = reason
+        if notes and not existing.notes:
+            existing.notes = notes
+        db.flush()
+        return existing
+
+    apt = Appointment(
+        appointment_uid=h.next_appointment_uid(db),
+        patient_id=patient_id,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        scheduled_at=slot,
+        reason=reason,
+        notes=notes,
+        appointment_type=appointment_type,
+        status=AppointmentStatus.scheduled,
+        created_by=created_by,
+    )
+    db.add(apt)
+    db.flush()
+    return apt
+
+
 def _load_visits_for_appointments(
     db: Session, appointments: list[Appointment]
 ) -> dict[int, OpdVisit]:
-    """Match appointments to opd_visits by patient, doctor, department, and day."""
+    """Prefer OpdVisit.appointment_id FK; fall back to legacy day matching."""
     if not appointments:
         return {}
 
-    patient_ids = {a.patient_id for a in appointments}
-    scheduled_times = [a.scheduled_at for a in appointments if a.scheduled_at]
-    if not scheduled_times:
-        return {}
+    matched: dict[int, OpdVisit] = {}
+    apt_ids = [a.id for a in appointments]
 
-    range_start = min(scheduled_times).replace(
+    linked = (
+        db.query(OpdVisit)
+        .filter(
+            OpdVisit.appointment_id.in_(apt_ids),
+            OpdVisit.status != "cancelled",
+        )
+        .order_by(OpdVisit.id.desc())
+        .all()
+    )
+    for visit in linked:
+        if visit.appointment_id is not None and visit.appointment_id not in matched:
+            matched[visit.appointment_id] = visit
+
+    remaining = [a for a in appointments if a.id not in matched]
+    if not remaining:
+        return matched
+
+    patient_ids = {a.patient_id for a in remaining}
+    scheduled_times = [a.scheduled_at for a in remaining if a.scheduled_at]
+    if not scheduled_times:
+        return matched
+
+    range_start = min(_to_ist(t) for t in scheduled_times).replace(
         hour=0, minute=0, second=0, microsecond=0
     )
-    range_end = max(scheduled_times).replace(
+    range_end = max(_to_ist(t) for t in scheduled_times).replace(
         hour=23, minute=59, second=59, microsecond=999999
     )
 
@@ -83,20 +235,22 @@ def _load_visits_for_appointments(
         .all()
     )
 
-    matched: dict[int, OpdVisit] = {}
-    for apt in appointments:
+    for apt in remaining:
         if not apt.scheduled_at:
             continue
-        apt_day = apt.scheduled_at.date()
+        apt_day = _to_ist(apt.scheduled_at).date()
         best: OpdVisit | None = None
 
         for visit in visits:
+            # Prefer exact FK already handled; skip visits linked to another apt
+            if visit.appointment_id is not None and visit.appointment_id != apt.id:
+                continue
             if (
                 visit.patient_id == apt.patient_id
                 and visit.doctor_id == apt.doctor_id
                 and visit.department_id == apt.department_id
                 and visit.visit_date
-                and visit.visit_date.date() == apt_day
+                and _to_ist(visit.visit_date).date() == apt_day
             ):
                 if best is None or visit.visit_date > best.visit_date:
                     best = visit
@@ -453,23 +607,18 @@ def _appointments_out_list(
 
 
 def create_appointment(db: Session, data: AppointmentCreate, created_by: int) -> AppointmentOut:
-    patient = h.get_patient(db, data.patient_id)
-    h.get_department(db, data.department_id)
-    h.get_doctor_in_department(db, data.doctor_id, data.department_id)
-
-    apt = Appointment(
-        appointment_uid=h.next_appointment_uid(db),
-        patient_id=patient.id,
+    """Create or reuse one active appointment for the patient+doctor+dept+day."""
+    apt = resolve_appointment_for_visit(
+        db,
+        patient_id=data.patient_id,
         doctor_id=data.doctor_id,
         department_id=data.department_id,
+        created_by=created_by,
         scheduled_at=data.scheduled_at,
         reason=data.reason,
         notes=data.notes,
         appointment_type=data.appointment_type,
-        status=AppointmentStatus.scheduled,
-        created_by=created_by,
     )
-    db.add(apt)
     db.commit()
     db.refresh(apt)
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
@@ -484,25 +633,17 @@ def create_walk_in_appointment(
     created_by: int,
     reason: str = "OPD walk-in",
 ) -> Appointment:
-    """Create today's scheduled appointment so reception can check the patient in."""
-    h.get_patient(db, patient_id)
-    h.get_department(db, department_id)
-    h.get_doctor_in_department(db, doctor_id, department_id)
-
-    apt = Appointment(
-        appointment_uid=h.next_appointment_uid(db),
+    """Resolve today's appointment for walk-in check-in — never create a day duplicate."""
+    return resolve_appointment_for_visit(
+        db,
         patient_id=patient_id,
         doctor_id=doctor_id,
         department_id=department_id,
+        created_by=created_by,
         scheduled_at=h.now_ist(),
         reason=reason,
         appointment_type="opd",
-        status=AppointmentStatus.scheduled,
-        created_by=created_by,
     )
-    db.add(apt)
-    db.flush()
-    return apt
 
 
 def list_appointments(

@@ -32,6 +32,14 @@ class PatientRegisterRequest(PatientFields, VisitBillingFields):
         pattern=r"^\d{12}$",
         description="12-digit Aadhaar number",
     )
+    scheduled_at: Optional[datetime] = Field(
+        None,
+        description="Booked doctor slot; when omitted, defaults to now (IST)",
+    )
+    appointment_id: Optional[int] = Field(
+        None,
+        description="Reuse an existing appointment when provided",
+    )
 
     class Config:
         json_schema_extra = {
@@ -46,6 +54,7 @@ class PatientRegisterRequest(PatientFields, VisitBillingFields):
                 "registration_fee": 200.0,
                 "consultation_fee": 800.0,
                 "gst_percent": 5.0,
+                "scheduled_at": "2026-07-14T13:00:00+05:30",
             }
         }
 
@@ -59,6 +68,10 @@ class OpdVisitCreate(VisitBillingFields):
 
     patient_id: int
     appointment_id: Optional[int] = None
+    scheduled_at: Optional[datetime] = Field(
+        None,
+        description="Doctor slot for this revisit; resolves/creates one appointment",
+    )
     waive_registration_fee: bool = False
 
     class Config:
@@ -71,6 +84,7 @@ class OpdVisitCreate(VisitBillingFields):
                 "consultation_fee": 800.0,
                 "gst_percent": 5.0,
                 "waive_registration_fee": True,
+                "scheduled_at": "2026-07-14T13:30:00+05:30",
             }
         }
 
@@ -151,6 +165,7 @@ class RegisterSuccessResponse(BaseModel):
     visit_id: int
     appointment_id: Optional[int] = None
     appointment_uid: Optional[str] = None
+    scheduled_at: Optional[str] = None
 
 
 class VisitSuccessResponse(BaseModel):
@@ -164,6 +179,7 @@ class VisitSuccessResponse(BaseModel):
     payment_status: str
     appointment_id: Optional[int] = None
     appointment_uid: Optional[str] = None
+    scheduled_at: Optional[str] = None
 
 
 class QueueVisitItem(BaseModel):

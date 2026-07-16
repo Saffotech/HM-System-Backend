@@ -30,6 +30,10 @@ class PatientHistoryItem(BaseModel):
 
     patient_phone: str
 
+    patient_age: Optional[int] = None
+
+    patient_gender: Optional[str | int] = None
+
     doctor_id: int
 
     department_id: int

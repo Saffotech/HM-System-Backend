@@ -6,7 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
-from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
+from Models.opd_billing import Appointment, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import (
@@ -29,38 +29,13 @@ from Schemas.opd_schema import (
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
 from Services import opd_helpers as h
+from Services import appointment_service
 from Services.queue_enqueue_service import enqueue_after_payment_if_eligible
 
 # Re-export helpers used by router
 get_patient = h.get_patient
 list_doctors_in_department = h.list_doctors_in_department
 display_name = h.display_name
-
-
-def _resolve_appointment_for_visit(
-    db: Session,
-    *,
-    patient_id: int,
-    appointment_id: Optional[int] = None,
-) -> Optional[Appointment]:
-    """Link an existing appointment only — never auto-create a walk-in."""
-    if not appointment_id:
-        return None
-
-    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
-    if not apt:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-    if apt.patient_id != patient_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Appointment does not belong to this patient",
-        )
-    if apt.status == AppointmentStatus.cancelled:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot bill a cancelled appointment",
-        )
-    return apt
 
 
 def _finalize_visit_appointment_and_queue(
@@ -204,6 +179,19 @@ def register_new_patient(
     db.add(patient)
     db.flush()
 
+    # Resolve ONE appointment for the selected slot (reuse same patient+doctor+day).
+    apt = appointment_service.resolve_appointment_for_visit(
+        db,
+        patient_id=patient.id,
+        doctor_id=data.doctor_id,
+        department_id=data.department_id,
+        created_by=registered_by,
+        scheduled_at=data.scheduled_at,
+        appointment_id=data.appointment_id,
+        reason="New patient registration",
+        notes="Booked during registration",
+    )
+
     visit = create_visit(
         db, patient, data, registered_by,
         pay_later=pay_later,
@@ -211,10 +199,10 @@ def register_new_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
-    # Appointment is created only via explicit booking (POST /opd/appointments).
-    # Do not auto-create a walk-in here — that caused duplicate appointments.
+    _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
+    db.refresh(apt)
 
     return RegisterSuccessResponse(
         message="Patient registered successfully",
@@ -223,8 +211,9 @@ def register_new_patient(
         bill_number=visit.bill_number,
         token_number=visit.token_number,
         visit_id=visit.id,
-        appointment_id=None,
-        appointment_uid=None,
+        appointment_id=apt.id,
+        appointment_uid=apt.appointment_uid,
+        scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at),
     )
 
 
@@ -247,11 +236,21 @@ def create_visit_for_existing_patient(
         amount_received=amount_received,
         transaction_reference=transaction_reference,
     )
-    apt = _resolve_appointment_for_visit(
-        db,
-        patient_id=patient.id,
-        appointment_id=data.appointment_id,
-    )
+
+    apt: Optional[Appointment] = None
+    if data.appointment_id is not None or data.scheduled_at is not None:
+        apt = appointment_service.resolve_appointment_for_visit(
+            db,
+            patient_id=patient.id,
+            doctor_id=data.doctor_id,
+            department_id=data.department_id,
+            created_by=registered_by,
+            scheduled_at=data.scheduled_at,
+            appointment_id=data.appointment_id,
+            reason="OPD revisit",
+            notes="Booked during registration",
+        )
+
     _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
@@ -267,6 +266,7 @@ def create_visit_for_existing_patient(
         payment_status=visit.payment_status,
         appointment_id=apt.id if apt else None,
         appointment_uid=apt.appointment_uid if apt else None,
+        scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at) if apt else None,
     )
 
 def generate_bill(

@@ -32,8 +32,12 @@ class QueueItemOut(BaseModel):
     patient_uid: str
     patient_phone: Optional[str] = None
     doctor_id: int
+    doctor_name: Optional[str] = None
+    department_id: Optional[int] = None
+    department: Optional[str] = None
     status: ReceptionistAppointmentStatus
     payment_status: Optional[str] = None
+    scheduled_at: Optional[datetime] = None
     scheduled_at: Optional[datetime] = None
     checked_in_at: Optional[datetime] = None
     consultation_started_at: Optional[datetime] = None

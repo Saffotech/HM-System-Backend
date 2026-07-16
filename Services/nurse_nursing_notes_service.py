@@ -8,6 +8,7 @@ from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_nursing_notes import NursingNote
+from Models.user import User
 
 from Schemas.nurse_schema import (
     NursingNoteCreate,
@@ -106,6 +107,36 @@ def _patient_display_name(patient: Patient | None) -> str | None:
     if not patient:
         return None
     return f"{patient.first_name} {patient.last_name or ''}".strip()
+
+
+def _serialize_note(note: NursingNote) -> NursingNoteResponse:
+    patient = note.patient
+    nurse = note.nurse if getattr(note, "nurse", None) is not None else None
+    nurse_name = getattr(note, "nurse_name", None) or _user_display_name(nurse)
+    return NursingNoteResponse.model_validate(note).model_copy(
+        update={
+            "patient_uid": getattr(note, "patient_uid", None)
+            or (patient.patient_uid if patient else None),
+            "patient_name": getattr(note, "patient_name", None)
+            or _patient_display_name(patient),
+            "nurse_name": nurse_name,
+            "created_by_name": getattr(note, "created_by_name", None) or nurse_name,
+            "bed_number": getattr(note, "bed_number", None),
+        }
+    )
+
+
+def _note_query(db: Session):
+    """Notes for active patients only (OPD soft-delete hides notes)."""
+    return (
+        db.query(NursingNote)
+        .join(Patient, Patient.id == NursingNote.patient_id)
+        .filter(Patient.is_active.is_(True))
+        .options(
+            joinedload(NursingNote.patient),
+            joinedload(NursingNote.nurse),
+        )
+    )
 
 
 def _enrich_note(db: Session, note: NursingNote) -> NursingNote:
@@ -233,7 +264,7 @@ def create_note_service(
             .first()
         )
 
-        return _serialize_note(note)
+        return _serialize_note(_enrich_note(db, note))
 
     except Exception:
         db.rollback()
@@ -293,7 +324,7 @@ def update_note_service(
             .first()
         )
 
-        return _serialize_note(note)
+        return _serialize_note(_enrich_note(db, note))
 
     except Exception:
         db.rollback()
@@ -323,7 +354,7 @@ def get_note_by_id_service(
             detail="Note not found"
         )
 
-    return _serialize_note(note)
+    return _serialize_note(_enrich_note(db, note))
 
 
 # ==========================================================
@@ -350,6 +381,7 @@ def get_all_notes_service(
         .all()
     )
 
+    notes = _enrich_notes_batch(db, notes)
     return [_serialize_note(note) for note in notes]
 
 
@@ -377,13 +409,7 @@ def search_notes_service(
     page_size: int = 20
 ):
 
-    query = (
-        _note_query(db)
-        .join(
-            Patient,
-            Patient.id == NursingNote.patient_id
-        )
-    )
+    query = _note_query(db)
 
     if patient_id:
         query = query.filter(
@@ -456,4 +482,5 @@ def search_notes_service(
         .all()
     )
 
+    notes = _enrich_notes_batch(db, notes)
     return [_serialize_note(note) for note in notes]

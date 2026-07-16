@@ -117,11 +117,20 @@ def _enrich_vitals_batch(
 
 
 def _serialize_vital(vital: PatientVitals) -> VitalResponse:
+    patient = vital.patient
+    nurse = getattr(vital, "nurse", None)
+    recorded_by_name = (
+        getattr(vital, "recorded_by_name", None)
+        or _user_display_name(nurse)
+    )
     return VitalResponse.model_validate(vital).model_copy(
         update={
-            "patient_uid": (
-                vital.patient.patient_uid if vital.patient else None
-            )
+            "patient_uid": getattr(vital, "patient_uid", None)
+            or (patient.patient_uid if patient else None),
+            "patient_name": getattr(vital, "patient_name", None)
+            or _patient_display_name(patient),
+            "bed_number": getattr(vital, "bed_number", None),
+            "recorded_by_name": recorded_by_name,
         }
     )
 
@@ -283,7 +292,7 @@ def create_vital_service(
             mark_critical=bool(vital_data.mark_critical),
         )
 
-        return _serialize_vital(vital)
+        return _serialize_vital(_enrich_vital(db, vital))
 
     except Exception:
         db.rollback()
@@ -353,7 +362,7 @@ def update_vital_service(
             mark_critical=mark_critical,
         )
 
-        return _serialize_vital(vital)
+        return _serialize_vital(_enrich_vital(db, vital))
 
     except Exception:
         db.rollback()
@@ -383,7 +392,7 @@ def get_vital_by_id_service(
             detail="Vital record not found"
         )
 
-    return _serialize_vital(vital)
+    return _serialize_vital(_enrich_vital(db, vital))
 
 
 # ==========================================================
@@ -410,7 +419,8 @@ def get_all_vitals_service(
         .all()
     )
 
-    return [_serialize_vital(vital) for vital in vitals]
+    enriched = _enrich_vitals_batch(db, vitals)
+    return [_serialize_vital(vital) for vital in enriched]
 
 
 # ==========================================================
@@ -437,13 +447,7 @@ def search_vitals_service(
     page_size: int = 20
 ):
 
-    query = (
-        _vital_query(db)
-        .join(
-            Patient,
-            Patient.id == PatientVitals.patient_id
-        )
-    )
+    query = _vital_query(db)
 
     if patient_id:
         query = query.filter(
@@ -516,4 +520,5 @@ def search_vitals_service(
         .all()
     )
 
-    return [_serialize_vital(vital) for vital in vitals]
+    enriched = _enrich_vitals_batch(db, vitals)
+    return [_serialize_vital(vital) for vital in enriched]
