@@ -82,6 +82,10 @@ def get_alerts(
         default=None
     ),
 
+    unassigned: bool | None = Query(
+        default=None
+    ),
+
     from_date: date | None = Query(
         default=None
     ),
@@ -123,6 +127,7 @@ def get_alerts(
         patient_id=patient_id,
         patient_uid=patient_uid,
         assigned_nurse_id=assigned_nurse_id,
+        unassigned=unassigned,
         from_date=from_date,
         to_date=to_date,
         search=search,

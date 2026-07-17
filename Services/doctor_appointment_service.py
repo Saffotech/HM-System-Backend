@@ -1,9 +1,8 @@
-from datetime import date, datetime, time
+from datetime import date
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from Models.doctor_patient_queue import PatientQueue, QueueStatus
 from Models.opd_billing import Appointment, AppointmentStatus
 from Schemas.doctor_appointment_schema import AppointmentConsultationUpdate
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
@@ -14,11 +13,9 @@ from Services.doctor_patient_queue_service import (
     complete_queue_for_appointment_if_exists,
     queue_to_summary,
 )
-from Services.queue_helpers import persist, status_value
+from Services.queue_helpers import persist
 
-IST = opd_helpers.IST
-
-# Doctor may only complete. Cancel is OPD; no_show is system-managed.
+# Doctor may only complete. Cancel is OPD; past unconsulted are system-cancelled.
 VALID_TRANSITIONS = {
     "scheduled": ["completed"],
     "completed": [],
@@ -27,47 +24,28 @@ VALID_TRANSITIONS = {
 }
 
 
+def mark_past_scheduled_as_cancelled(
+    db: Session,
+    *,
+    as_of: date | None = None,
+    commit: bool = True,
+) -> int:
+    """Past open (scheduled) appointments become cancelled after the day ends."""
+    from Services.appointment_lifecycle_service import (
+        mark_past_open_appointments_cancelled,
+    )
+
+    return mark_past_open_appointments_cancelled(db, as_of=as_of, commit=commit)
+
+
+# Back-compat for older call sites / imports.
 def mark_past_scheduled_as_no_show(
     db: Session,
     *,
     as_of: date | None = None,
     commit: bool = True,
 ) -> int:
-    """
-    System-only: past ``scheduled`` appointments become ``no_show`` in DB.
-    Frontend/doctor APIs never list these patients.
-    """
-    cutoff_date = as_of or opd_helpers.today_ist_date()
-    cutoff_start = datetime.combine(cutoff_date, time.min, tzinfo=IST)
-
-    appointments = (
-        db.query(Appointment)
-        .filter(
-            Appointment.status == AppointmentStatus.scheduled,
-            Appointment.scheduled_at < cutoff_start,
-        )
-        .with_for_update()
-        .all()
-    )
-    if not appointments:
-        return 0
-
-    appointment_ids = [apt.id for apt in appointments]
-    for apt in appointments:
-        apt.status = AppointmentStatus.no_show
-
-    queues = (
-        db.query(PatientQueue)
-        .filter(PatientQueue.appointment_id.in_(appointment_ids))
-        .with_for_update()
-        .all()
-    )
-    for queue in queues:
-        if status_value(queue.status) == QueueStatus.SCHEDULED.value:
-            queue.status = QueueStatus.NO_SHOW
-
-    persist(db, commit=commit)
-    return len(appointments)
+    return mark_past_scheduled_as_cancelled(db, as_of=as_of, commit=commit)
 
 
 def _doctor_appointments_query(db: Session, doctor_id: int):
@@ -79,10 +57,15 @@ def _doctor_appointments_query(db: Session, doctor_id: int):
 
 
 def get_today_appointments_service(db: Session, doctor_id: int) -> list[dict]:
-    mark_past_scheduled_as_no_show(db)
+    try:
+        mark_past_scheduled_as_no_show(db)
+    except Exception:
+        # Never block today's list if no-show backfill fails (enum/schema drift).
+        db.rollback()
+    today = opd_helpers.today_ist_date()
     rows = (
         _doctor_appointments_query(db, doctor_id)
-        .filter(h.scheduled_on_date(date.today()))
+        .filter(h.scheduled_on_date(today))
         .order_by(Appointment.scheduled_at.asc())
         .all()
     )
@@ -236,7 +219,10 @@ def get_appointments_by_date_service(
     doctor_id: int,
     appointment_date: date,
 ) -> list[dict]:
-    mark_past_scheduled_as_no_show(db)
+    try:
+        mark_past_scheduled_as_no_show(db)
+    except Exception:
+        db.rollback()
     rows = (
         _doctor_appointments_query(db, doctor_id)
         .filter(h.scheduled_on_date(appointment_date))
@@ -247,8 +233,11 @@ def get_appointments_by_date_service(
 
 
 def get_dashboard_stats_service(db: Session, doctor_id: int) -> dict:
-    mark_past_scheduled_as_no_show(db)
-    today_filter = h.scheduled_on_date(date.today())
+    try:
+        mark_past_scheduled_as_no_show(db)
+    except Exception:
+        db.rollback()
+    today_filter = h.scheduled_on_date(opd_helpers.today_ist_date())
     base = _doctor_appointments_query(db, doctor_id).filter(today_filter)
 
     return {

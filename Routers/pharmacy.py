@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Query
@@ -22,11 +23,19 @@ router = APIRouter(prefix="/pharmacy", tags=["Pharmacy"])
 def dispense_history(
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
+    date_from: Optional[date] = Query(None, description="Inclusive start date (YYYY-MM-DD)"),
+    date_to: Optional[date] = Query(None, description="Inclusive end date (YYYY-MM-DD)"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("prescriptions:view")),
 ):
-    return pharmacy_service.get_dispense_history(db, page=page, limit=limit)
+    return pharmacy_service.get_dispense_history(
+        db,
+        page=page,
+        limit=limit,
+        date_from=date_from,
+        date_to=date_to,
+    )
 
 
 @router.get("/prescriptions", response_model=PharmacyPrescriptionListResponse)

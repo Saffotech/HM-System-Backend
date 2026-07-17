@@ -771,6 +771,17 @@ def get_report_detail(db: Session, report_id: int):
         )
     )
 
+    doctor = (
+        db.query(User).filter(User.id == report.lab_order.doctor_id).first()
+        if report.lab_order and report.lab_order.doctor_id
+        else None
+    )
+    doctor_name = h.display_name(
+        doctor.first_name,
+        doctor.last_name,
+        prefix="Dr. ",
+    ) if doctor else ""
+
     parameters = [
         {
             "id": parameter.id,
@@ -803,6 +814,7 @@ def get_report_detail(db: Session, report_id: int):
             "patient_name": report.lab_order.patient_name,
             **_order_patient_fields(report.lab_order),
             "doctor_id": report.lab_order.doctor_id,
+            "doctor_name": doctor_name,
             "test_name": report.lab_order.test_name,
             "category": report.lab_order.category,
             "priority": report.lab_order.priority,

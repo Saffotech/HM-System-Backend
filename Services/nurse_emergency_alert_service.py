@@ -23,6 +23,7 @@ from Models.nurse_medication_administration import (
     MedicationAdministration
 )
 from Models.opd_billing import Appointment
+from Models.doctor_prescriptions import Prescription
 
 from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertAssign,
@@ -929,6 +930,39 @@ def resolve_alert_service(
 # ESCALATE ALERT
 # ==========================================================
 
+def _find_patient_doctor_id(
+    db: Session,
+    patient_id: int,
+) -> int | None:
+    latest_appointment = (
+        db.query(Appointment)
+        .filter(Appointment.patient_id == patient_id)
+        .order_by(Appointment.created_at.desc())
+        .first()
+    )
+    if latest_appointment and latest_appointment.doctor_id:
+        return latest_appointment.doctor_id
+
+    latest_prescription = (
+        db.query(Prescription)
+        .filter(Prescription.patient_id == patient_id)
+        .order_by(Prescription.created_at.desc())
+        .first()
+    )
+    if latest_prescription and latest_prescription.doctor_id:
+        return latest_prescription.doctor_id
+
+    patient = (
+        db.query(Patient)
+        .filter(Patient.id == patient_id)
+        .first()
+    )
+    if patient and patient.doctor_id:
+        return patient.doctor_id
+
+    return None
+
+
 def escalate_alert_service(
     db: Session,
     alert_id: int,
@@ -956,37 +990,15 @@ def escalate_alert_service(
             detail="Resolved alert cannot be escalated"
         )
 
-    doctor_id = (
-        escalate_data.doctor_id
-    )
-
-    # ======================================================
-    # AUTO DOCTOR LOOKUP
-    # ======================================================
+    doctor_id = escalate_data.doctor_id
 
     if not doctor_id:
-
-        latest_appointment = (
-            db.query(Appointment)
-            .filter(
-                Appointment.patient_id ==
-                alert.patient_id
-            )
-            .order_by(
-                Appointment.created_at.desc()
-            )
-            .first()
-        )
-
-        if not latest_appointment:
+        doctor_id = _find_patient_doctor_id(db, alert.patient_id)
+        if not doctor_id:
             raise HTTPException(
                 status_code=404,
                 detail="No doctor assigned to patient"
             )
-
-        doctor_id = (
-            latest_appointment.doctor_id
-        )
 
     doctor = (
         db.query(User)
@@ -1254,6 +1266,7 @@ def get_alerts_service(
     patient_id: int | None = None,
     patient_uid: str | None = None,
     assigned_nurse_id: int | None = None,
+    unassigned: bool | None = None,
     from_date: date | None = None,
     to_date: date | None = None,
     search: str | None = None,
@@ -1341,6 +1354,12 @@ def get_alerts_service(
         query = query.filter(
             EmergencyAlert.assigned_nurse_id ==
             assigned_nurse_id
+        )
+
+    if unassigned:
+
+        query = query.filter(
+            EmergencyAlert.assigned_nurse_id.is_(None)
         )
 
     if from_date:

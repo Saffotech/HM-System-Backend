@@ -38,7 +38,6 @@ class QueueItemOut(BaseModel):
     status: ReceptionistAppointmentStatus
     payment_status: Optional[str] = None
     scheduled_at: Optional[datetime] = None
-    scheduled_at: Optional[datetime] = None
     checked_in_at: Optional[datetime] = None
     consultation_started_at: Optional[datetime] = None
     consultation_completed_at: Optional[datetime] = None
@@ -81,6 +80,13 @@ class TodayQueueResponse(BaseModel):
     queue: list[TodayQueueItem]
 
 
+class DoctorScheduleSlot(BaseModel):
+    slot_start: str
+    slot_end: str
+    is_available: bool
+    status: str
+
+
 class DoctorScheduleItem(BaseModel):
     doctor_id: int
     doctor_name: str
@@ -95,6 +101,10 @@ class DoctorScheduleItem(BaseModel):
     completed_count: int = 0
     cancelled_count: int = 0
     is_available: bool = True
+    slots: Optional[list[DoctorScheduleSlot]] = None
+    total_slots: int = 0
+    booked_slots: int = 0
+    available_slots: int = 0
 
 
 class DoctorsScheduleResponse(BaseModel):

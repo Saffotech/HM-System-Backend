@@ -98,10 +98,6 @@ def create_prescription_for_appointment(
             status_code=400,
             detail="Prescription already exists for this appointment",
         )
-        raise HTTPException(
-            status_code=400,
-            detail="Prescription already exists for this appointment",
-        )
 
     patient = h.get_patient(db, _pk(appointment.patient_id))
     if not patient:
@@ -113,11 +109,9 @@ def create_prescription_for_appointment(
         patient_name=h.display_name(patient.first_name, patient.last_name),
         doctor_id=doctor_id,
         diagnosis=diagnosis,
-        diagnosis=diagnosis,
         status="pending",
         created_by=doctor_id,
     )
-    rx.notes = notes
     rx.notes = notes
     db.add(rx)
     db.flush()

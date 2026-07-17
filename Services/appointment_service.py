@@ -1,5 +1,6 @@
 """OPD appointment booking."""
 from datetime import date, datetime, time, timedelta
+import re
 from typing import Optional
 
 from fastapi import HTTPException
@@ -7,6 +8,12 @@ from sqlalchemy import String, and_, case, cast, exists, func, or_
 from sqlalchemy.orm import Session, aliased
 
 from Models.department import Department
+from Models.doctor_lab_test_order import LabTestOrder
+from Models.doctor_patient_queue import PatientQueue
+from Models.doctor_prescriptions import Prescription
+from Models.doctor_queue_next_request import DoctorQueueNextRequest
+from Models.nurse_nursing_notes import NursingNote
+from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit, Patient
 from Models.user import User
@@ -25,9 +32,24 @@ _OPD_LIST_STATUSES = (
 # Active slots that may be reused for the same patient+doctor+dept+day.
 _ACTIVE_REUSE_STATUSES = (
     AppointmentStatus.scheduled,
-    AppointmentStatus.waiting,
-    AppointmentStatus.in_progress,
 )
+
+_INTERNAL_APPOINTMENT_MARKERS = (
+    "[pay-later]",
+    "booked during registration",
+    "new patient registration",
+    "opd revisit",
+)
+
+
+def _strip_internal_appointment_markers(text: Optional[str]) -> Optional[str]:
+    if text is None:
+        return None
+    cleaned = str(text)
+    for marker in _INTERNAL_APPOINTMENT_MARKERS:
+        cleaned = re.sub(re.escape(marker), "", cleaned, flags=re.IGNORECASE)
+    cleaned = " ".join(cleaned.split()).strip()
+    return cleaned or None
 
 
 def _payment_from_visit(visit: OpdVisit | None) -> dict:
@@ -446,7 +468,8 @@ def _apply_list_filter(q, db: Session, list_filter: Optional[str]):
     if list_filter == "cancelled":
         return q.filter(Appointment.status == AppointmentStatus.cancelled)
     if list_filter == "all":
-        return q.filter(Appointment.status == AppointmentStatus.scheduled)
+        # All visible lifecycle states for the selected date/filters.
+        return q
 
     q, visit_col = _join_matching_visit(q, db)
     if list_filter == "pending":
@@ -464,7 +487,7 @@ def _compute_list_counts(db: Session, q) -> dict[str, int]:
     joined, visit_col = _join_matching_visit(visible, db)
 
     return {
-        "all": visible.filter(Appointment.status == AppointmentStatus.scheduled).count(),
+        "all": visible.count(),
         "scheduled": joined.filter(
             Appointment.status == AppointmentStatus.scheduled,
             ~_scheduled_unpaid_expr(visit_col),
@@ -579,8 +602,8 @@ def _appointment_out(
         department_id=apt.department_id,
         department_name=dept.name if dept else "",
         scheduled_at=apt.scheduled_at.isoformat() if apt.scheduled_at else "",
-        reason=apt.reason,
-        notes=apt.notes,
+        reason=_strip_internal_appointment_markers(apt.reason),
+        notes=_strip_internal_appointment_markers(apt.notes),
         appointment_type=apt.appointment_type,
         status=appointment_status_value(apt.status),
         **payment,
@@ -663,6 +686,16 @@ def list_appointments(
     page: int = 1,
     limit: int = 20,
 ) -> dict:
+    # Day rollover: past scheduled (unconsulted) → cancelled before listing.
+    try:
+        from Services.appointment_lifecycle_service import (
+            mark_past_open_appointments_cancelled,
+        )
+
+        mark_past_open_appointments_cancelled(db, commit=True)
+    except Exception:
+        db.rollback()
+
     resolved_list_filter = _resolve_list_filter(list_filter)
     sort_key, order_key = _resolve_sort_order(sort, order)
     effective_status = None if resolved_list_filter else status
@@ -737,6 +770,45 @@ def cancel_appointment(db: Session, appointment_id: int) -> AppointmentOut:
     )
 
 
+def delete_appointment(db: Session, appointment_id: int) -> dict:
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if apt.status not in (AppointmentStatus.completed, AppointmentStatus.cancelled):
+        raise HTTPException(
+            status_code=400,
+            detail="Only completed or cancelled appointments can be deleted",
+        )
+
+    db.query(DoctorQueueNextRequest).filter(
+        DoctorQueueNextRequest.appointment_id == appointment_id
+    ).delete(synchronize_session=False)
+    db.query(PatientQueue).filter(PatientQueue.appointment_id == appointment_id).delete(
+        synchronize_session=False
+    )
+    for rx in db.query(Prescription).filter(Prescription.appointment_id == appointment_id).all():
+        db.delete(rx)
+    db.query(LabTestOrder).filter(LabTestOrder.appointment_id == appointment_id).delete(
+        synchronize_session=False
+    )
+    db.query(PatientVitals).filter(PatientVitals.appointment_id == appointment_id).update(
+        {PatientVitals.appointment_id: None},
+        synchronize_session=False,
+    )
+    db.query(NursingNote).filter(NursingNote.appointment_id == appointment_id).update(
+        {NursingNote.appointment_id: None},
+        synchronize_session=False,
+    )
+    db.query(OpdVisit).filter(OpdVisit.appointment_id == appointment_id).update(
+        {OpdVisit.appointment_id: None},
+        synchronize_session=False,
+    )
+
+    db.delete(apt)
+    db.commit()
+    return {"message": "Appointment deleted successfully", "appointment_id": appointment_id}
+
+
 def doctor_availability(db: Session, doctor_id: int, department_id: int, date_str: str) -> dict:
     h.get_doctor_in_department(db, doctor_id, department_id)
     from datetime import datetime
@@ -750,15 +822,32 @@ def doctor_availability(db: Session, doctor_id: int, department_id: int, date_st
             Appointment.doctor_id == doctor_id,
             Appointment.scheduled_at >= day,
             Appointment.scheduled_at <= day_end,
-            Appointment.status == "scheduled",
+            Appointment.status == AppointmentStatus.scheduled,
         )
         .all()
     )
+
+    def _slot_taken(slot_time: datetime) -> bool:
+        """Match by IST calendar day + hour + minute (ignore tz/seconds noise)."""
+        for apt in booked:
+            if apt.scheduled_at is None:
+                continue
+            apt_ist = apt.scheduled_at.astimezone(h.IST)
+            if (
+                apt_ist.year == slot_time.year
+                and apt_ist.month == slot_time.month
+                and apt_ist.day == slot_time.day
+                and apt_ist.hour == slot_time.hour
+                and apt_ist.minute == slot_time.minute
+            ):
+                return True
+        return False
+
     slots = []
     for hour in range(9, 17):
         for minute in (0, 30):
-            slot_time = day.replace(hour=hour, minute=minute)
-            taken = any(a.scheduled_at == slot_time for a in booked)
+            slot_time = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+            taken = _slot_taken(slot_time)
             slots.append({
                 "time": slot_time.strftime("%H:%M"),
                 "status": "booked" if taken else "available",

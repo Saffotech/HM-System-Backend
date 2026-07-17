@@ -17,6 +17,7 @@ from Models.user import User
 from Services import opd_helpers
 from Services.queue_helpers import (
     apply_receptionist_payment_filter,
+    is_visit_paid,
     is_visit_paid_sql,
     status_value,
 )
@@ -59,9 +60,15 @@ def _today():
 
 
 def _resolve_payment_status(visit: OpdVisit | None) -> str:
+    """Latest linked visit payment — same rules as OPD/billing (is_visit_paid)."""
     if visit is None:
         return "pending"
-    return visit.payment_status or "pending"
+    if is_visit_paid(visit):
+        return "paid"
+    raw = (visit.payment_status or "pending").strip().lower()
+    if raw in {"paid", "partial", "pending"}:
+        return raw
+    return "pending"
 
 
 def _appointment_row_to_dict(
@@ -92,7 +99,6 @@ def _appointment_row_to_dict(
         "department": department,
         "status": _receptionist_display_status(appointment),
         "payment_status": _resolve_payment_status(visit),
-        "scheduled_at": appointment.scheduled_at,
         "scheduled_at": appointment.scheduled_at,
         "checked_in_at": queue.queue_entered_at if queue else None,
         "consultation_started_at": queue.consultation_started_at if queue else None,
@@ -224,7 +230,9 @@ def _receptionist_appointments_query(
     date_from: date,
     date_to: date | None = None,
     doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     payment_filter: Optional[str] = None,
+    include_cancelled: bool = False,
 ):
     """Appointments in range with latest visit and single queue row for that day."""
     date_to = date_to or date_from
@@ -235,8 +243,12 @@ def _receptionist_appointments_query(
     Visit = aliased(OpdVisit)
     Queue = aliased(PatientQueue)
 
+    status_filters = [Appointment.status != AppointmentStatus.no_show]
+    if not include_cancelled:
+        status_filters.append(Appointment.status != AppointmentStatus.cancelled)
+
     q = (
-        db.query(Appointment, Patient, Visit, Queue, User)
+        db.query(Appointment, Patient, Visit, Queue, User, Department)
         .join(Patient, Appointment.patient_id == Patient.id)
         .outerjoin(latest_visit, latest_visit.c.appointment_id == Appointment.id)
         .outerjoin(Visit, Visit.id == latest_visit.c.visit_id)
@@ -254,14 +266,40 @@ def _receptionist_appointments_query(
         .filter(
             Appointment.scheduled_at >= range_start,
             Appointment.scheduled_at <= range_end,
-            Appointment.status != AppointmentStatus.cancelled,
-            Appointment.status != AppointmentStatus.no_show,
+            *status_filters,
         )
     )
     if doctor_id is not None:
         q = q.filter(Appointment.doctor_id == doctor_id)
+    if department_id is not None:
+        q = q.filter(Appointment.department_id == department_id)
     q = apply_receptionist_payment_filter(q, payment_filter, visit_model=Visit)
     return q, Visit
+
+
+def _todays_appointments_query(
+    db: Session,
+    *,
+    doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    payment_filter: Optional[str] = None,
+    include_cancelled: bool = False,
+):
+    """Today's IST appointments — shared by dashboard and today-queue."""
+    today = _today()
+    return _receptionist_appointments_query(
+        db,
+        date_from=today,
+        date_to=today,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        payment_filter=payment_filter,
+        include_cancelled=include_cancelled,
+    )
+
+
+def _appointment_list_order():
+    return (Appointment.scheduled_at.asc(), Appointment.id.asc())
 
 
 def _appointment_search_filter(term: str, *, include_doctor: bool = False):
@@ -376,11 +414,13 @@ def _load_canonical_rows(
     include_doctor_search: bool = False,
     order_desc: bool = False,
 ) -> list[tuple]:
-    q = _receptionist_appointments_query(
+    q, _Visit = _receptionist_appointments_query(
         db,
         date_from=date_from,
         date_to=date_to or date_from,
         doctor_id=doctor_id,
+        payment_filter=None,
+        include_cancelled=(status == "cancelled"),
     )
     if doctor_name:
         q = q.filter(_doctor_name_filter(doctor_name))
@@ -391,7 +431,7 @@ def _load_canonical_rows(
             _appointment_search_filter(search, include_doctor=include_doctor_search)
         )
     if order_desc:
-        q = q.order_by(Appointment.scheduled_at.desc())
+        q = q.order_by(Appointment.scheduled_at.desc(), Appointment.id.desc())
     else:
         q = q.order_by(*_appointment_list_order())
 
@@ -453,6 +493,7 @@ def get_today_queue(
     db: Session,
     *,
     doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     doctor_name: Optional[str] = None,
     patient_id: Optional[int] = None,
     status: str | None = None,
@@ -467,7 +508,11 @@ def get_today_queue(
     mark_past_scheduled_as_no_show(db)
     today = _today()
     q, Visit = _todays_appointments_query(
-        db, doctor_id=doctor_id, payment_filter=payment_filter
+        db,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        payment_filter=payment_filter,
+        include_cancelled=(status == "cancelled"),
     )
     if doctor_name:
         q = q.filter(_doctor_name_filter(doctor_name))
@@ -504,7 +549,7 @@ def get_today_queue(
                 department=dept.name if dept else None,
                 queue_date=today,
             )
-            for appointment, patient, visit, queue, doc, dept in page_rows
+            for appointment, patient, visit, queue, doc, dept in rows
         ],
     }
 
@@ -526,8 +571,8 @@ def get_doctor_queue(
         date_from=target_date,
         date_to=target_date,
         doctor_id=doctor_id,
-        status=status,
         payment_filter=payment_filter,
+        include_cancelled=(status == "cancelled"),
     )
     q = _apply_receptionist_status_filter(q, status)
     if search:
@@ -560,7 +605,7 @@ def get_doctor_queue(
                 department=dept.name if dept else None,
                 queue_date=target_date,
             )
-            for appointment, patient, visit, queue, _doc, dept in page_rows
+            for appointment, patient, visit, queue, _doc, dept in rows
         ],
     }
 
@@ -572,6 +617,7 @@ def _queue_history_query(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     status: str | None = None,
     payment_filter: Optional[str] = None,
     search: Optional[str] = None,
@@ -588,7 +634,9 @@ def _queue_history_query(
         date_from=date_from,
         date_to=date_to,
         doctor_id=doctor_id,
+        department_id=department_id,
         payment_filter=payment_filter,
+        include_cancelled=(status == "cancelled" or status is None),
     )
     q = _apply_receptionist_status_filter(q, status)
     if search:
@@ -608,6 +656,7 @@ def get_queue_history(
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
     doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
     status: str | None = None,
     payment_filter: Optional[str] = None,
     search: Optional[str] = None,
@@ -620,11 +669,10 @@ def get_queue_history(
         date_from=date_from,
         date_to=date_to,
         doctor_id=doctor_id,
+        department_id=department_id,
         status=status,
         payment_filter=payment_filter,
         search=search,
-        include_doctor_search=True,
-        order_desc=True,
     )
 
     unique_rows = _unique_appointment_rows(q, Visit)
@@ -646,13 +694,19 @@ def get_queue_history(
             )
             if doc
             else None,
+            department_id=appointment.department_id,
+            department=dept.name if dept else None,
             queue_date=(
                 queue.queue_date
                 if queue
-                else appointment.scheduled_at.astimezone(IST).date()
+                else (
+                    appointment.scheduled_at.astimezone(IST).date()
+                    if appointment.scheduled_at
+                    else None
+                )
             ),
         )
-        for appointment, patient, visit, queue, doc, dept in page_rows
+        for appointment, patient, visit, queue, doc, dept in rows
     ]
     return {
         "date_from": date_from,
@@ -709,6 +763,49 @@ def _appointment_counts_by_doctor(db: Session, target_date: date) -> dict[int, d
     }
 
 
+def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> list[dict]:
+    """30-min slots (9:00–16:30 IST) with booked/available — mirrors OPD doctor_availability."""
+    day_start = datetime.combine(schedule_date, time.min, tzinfo=IST)
+    day_end = datetime.combine(schedule_date, time.max, tzinfo=IST)
+
+    booked = (
+        db.query(Appointment)
+        .filter(
+            Appointment.doctor_id == doctor_id,
+            Appointment.scheduled_at >= day_start,
+            Appointment.scheduled_at <= day_end,
+            Appointment.status.in_(
+                [AppointmentStatus.scheduled, AppointmentStatus.completed]
+            ),
+        )
+        .all()
+    )
+
+    booked_hm = set()
+    for apt in booked:
+        if apt.scheduled_at is None:
+            continue
+        apt_ist = apt.scheduled_at.astimezone(IST)
+        booked_hm.add((apt_ist.hour, apt_ist.minute))
+
+    slots = []
+    for hour in range(9, 17):
+        for minute in (0, 30):
+            taken = (hour, minute) in booked_hm
+            end_minute = minute + 30
+            end_hour = hour + (1 if end_minute >= 60 else 0)
+            end_minute %= 60
+            slots.append(
+                {
+                    "slot_start": f"{hour:02d}:{minute:02d}",
+                    "slot_end": f"{end_hour:02d}:{end_minute:02d}",
+                    "is_available": not taken,
+                    "status": "booked" if taken else "available",
+                }
+            )
+    return slots
+
+
 def get_doctors_schedule(
     db: Session,
     *,
@@ -716,6 +813,7 @@ def get_doctors_schedule(
     doctor_id: Optional[int] = None,
     department_id: Optional[int] = None,
     search: Optional[str] = None,
+    include_slots: bool = False,
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -784,6 +882,14 @@ def get_doctors_schedule(
         profile: DoctorProfile | None = doctor.doctor_profile
         dept: Department | None = doctor.department
         stats = counts.get(doctor.id, empty_stats)
+        slots = (
+            _build_doctor_slots(db, doctor.id, schedule_date)
+            if include_slots
+            else None
+        )
+        available_count = (
+            sum(1 for s in slots if s["is_available"]) if slots else 0
+        )
         items.append(
             {
                 "doctor_id": doctor.id,
@@ -802,6 +908,10 @@ def get_doctors_schedule(
                 "cancelled_count": stats["cancelled_count"],
                 # Active doctors are listable; shift fields indicate configured hours.
                 "is_available": True,
+                "slots": slots,
+                "total_slots": len(slots) if slots else 0,
+                "booked_slots": (len(slots) - available_count) if slots else 0,
+                "available_slots": available_count,
             }
         )
 

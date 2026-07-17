@@ -1,7 +1,7 @@
 """add users.specialization if missing (repair migration)
 
 Revision ID: f4a5b6c7d8e9
-Revises: e3f4a5b6c7d8
+Revises: e4f5a6b7c8d9
 Create Date: 2026-07-08
 
 """
@@ -11,7 +11,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "f4a5b6c7d8e9"
-down_revision: Union[str, Sequence[str], None] = "e3f4a5b6c7d8"
+down_revision: Union[str, Sequence[str], None] = "e4f5a6b7c8d9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

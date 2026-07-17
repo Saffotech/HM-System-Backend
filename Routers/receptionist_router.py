@@ -44,6 +44,7 @@ def receptionist_dashboard(
 )
 def receptionist_today_queue(
     doctor_id: Optional[int] = Query(None, ge=1),
+    department_id: Optional[int] = Query(None, ge=1),
     doctor_name: Optional[str] = Query(None, min_length=1),
     patient_id: Optional[int] = Query(None, ge=1),
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
@@ -67,6 +68,7 @@ def receptionist_today_queue(
         **receptionist_service.get_today_queue(
             db,
             doctor_id=doctor_id,
+            department_id=department_id,
             doctor_name=doctor_name,
             patient_id=patient_id,
             status=receptionist_service.receptionist_appointment_status_from_query(
@@ -131,6 +133,7 @@ def receptionist_queue_history(
     date_from: Optional[date] = Query(None),
     date_to: Optional[date] = Query(None),
     doctor_id: Optional[int] = Query(None, ge=1),
+    department_id: Optional[int] = Query(None, ge=1),
     status_filter: Optional[ReceptionistAppointmentStatus] = Query(
         None,
         alias="status",
@@ -155,6 +158,7 @@ def receptionist_queue_history(
             date_from=date_from,
             date_to=date_to,
             doctor_id=doctor_id,
+            department_id=department_id,
             status=receptionist_service.receptionist_appointment_status_from_query(
                 status_filter.value if status_filter else None
             ),
@@ -182,6 +186,9 @@ def receptionist_doctors_schedule(
         None,
         description="Search doctor name, specialization, department, or doctor id",
     ),
+    include_slots: bool = Query(
+        False, description="Include per-slot availability grid for each doctor"
+    ),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -196,6 +203,7 @@ def receptionist_doctors_schedule(
             doctor_id=doctor_id,
             department_id=department_id,
             search=search,
+            include_slots=include_slots,
             page=page,
             page_size=page_size,
         ),

@@ -10,10 +10,9 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     ForeignKey,
-    Enum
 )
-
 from sqlalchemy.orm import relationship
+from sqlalchemy.types import TypeDecorator, String as SAString
 
 from database import Base
 
@@ -22,7 +21,7 @@ def _now():
     return datetime.now(
         ZoneInfo("Asia/Kolkata")
     )
- 
+
 
 # ==========================================================
 # QUEUE STATUS
@@ -33,7 +32,7 @@ class QueueStatus(str, enum.Enum):
     COMPLETED = "completed"
     CANCELLED = "cancelled"
     NO_SHOW = "no_show"
- 
+
 
 # ==========================================================
 # PRIORITY
@@ -43,6 +42,31 @@ class QueuePriority(str, enum.Enum):
     NORMAL = "normal"
     URGENT = "urgent"
     EMERGENCY = "emergency"
+
+
+class LowercaseStrEnum(TypeDecorator):
+    """Store str Enum values on VARCHAR; accept legacy UPPERCASE DB rows."""
+
+    impl = SAString
+    cache_ok = True
+
+    def __init__(self, enum_cls, length: int = 32):
+        self.enum_cls = enum_cls
+        super().__init__(length)
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, self.enum_cls):
+            return value.value
+        return self.enum_cls(str(value).strip().lower()).value
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return None
+        if isinstance(value, self.enum_cls):
+            return value
+        return self.enum_cls(str(value).strip().lower())
 
 
 # ==========================================================
@@ -116,21 +140,13 @@ class PatientQueue(Base):
     )
 
     status = Column(
-        Enum(
-            QueueStatus,
-            name="queuestatus",
-            values_callable=lambda enum_cls: [item.value for item in enum_cls],
-        ),
+        LowercaseStrEnum(QueueStatus, length=32),
         nullable=False,
         default=QueueStatus.SCHEDULED,
     )
 
     priority = Column(
-        Enum(
-            QueuePriority,
-            name="queuepriority",
-            values_callable=lambda enum_cls: [item.value for item in enum_cls],
-        ),
+        LowercaseStrEnum(QueuePriority, length=32),
         nullable=False,
         default=QueuePriority.NORMAL,
     )

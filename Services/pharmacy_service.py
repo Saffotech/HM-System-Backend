@@ -1,3 +1,4 @@
+from datetime import date, datetime, time
 from typing import Optional
 
 from fastapi import HTTPException
@@ -21,6 +22,14 @@ from Services import opd_helpers as h
 PRESCRIPTION_STATUS_PENDING = "pending"
 PRESCRIPTION_STATUS_PARTIALLY = "partially_dispensed"
 PRESCRIPTION_STATUS_DISPENSED = "dispensed"
+
+
+def _day_start(day: date) -> datetime:
+    return datetime.combine(day, time.min, tzinfo=h.IST)
+
+
+def _day_end(day: date) -> datetime:
+    return datetime.combine(day, time.max, tzinfo=h.IST)
 
 
 def _doctor_name(doctor: Optional[User]) -> str:
@@ -293,13 +302,24 @@ def dispense_prescription(
     }
 
 
-def get_dispense_history(db: Session, page: int = 1, limit: int = 20) -> dict:
+def get_dispense_history(
+    db: Session,
+    page: int = 1,
+    limit: int = 20,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
+) -> dict:
     q = (
         db.query(DispensingItem, Dispensing, PrescriptionItem)
         .join(Dispensing, Dispensing.id == DispensingItem.dispensing_id)
         .join(PrescriptionItem, PrescriptionItem.id == DispensingItem.prescription_item_id)
         .order_by(Dispensing.dispensed_at.desc(), DispensingItem.id.desc())
     )
+    if date_from is not None:
+        q = q.filter(Dispensing.dispensed_at >= _day_start(date_from))
+    if date_to is not None:
+        q = q.filter(Dispensing.dispensed_at <= _day_end(date_to))
+
     total = q.count()
     rows = q.offset((page - 1) * limit).limit(limit).all()
 

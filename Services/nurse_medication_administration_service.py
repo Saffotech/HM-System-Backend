@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from Models.patient import Patient
 from Models.opd_billing import Bed
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
-from Models.nurse_medication_administration import MedicationAdministration
+from Models.nurse_medication_administration import MedicationAdministration, _now
 from Models.user import User
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
@@ -380,6 +380,8 @@ def administer_medication_service(
 
         status=medication_data.status,
         remarks=medication_data.remarks,
+
+        administered_at=_now(),
 
         is_active=True,
         created_by=nurse_id,

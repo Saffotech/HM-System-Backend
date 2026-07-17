@@ -1,4 +1,5 @@
 """Shared helpers for doctor module (OPD appointments + patients)."""
+import re
 from datetime import date, datetime, time
 from typing import List, Optional
 
@@ -42,7 +43,25 @@ def get_patient(db: Session, patient_id: int) -> Optional[Patient]:
         .filter(Patient.id == patient_id, Patient.is_active.is_(True))
         .first()
     )
- 
+
+
+_INTERNAL_APPOINTMENT_MARKERS = (
+    "[pay-later]",
+    "booked during registration",
+    "new patient registration",
+    "opd revisit",
+)
+
+
+def strip_internal_appointment_markers(text: Optional[str]) -> Optional[str]:
+    """Hide OPD booking markers from doctor-facing clinical fields."""
+    if text is None:
+        return None
+    cleaned = str(text)
+    for marker in _INTERNAL_APPOINTMENT_MARKERS:
+        cleaned = re.sub(re.escape(marker), "", cleaned, flags=re.IGNORECASE)
+    cleaned = " ".join(cleaned.split()).strip()
+    return cleaned or None
 
 def appointment_to_dict(
     db: Session,
@@ -69,9 +88,9 @@ def appointment_to_dict(
         "appointment_time": scheduled.strftime("%H:%M:%S") if scheduled else None,
         "appointment_type": apt.appointment_type,
         "status": apt.status,
-        "reason": apt.reason,
+        "reason": strip_internal_appointment_markers(apt.reason),
         "symptoms": getattr(apt, "symptoms", None),
-        "notes": apt.notes,
+        "notes": strip_internal_appointment_markers(apt.notes),
         "diagnosis": getattr(apt, "diagnosis", None),
         "follow_up": (
             apt.follow_up_date.isoformat()

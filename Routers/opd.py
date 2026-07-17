@@ -419,6 +419,16 @@ def cancel_appointment(
     return appointment_service.cancel_appointment(db, appointment_id)
 
 
+@router.delete("/appointments/{appointment_id}")
+def delete_appointment(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("appointments:update")),
+):
+    return appointment_service.delete_appointment(db, appointment_id)
+
+
 @router.get("/appointments/doctor/{doctor_id}/slots")
 def doctor_slots(
     doctor_id: int,

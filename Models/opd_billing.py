@@ -60,7 +60,11 @@ class Appointment(Base):
     follow_up_date = Column(Date, nullable=True)
     appointment_type = Column(String, default="opd")  # opd / follow-up
     status = Column(
-        Enum(AppointmentStatus, name="appointmentstatus"),
+        Enum(
+            AppointmentStatus,
+            name="appointmentstatus",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
         default=AppointmentStatus.scheduled,
     )
