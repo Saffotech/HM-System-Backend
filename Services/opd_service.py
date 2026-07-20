@@ -290,7 +290,9 @@ def generate_bill(
         extra_items=extra or None,
         transaction_reference=data.transaction_reference,
     )
-    # No auto walk-in — book appointment separately via POST /opd/appointments.
+    # Link to an existing same-day appointment when one already exists (no auto walk-in create).
+    apt = appointment_service.link_orphan_visit_to_appointment(db, visit)
+    enqueue_after_payment_if_eligible(db, visit, handled_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -303,8 +305,9 @@ def generate_bill(
         visit_id=visit.id,
         grand_total=visit.grand_total,
         payment_status=visit.payment_status,
-        appointment_id=None,
-        appointment_uid=None,
+        appointment_id=apt.id if apt else None,
+        appointment_uid=apt.appointment_uid if apt else None,
+        scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at) if apt else None,
     )
 
 
@@ -543,6 +546,8 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
         raise HTTPException(status_code=400, detail=f"Amount exceeds balance due ({visit.balance_due})")
 
     h.record_payment(db, visit, data.paid_amount, data.payment_mode, recorded_by, data.transaction_reference)
+    # Link orphan visit → same-day appointment so receptionist + queue see paid status
+    appointment_service.link_orphan_visit_to_appointment(db, visit)
     queue = enqueue_after_payment_if_eligible(db, visit, handled_by=recorded_by)
     db.commit()
     db.refresh(visit)
@@ -676,14 +681,20 @@ def list_payment_history(
     page: int = 1,
     limit: int = 20,
 ) -> dict:
+    def _norm_mode(mode: Optional[str]) -> str:
+        key = (mode or "").strip().lower()
+        if key in {"online", "upi"}:
+            return "upi"
+        if key in {"cash", "card", "insurance"}:
+            return key
+        return key or "cash"
+
     q = (
         db.query(PaymentTransaction, OpdVisit, Patient)
         .join(OpdVisit, PaymentTransaction.visit_id == OpdVisit.id)
         .join(Patient, OpdVisit.patient_id == Patient.id)
         .order_by(PaymentTransaction.paid_at.desc())
     )
-    if payment_mode:
-        q = q.filter(PaymentTransaction.payment_mode == payment_mode)
     if search:
         term = f"%{search.strip()}%"
         q = q.filter(
@@ -692,21 +703,34 @@ def list_payment_history(
             | (PaymentTransaction.transaction_reference.ilike(term))
         )
 
-    rows = q.all()
-    total_collected = sum(t.amount for t, _, _ in rows)
-    by_mode = {}
-    for t, _, _ in rows:
-        by_mode[t.payment_mode] = by_mode.get(t.payment_mode, 0) + t.amount
+    # Summary always from all search matches (not mode filter) so cards stay consistent.
+    all_rows = q.all()
+    by_mode: dict[str, float] = {"cash": 0.0, "upi": 0.0, "card": 0.0, "insurance": 0.0}
+    total_collected = 0.0
+    for t, _, _ in all_rows:
+        amount = float(t.amount or 0)
+        total_collected += amount
+        mode = _norm_mode(t.payment_mode)
+        by_mode[mode] = by_mode.get(mode, 0.0) + amount
 
-    page_rows = rows[(page - 1) * limit : page * limit]
+    filtered = all_rows
+    if payment_mode:
+        want = _norm_mode(payment_mode)
+        filtered = [
+            row for row in all_rows if _norm_mode(row[0].payment_mode) == want
+        ]
+
+    page_rows = filtered[(page - 1) * limit : page * limit]
     return {
         "summary": {
             "total_collected": round(total_collected, 2),
             "cash": round(by_mode.get("cash", 0), 2),
             "upi": round(by_mode.get("upi", 0), 2),
             "card": round(by_mode.get("card", 0), 2),
+            "insurance": round(by_mode.get("insurance", 0), 2),
+            "transaction_count": len(all_rows),
         },
-        "total": len(rows),
+        "total": len(filtered),
         "page": page,
         "limit": limit,
         "payments": [
@@ -717,7 +741,7 @@ def list_payment_history(
                 "patient_uid": p.patient_uid,
                 "bill_number": v.bill_number,
                 "date": t.paid_at.isoformat() if t.paid_at else None,
-                "mode": t.payment_mode,
+                "mode": _norm_mode(t.payment_mode),
                 "amount": t.amount,
                 "reference": t.transaction_reference,
                 "bill_status": v.payment_status,

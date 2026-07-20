@@ -14,14 +14,10 @@ def _get_linked_appointment(
     db: Session,
     visit: OpdVisit,
 ) -> Appointment | None:
-    """Return linked appointment only — never auto-create a walk-in."""
-    if not visit.appointment_id:
-        return None
+    """Return linked appointment; self-heal orphan visits via same-day match."""
+    from Services.appointment_service import link_orphan_visit_to_appointment
 
-    apt = db.query(Appointment).filter(Appointment.id == visit.appointment_id).first()
-    if not apt:
-        raise HTTPException(status_code=404, detail="Linked appointment not found")
-    return apt
+    return link_orphan_visit_to_appointment(db, visit)
 
 
 def enqueue_after_payment_if_eligible(
@@ -61,6 +57,7 @@ def enqueue_after_payment_if_eligible(
             created_by=handled_by,
         )
     except HTTPException as exc:
-        if exc.status_code == 409:
+        # 409 = already queued; 400 = not eligible yet — never break payment/list flows
+        if exc.status_code in {400, 409}:
             return find_queue_for_appointment_today(db, appointment.id)
         raise

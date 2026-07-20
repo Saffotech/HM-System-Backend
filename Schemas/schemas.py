@@ -9,7 +9,7 @@ class UserCreate(BaseModel):
     email:      EmailStr
     password:   str = Field(..., min_length=8)
     role_id:    int  # FK to roles table
-    department_id: Optional[int] = None  # only relevant for Doctor/Nurse
+    department_id: Optional[int] = None  # only relevant for Doctor
     phone: Optional[str] = Field(None, max_length=20)
     specialization: Optional[str] = Field(None, max_length=120)
     gender: Optional[int] = Field(None, ge=1, le=4)

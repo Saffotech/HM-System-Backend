@@ -7,8 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
-from Models.nurse_nursing_notes import NursingNote
-from Models.user import User
+from Models.nurse_nursing_notes import NursingNote, NursingNoteStatus
 
 from Schemas.nurse_schema import (
     NursingNoteCreate,
@@ -17,22 +16,6 @@ from Schemas.nurse_schema import (
 )
 
 IST = ZoneInfo("Asia/Kolkata")
-
-
-def _serialize_note(note: NursingNote) -> NursingNoteResponse:
-    return NursingNoteResponse.model_validate(note).model_copy(
-        update={
-            "patient_uid": (
-                note.patient.patient_uid if note.patient else None
-            )
-        }
-    )
-
-
-def _note_query(db: Session):
-    return db.query(NursingNote).options(
-        joinedload(NursingNote.patient)
-    )
 
 
 def _occupied_bed_for_patient(db: Session, patient_id: int) -> Bed | None:
@@ -109,21 +92,70 @@ def _patient_display_name(patient: Patient | None) -> str | None:
     return f"{patient.first_name} {patient.last_name or ''}".strip()
 
 
-def _serialize_note(note: NursingNote) -> NursingNoteResponse:
+def _status_value(status) -> str | None:
+    if status is None:
+        return None
+    return status.value if hasattr(status, "value") else str(status)
+
+
+def _history_entry(note: NursingNote) -> dict:
+    created_by = getattr(note, "created_by_name", None) or getattr(note, "nurse_name", None)
+    return {
+        "history_id": note.id,
+        "created_at": note.created_at,
+        "created_by": created_by,
+        "status": _status_value(note.status) or "active",
+        "symptoms": note.symptoms,
+        "treatment_response": note.treatment_response,
+        "additional_notes": note.additional_notes,
+    }
+
+
+def _patient_note_history(db: Session, patient_id: int) -> list[dict]:
+    """All notes for a patient, newest first — powers Created At filter."""
+    rows = (
+        db.query(NursingNote)
+        .filter(NursingNote.patient_id == patient_id)
+        .order_by(NursingNote.created_at.desc(), NursingNote.id.desc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    nurse_ids = {n.nurse_id for n in rows if n.nurse_id}
+    nurses = {
+        u.id: u
+        for u in db.query(User).filter(User.id.in_(nurse_ids)).all()
+    } if nurse_ids else {}
+
+    history = []
+    for row in rows:
+        nurse = nurses.get(row.nurse_id)
+        name = _user_display_name(nurse)
+        row.nurse_name = name
+        row.created_by_name = name
+        history.append(_history_entry(row))
+    return history
+
+
+def _serialize_note(note: NursingNote, db: Session | None = None) -> NursingNoteResponse:
     patient = note.patient
     nurse = note.nurse if getattr(note, "nurse", None) is not None else None
     nurse_name = getattr(note, "nurse_name", None) or _user_display_name(nurse)
-    return NursingNoteResponse.model_validate(note).model_copy(
-        update={
-            "patient_uid": getattr(note, "patient_uid", None)
-            or (patient.patient_uid if patient else None),
-            "patient_name": getattr(note, "patient_name", None)
-            or _patient_display_name(patient),
-            "nurse_name": nurse_name,
-            "created_by_name": getattr(note, "created_by_name", None) or nurse_name,
-            "bed_number": getattr(note, "bed_number", None),
-        }
-    )
+    history = _patient_note_history(db, note.patient_id) if db is not None else None
+    payload = {
+        "patient_uid": getattr(note, "patient_uid", None)
+        or (patient.patient_uid if patient else None),
+        "patient_name": getattr(note, "patient_name", None)
+        or _patient_display_name(patient),
+        "nurse_name": nurse_name,
+        "created_by_name": getattr(note, "created_by_name", None) or nurse_name,
+        "bed_number": getattr(note, "bed_number", None),
+        "status": _status_value(note.status),
+    }
+    if history is not None:
+        payload["history"] = history
+    return NursingNoteResponse.model_validate(note).model_copy(update=payload)
 
 
 def _note_query(db: Session):
@@ -264,7 +296,7 @@ def create_note_service(
             .first()
         )
 
-        return _serialize_note(_enrich_note(db, note))
+        return _serialize_note(_enrich_note(db, note), db)
 
     except Exception:
         db.rollback()
@@ -281,6 +313,10 @@ def update_note_service(
     note_data: NursingNoteUpdate,
     nurse_id: int,
 ):
+    """
+    Append a new nursing note (does not overwrite the previous snapshot).
+    Old values stay available in the Created At history filter; latest is newest.
+    """
 
     note = (
         db.query(NursingNote)
@@ -310,21 +346,30 @@ def update_note_service(
             )
         )
 
-        for field, value in update_data.items():
-            setattr(note, field, value)
+        def pick(field):
+            return update_data[field] if field in update_data else getattr(note, field)
 
-        if hasattr(note, "updated_at"):
-            note.updated_at = datetime.now(IST)
-
+        new_note = NursingNote(
+            appointment_id=note.appointment_id,
+            patient_id=note.patient_id,
+            nurse_id=nurse_id,
+            symptoms=pick("symptoms"),
+            treatment_response=pick("treatment_response"),
+            additional_notes=pick("additional_notes"),
+            status=NursingNoteStatus.ACTIVE,
+            created_by=nurse_id,
+            created_at=datetime.now(IST),
+        )
+        db.add(new_note)
         db.commit()
-        db.refresh(note)
-        note = (
+        db.refresh(new_note)
+        new_note = (
             _note_query(db)
-            .filter(NursingNote.id == note.id)
+            .filter(NursingNote.id == new_note.id)
             .first()
         )
 
-        return _serialize_note(_enrich_note(db, note))
+        return _serialize_note(_enrich_note(db, new_note), db)
 
     except Exception:
         db.rollback()
@@ -354,7 +399,7 @@ def get_note_by_id_service(
             detail="Note not found"
         )
 
-    return _serialize_note(_enrich_note(db, note))
+    return _serialize_note(_enrich_note(db, note), db)
 
 
 # ==========================================================
@@ -382,7 +427,7 @@ def get_all_notes_service(
     )
 
     notes = _enrich_notes_batch(db, notes)
-    return [_serialize_note(note) for note in notes]
+    return [_serialize_note(note, db) for note in notes]
 
 
 # ==========================================================
@@ -483,4 +528,4 @@ def search_notes_service(
     )
 
     notes = _enrich_notes_batch(db, notes)
-    return [_serialize_note(note) for note in notes]
+    return [_serialize_note(note, db) for note in notes]

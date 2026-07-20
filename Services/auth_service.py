@@ -20,8 +20,11 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
 
     assert_can_assign_role(caller_role_name(actor), role.name)
 
-    if role.name in {"doctor", "nurse"} and not data.department_id:
-        raise HTTPException(status_code=400, detail="department_id required for doctor/nurse")
+    if role.name == "doctor" and not data.department_id:
+        raise HTTPException(status_code=400, detail="department_id required for doctor")
+
+    # Department is only assigned to doctors; clear for all other roles
+    department_id = data.department_id if role.name == "doctor" else None
 
     new_user = User(
         first_name=data.first_name,
@@ -29,7 +32,7 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         email=data.email,
         password=hash_password(data.password),
         role_id=data.role_id,
-        department_id=data.department_id,
+        department_id=department_id,
     )
     db.add(new_user)
     db.commit()

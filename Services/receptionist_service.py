@@ -172,6 +172,42 @@ def _dedupe_canonical_rows(rows: list[tuple]) -> list[tuple]:
     return canonical
 
 
+def _enrich_rows_with_visits(
+    db: Session, rows: list[tuple], *, persist_links: bool = True
+) -> list[tuple]:
+    """
+    Attach visits the same way OPD does (FK first, then patient+doctor+dept+day).
+
+    Read-only boards must never raise queue/payment errors — only resolve display
+    payment_status. Optionally persist missing appointment_id for future joins.
+    """
+    from Services import appointment_service
+
+    if not rows:
+        return rows
+
+    appointments = [row[0] for row in rows]
+    visit_map = appointment_service._load_visits_for_appointments(db, appointments)
+    linked_any = False
+    enriched: list[tuple] = []
+
+    for row in rows:
+        apt = row[0]
+        visit = visit_map.get(apt.id, row[2])
+        if persist_links and visit is not None and visit.appointment_id is None:
+            visit.appointment_id = apt.id
+            linked_any = True
+        enriched.append((row[0], row[1], visit, *row[3:]))
+
+    if linked_any:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    return enriched
+
+
 def _filter_canonical_rows(
     rows: list[tuple],
     *,
@@ -436,6 +472,7 @@ def _load_canonical_rows(
         q = q.order_by(*_appointment_list_order())
 
     rows = q.all()
+    rows = _enrich_rows_with_visits(db, rows)
     canonical = _dedupe_canonical_rows(rows)
     filtered = _filter_canonical_rows(
         canonical, status=status, payment_filter=payment_filter
@@ -455,37 +492,29 @@ def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
     from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
 
     mark_past_scheduled_as_no_show(db)
-    all_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
-    paid_q, _ = _todays_appointments_query(db, doctor_id=doctor_id, payment_filter="paid")
-    unpaid_q, _ = _todays_appointments_query(
-        db, doctor_id=doctor_id, payment_filter="unpaid"
+    today = _today()
+    # Resolve visits like OPD so paid orphan bills count correctly
+    rows = _load_canonical_rows(db, date_from=today, date_to=today, doctor_id=doctor_id)
+    completed = [
+        r for r in rows if status_value(r[0].status) == AppointmentStatus.completed.value
+    ]
+    paid = [r for r in rows if r[2] is not None and is_visit_paid(r[2])]
+    unpaid = [r for r in rows if r[2] is None or not is_visit_paid(r[2])]
+
+    cancelled_q = db.query(Appointment).filter(
+        Appointment.scheduled_at >= _today_range()[0],
+        Appointment.scheduled_at < _today_range()[1],
+        Appointment.status == AppointmentStatus.cancelled,
     )
-    completed_q, _ = _todays_appointments_query(db, doctor_id=doctor_id)
-    completed_q = _apply_receptionist_status_filter(completed_q, "completed")
+    if doctor_id:
+        cancelled_q = cancelled_q.filter(Appointment.doctor_id == doctor_id)
 
     return {
-        "total_patients": _count_distinct_appointments(all_q),
-        "completed": _count_distinct_appointments(completed_q),
-        "todays_paid_appointments": _count_distinct_appointments(paid_q),
-        "todays_unpaid_appointments": _count_distinct_appointments(unpaid_q),
-        "todays_cancelled": (
-            db.query(Appointment)
-            .filter(
-                Appointment.scheduled_at >= _today_range()[0],
-                Appointment.scheduled_at < _today_range()[1],
-                Appointment.status == AppointmentStatus.cancelled,
-            )
-            .count()
-            if not doctor_id
-            else db.query(Appointment)
-            .filter(
-                Appointment.scheduled_at >= _today_range()[0],
-                Appointment.scheduled_at < _today_range()[1],
-                Appointment.status == AppointmentStatus.cancelled,
-                Appointment.doctor_id == doctor_id,
-            )
-            .count()
-        ),
+        "total_patients": len(rows),
+        "completed": len(completed),
+        "todays_paid_appointments": len(paid),
+        "todays_unpaid_appointments": len(unpaid),
+        "todays_cancelled": cancelled_q.count(),
     }
 
 
@@ -507,11 +536,13 @@ def get_today_queue(
 
     mark_past_scheduled_as_no_show(db)
     today = _today()
+    # Do not SQL-filter by payment — orphan paid visits lack appointment_id FK.
+    # Resolve visits like OPD, then filter in Python.
     q, Visit = _todays_appointments_query(
         db,
         doctor_id=doctor_id,
         department_id=department_id,
-        payment_filter=payment_filter,
+        payment_filter=None,
         include_cancelled=(status == "cancelled"),
     )
     if doctor_name:
@@ -522,7 +553,10 @@ def get_today_queue(
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
 
-    canonical = _canonical_rows(q, Visit)
+    canonical = _enrich_rows_with_visits(db, _canonical_rows(q, Visit))
+    canonical = _filter_canonical_rows(
+        canonical, status=None, payment_filter=payment_filter
+    )
     rows, total, page, limit = _paginate_rows(
         canonical,
         page,
@@ -571,14 +605,17 @@ def get_doctor_queue(
         date_from=target_date,
         date_to=target_date,
         doctor_id=doctor_id,
-        payment_filter=payment_filter,
+        payment_filter=None,
         include_cancelled=(status == "cancelled"),
     )
     q = _apply_receptionist_status_filter(q, status)
     if search:
         q = q.filter(_appointment_search_filter(search))
 
-    canonical = _canonical_rows(q, Visit)
+    canonical = _enrich_rows_with_visits(db, _canonical_rows(q, Visit))
+    canonical = _filter_canonical_rows(
+        canonical, status=None, payment_filter=payment_filter
+    )
     if page is not None and limit is not None:
         rows, total, page, limit = _paginate_rows(
             canonical,
@@ -635,13 +672,13 @@ def _queue_history_query(
         date_to=date_to,
         doctor_id=doctor_id,
         department_id=department_id,
-        payment_filter=payment_filter,
+        payment_filter=None,
         include_cancelled=(status == "cancelled" or status is None),
     )
     q = _apply_receptionist_status_filter(q, status)
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
-    return q, Visit, date_from, date_to
+    return q, Visit, date_from, date_to, payment_filter
 
 
 def _unique_appointment_rows(query, Visit):
@@ -663,7 +700,7 @@ def get_queue_history(
     page: int = 1,
     limit: int = 20,
 ) -> dict:
-    q, Visit, date_from, date_to = _queue_history_query(
+    q, Visit, date_from, date_to, payment_filter = _queue_history_query(
         db,
         single_date=single_date,
         date_from=date_from,
@@ -675,7 +712,10 @@ def get_queue_history(
         search=search,
     )
 
-    unique_rows = _unique_appointment_rows(q, Visit)
+    unique_rows = _enrich_rows_with_visits(db, _unique_appointment_rows(q, Visit))
+    unique_rows = _filter_canonical_rows(
+        unique_rows, status=None, payment_filter=payment_filter
+    )
     rows, total, page, limit = _paginate_rows(
         unique_rows,
         page,

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
-from Models.nurse_patient_vitals import PatientVitals
+from Models.nurse_patient_vitals import PatientVitals, VitalStatus
 
 from Schemas.nurse_schema import (
     VitalCreate,
@@ -116,23 +116,75 @@ def _enrich_vitals_batch(
     return vitals
 
 
-def _serialize_vital(vital: PatientVitals) -> VitalResponse:
+def _status_value(status) -> str | None:
+    if status is None:
+        return None
+    return status.value if hasattr(status, "value") else str(status)
+
+
+def _history_entry(vital: PatientVitals) -> dict:
+    return {
+        "history_id": vital.id,
+        "recorded_at": vital.recorded_at,
+        "recorded_by": getattr(vital, "recorded_by_name", None),
+        "status": _status_value(vital.status) or "recorded",
+        "temperature": vital.temperature,
+        "blood_pressure": vital.blood_pressure,
+        "heart_rate": vital.heart_rate,
+        "respiratory_rate": vital.respiratory_rate,
+        "oxygen_saturation": vital.oxygen_saturation,
+        "blood_sugar": vital.blood_sugar,
+        "weight": vital.weight,
+        "pain_level": vital.pain_level,
+        "observation_notes": vital.observation_notes,
+    }
+
+
+def _patient_vital_history(db: Session, patient_id: int) -> list[dict]:
+    """All recordings for a patient, newest first — powers Recorded At filter."""
+    rows = (
+        db.query(PatientVitals)
+        .filter(PatientVitals.patient_id == patient_id)
+        .order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
+        .all()
+    )
+    if not rows:
+        return []
+
+    nurse_ids = {v.recorded_by for v in rows if v.recorded_by}
+    nurses = {
+        u.id: u
+        for u in db.query(User).filter(User.id.in_(nurse_ids)).all()
+    } if nurse_ids else {}
+
+    history = []
+    for row in rows:
+        nurse = nurses.get(row.recorded_by)
+        row.recorded_by_name = _user_display_name(nurse)
+        history.append(_history_entry(row))
+    return history
+
+
+def _serialize_vital(vital: PatientVitals, db: Session | None = None) -> VitalResponse:
     patient = vital.patient
     nurse = getattr(vital, "nurse", None)
     recorded_by_name = (
         getattr(vital, "recorded_by_name", None)
         or _user_display_name(nurse)
     )
-    return VitalResponse.model_validate(vital).model_copy(
-        update={
-            "patient_uid": getattr(vital, "patient_uid", None)
-            or (patient.patient_uid if patient else None),
-            "patient_name": getattr(vital, "patient_name", None)
-            or _patient_display_name(patient),
-            "bed_number": getattr(vital, "bed_number", None),
-            "recorded_by_name": recorded_by_name,
-        }
-    )
+    history = _patient_vital_history(db, vital.patient_id) if db is not None else None
+    payload = {
+        "patient_uid": getattr(vital, "patient_uid", None)
+        or (patient.patient_uid if patient else None),
+        "patient_name": getattr(vital, "patient_name", None)
+        or _patient_display_name(patient),
+        "bed_number": getattr(vital, "bed_number", None),
+        "recorded_by_name": recorded_by_name,
+        "status": _status_value(vital.status),
+    }
+    if history is not None:
+        payload["history"] = history
+    return VitalResponse.model_validate(vital).model_copy(update=payload)
 
 
 def _vital_query(db: Session):
@@ -292,7 +344,7 @@ def create_vital_service(
             mark_critical=bool(vital_data.mark_critical),
         )
 
-        return _serialize_vital(_enrich_vital(db, vital))
+        return _serialize_vital(_enrich_vital(db, vital), db)
 
     except Exception:
         db.rollback()
@@ -309,6 +361,10 @@ def update_vital_service(
     vital_data: VitalUpdate,
     nurse_id: int,
 ):
+    """
+    Append a new vitals recording (does not overwrite the previous snapshot).
+    Old values stay available in the Recorded At history filter; latest is newest.
+    """
 
     vital = (
         db.query(PatientVitals)
@@ -342,27 +398,43 @@ def update_vital_service(
             update_data.pop("mark_critical", False)
         )
 
-        for field, value in update_data.items():
-            setattr(vital, field, value)
+        def pick(field):
+            return update_data[field] if field in update_data else getattr(vital, field)
 
-        vital.updated_at = datetime.now(IST)
-
+        new_vital = PatientVitals(
+            appointment_id=vital.appointment_id,
+            patient_id=vital.patient_id,
+            recorded_by=nurse_id,
+            temperature=pick("temperature"),
+            blood_pressure=pick("blood_pressure"),
+            heart_rate=pick("heart_rate"),
+            respiratory_rate=pick("respiratory_rate"),
+            oxygen_saturation=pick("oxygen_saturation"),
+            blood_sugar=pick("blood_sugar"),
+            weight=pick("weight"),
+            pain_level=pick("pain_level"),
+            observation_notes=pick("observation_notes"),
+            status=VitalStatus.RECORDED,
+            created_by=nurse_id,
+            recorded_at=datetime.now(IST),
+        )
+        db.add(new_vital)
         db.commit()
-        db.refresh(vital)
-        vital = (
+        db.refresh(new_vital)
+        new_vital = (
             _vital_query(db)
-            .filter(PatientVitals.id == vital.id)
+            .filter(PatientVitals.id == new_vital.id)
             .first()
         )
 
         process_vital_alerts(
             db=db,
-            vital=vital,
+            vital=new_vital,
             nurse_id=nurse_id,
             mark_critical=mark_critical,
         )
 
-        return _serialize_vital(_enrich_vital(db, vital))
+        return _serialize_vital(_enrich_vital(db, new_vital), db)
 
     except Exception:
         db.rollback()
@@ -392,7 +464,7 @@ def get_vital_by_id_service(
             detail="Vital record not found"
         )
 
-    return _serialize_vital(_enrich_vital(db, vital))
+    return _serialize_vital(_enrich_vital(db, vital), db)
 
 
 # ==========================================================
@@ -420,7 +492,7 @@ def get_all_vitals_service(
     )
 
     enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital) for vital in enriched]
+    return [_serialize_vital(vital, db) for vital in enriched]
 
 
 # ==========================================================
@@ -521,4 +593,4 @@ def search_vitals_service(
     )
 
     enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital) for vital in enriched]
+    return [_serialize_vital(vital, db) for vital in enriched]

@@ -161,11 +161,31 @@ def update_staff(
         audit_details["new_role_id"] = updates["role_id"]
         audit_details["new_role_name"] = role.name
 
+    # Resolve effective role after this update (new role if changed, else current)
+    effective_role = (
+        db.query(Role).filter(Role.id == user.role_id).first()
+        if user.role_id
+        else None
+    )
+    effective_role_name = effective_role.name if effective_role else None
+
     if "department_id" in updates:
-        dept = db.query(Department).filter(Department.id == updates["department_id"]).first()
-        if not dept:
-            raise HTTPException(status_code=404, detail="Department not found")
-        user.department_id = updates["department_id"]
+        # Department is only assigned to doctors
+        if effective_role_name != "doctor":
+            user.department_id = None
+        elif updates["department_id"] is None:
+            raise HTTPException(status_code=400, detail="department_id required for doctor")
+        else:
+            dept = db.query(Department).filter(Department.id == updates["department_id"]).first()
+            if not dept:
+                raise HTTPException(status_code=404, detail="Department not found")
+            user.department_id = updates["department_id"]
+    elif effective_role_name != "doctor":
+        # Role changed away from doctor — clear department even if not in payload
+        if "role_id" in updates:
+            user.department_id = None
+    elif effective_role_name == "doctor" and not user.department_id:
+        raise HTTPException(status_code=400, detail="department_id required for doctor")
 
     for field in ("first_name", "last_name", "phone"):
         if field in updates:

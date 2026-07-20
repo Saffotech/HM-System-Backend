@@ -205,11 +205,14 @@ def record_payment(
     recorded_by: int,
     transaction_reference: Optional[str] = None,
 ) -> PaymentTransaction:
-    ensure_immediate_payment_valid(payment_mode, pay_later=False, paid=amount, transaction_reference=transaction_reference)
+    mode = (payment_mode or "cash").strip().lower()
+    if mode == "online":
+        mode = "upi"
+    ensure_immediate_payment_valid(mode, pay_later=False, paid=amount, transaction_reference=transaction_reference)
     txn = PaymentTransaction(
         visit_id=visit.id,
         amount=amount,
-        payment_mode=payment_mode,
+        payment_mode=mode,
         transaction_reference=transaction_reference,
         paid_at=now_ist(),
         recorded_by=recorded_by,
@@ -217,7 +220,7 @@ def record_payment(
     db.add(txn)
     new_paid = round((visit.paid_amount or 0) + amount, 2)
     visit.paid_amount = new_paid
-    visit.payment_mode = payment_mode
+    visit.payment_mode = mode
     visit.paid_at = now_ist()
     visit.balance_due = round(max(visit.grand_total - new_paid, 0), 2)
     visit.payment_status = "paid" if visit.balance_due <= 0 else "partial"

@@ -1,7 +1,5 @@
 from datetime import datetime
-from typing import Optional
-
-from pydantic import BaseModel, model_validator
+from typing import List, Optional
 
 from pydantic import BaseModel, model_validator
 
@@ -67,7 +65,6 @@ class VitalResponse(BaseModel):
     id: int
 
     appointment_id: Optional[int] = None
-    appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
@@ -87,6 +84,8 @@ class VitalResponse(BaseModel):
 
     status: Optional[str] = None
     recorded_at: datetime
+    # Newest-first list of all recordings for this patient (Recorded At filter)
+    history: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True
@@ -153,6 +152,8 @@ class NursingNoteResponse(BaseModel):
 
     status: Optional[str] = None
     created_at: datetime
+    # Newest-first list of all notes for this patient (Created At filter)
+    history: Optional[List[dict]] = None
 
     class Config:
         from_attributes = True

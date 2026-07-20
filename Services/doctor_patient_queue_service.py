@@ -19,6 +19,7 @@ from Services.queue_helpers import (
     COMPLETE_CONSULTATION_ELIGIBLE,
     apply_eligible_queue_filters,
     is_queue_status,
+    is_visit_paid,
     persist,
     status_value,
 )
@@ -288,7 +289,7 @@ def add_patient_to_queue_service(
         .order_by(OpdVisit.id.desc())
         .first()
     )
-    if not visit or visit.payment_status != "paid":
+    if not visit or not is_visit_paid(visit):
         raise HTTPException(
             status_code=400,
             detail="Payment must be completed before the patient can join the queue",

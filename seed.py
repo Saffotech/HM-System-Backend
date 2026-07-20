@@ -10,6 +10,9 @@ import sys
 
 from database import SessionLocal
 from Models.department import Department
+from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
+from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.nurse_profile import NurseProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -51,6 +54,16 @@ PERMISSIONS_LIST = [
     "nurse_notes:view",
     "nurse_notes:create",
     "nurse_notes:update",
+    "nurse_profile:view",
+    "nurse_profile:update",
+    "nurse_profile:upload_image",
+    "nurse_profile:delete_image",
+    "doctor_profile:view",
+    "doctor_profile:update",
+    "doctor_profile:upload_image",
+    "doctor_profile:delete_image",
+    "notifications:view",
+    "notifications:update",
     "nurse_medication:view",
     "nurse_medication:create",
     "nurse_medication:update",
@@ -94,6 +107,12 @@ ROLES_DATA = {
             "appointments:view",
             "appointments:create",
             "appointments:update",
+            "doctor_profile:view",
+            "doctor_profile:update",
+            "doctor_profile:upload_image",
+            "doctor_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "nurse": {
@@ -108,6 +127,12 @@ ROLES_DATA = {
             "nurse_notes:view",
             "nurse_notes:create",
             "nurse_notes:update",
+            "nurse_profile:view",
+            "nurse_profile:update",
+            "nurse_profile:upload_image",
+            "nurse_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
             "nurse_medication:view",
             "nurse_medication:create",
             "nurse_medication:update",
@@ -268,22 +293,6 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
                 continue
             db.add(RolePermission(role_id=role.id, permission_id=pid))
             links_added += 1
-        target_perm_ids = {perm_ids[name] for name in target_perms if name in perm_ids}
-
-        existing_links = (
-            db.query(RolePermission).filter(RolePermission.role_id == role.id).all()
-        )
-        existing_perm_ids = {rp.permission_id for rp in existing_links}
-
-        for rp in existing_links:
-            if rp.permission_id not in target_perm_ids:
-                db.delete(rp)
-                links_removed += 1
-
-        for pid in target_perm_ids:
-            if pid not in existing_perm_ids:
-                db.add(RolePermission(role_id=role.id, permission_id=pid))
-                links_added += 1
 
     db.commit()
     print(
@@ -331,6 +340,74 @@ def ensure_hospital_settings(db) -> None:
     )
     db.commit()
     print("Hospital settings default row created (id=1)")
+
+
+def ensure_nurse_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty nurse_profiles for nurse-role users missing a profile row."""
+    nurse_role_id = role_ids.get("nurse")
+    if not nurse_role_id:
+        print("WARNING: nurse role not found — skipped nurse profile backfill")
+        return
+
+    nurses = (
+        db.query(User)
+        .filter(User.role_id == nurse_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for nurse in nurses:
+        exists = (
+            db.query(NurseProfile.id)
+            .filter(NurseProfile.user_id == nurse.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            NurseProfile(
+                user_id=nurse.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(f"Nurse profiles synced: {added} new ({len(nurses)} nurse users)")
+
+
+def ensure_doctor_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty doctor_profiles for doctor-role users missing a profile row."""
+    doctor_role_id = role_ids.get("doctor")
+    if not doctor_role_id:
+        print("WARNING: doctor role not found — skipped doctor profile backfill")
+        return
+
+    doctors = (
+        db.query(User)
+        .filter(User.role_id == doctor_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for doctor in doctors:
+        exists = (
+            db.query(DoctorProfile.id)
+            .filter(DoctorProfile.user_id == doctor.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            DoctorProfile(
+                user_id=doctor.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(f"Doctor profiles synced: {added} new ({len(doctors)} doctor users)")
 
 
 def ensure_super_admin_user(
@@ -423,6 +500,8 @@ def main() -> None:
         role_ids = upsert_roles(db, perm_ids)
         upsert_departments(db)
         ensure_hospital_settings(db)
+        ensure_nurse_profiles(db, role_ids)
+        ensure_doctor_profiles(db, role_ids)
 
         if args.super_admin_email and args.super_admin_password:
             ensure_super_admin_user(

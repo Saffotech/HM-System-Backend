@@ -125,6 +125,50 @@ def find_active_appointment_same_day(
     )
 
 
+def link_orphan_visit_to_appointment(
+    db: Session, visit: OpdVisit
+) -> Optional[Appointment]:
+    """
+    Ensure OpdVisit.appointment_id is set when a matching same-day appointment exists.
+
+    OPD list/payment can resolve visits via patient+doctor+dept+day even when the FK
+    is null; receptionist boards and queue enqueue require the FK. Call this before
+    payment enqueue and when self-healing receptionist reads.
+    """
+    if visit.appointment_id:
+        return db.query(Appointment).filter(Appointment.id == visit.appointment_id).first()
+
+    when = visit.visit_date or h.now_ist()
+    apt = find_active_appointment_same_day(
+        db,
+        patient_id=visit.patient_id,
+        doctor_id=visit.doctor_id,
+        department_id=visit.department_id,
+        scheduled_at=when,
+    )
+    if apt is None:
+        start, end = _day_window(when)
+        apt = (
+            db.query(Appointment)
+            .filter(
+                Appointment.patient_id == visit.patient_id,
+                Appointment.doctor_id == visit.doctor_id,
+                Appointment.department_id == visit.department_id,
+                Appointment.scheduled_at >= start,
+                Appointment.scheduled_at < end,
+                Appointment.status != AppointmentStatus.cancelled,
+            )
+            .order_by(Appointment.id.desc())
+            .first()
+        )
+    if apt is None:
+        return None
+
+    visit.appointment_id = apt.id
+    db.flush()
+    return apt
+
+
 def resolve_appointment_for_visit(
     db: Session,
     *,
