@@ -13,6 +13,12 @@ from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.nurse_profile import NurseProfile
+from Models.receptionist_profile import ReceptionistProfile
+from Models.lab_technician_profile import LabTechnicianProfile
+from Models.opd_billing_profile import OpdBillingProfile
+from Models.pharmacist_profile import PharmacistProfile
+from Models.admin_profile import AdminProfile
+from Models.super_admin_profile import SuperAdminProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -62,6 +68,30 @@ PERMISSIONS_LIST = [
     "doctor_profile:update",
     "doctor_profile:upload_image",
     "doctor_profile:delete_image",
+    "receptionist_profile:view",
+    "receptionist_profile:update",
+    "receptionist_profile:upload_image",
+    "receptionist_profile:delete_image",
+    "lab_technician_profile:view",
+    "lab_technician_profile:update",
+    "lab_technician_profile:upload_image",
+    "lab_technician_profile:delete_image",
+    "opd_billing_profile:view",
+    "opd_billing_profile:update",
+    "opd_billing_profile:upload_image",
+    "opd_billing_profile:delete_image",
+    "pharmacist_profile:view",
+    "pharmacist_profile:update",
+    "pharmacist_profile:upload_image",
+    "pharmacist_profile:delete_image",
+    "admin_profile:view",
+    "admin_profile:update",
+    "admin_profile:upload_image",
+    "admin_profile:delete_image",
+    "super_admin_profile:view",
+    "super_admin_profile:update",
+    "super_admin_profile:upload_image",
+    "super_admin_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "nurse_medication:view",
@@ -71,6 +101,16 @@ PERMISSIONS_LIST = [
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
+    "bed_allocation:view",
+    "bed_allocation:create",
+    "bed_allocation:update",
+    "bed_allocation:delete",
+    "bed_allocation:assign",
+    "workforce:view",
+    "workforce:create",
+    "workforce:update",
+    "workforce:delete",
+    "roster:manage",
     "emergency_alerts:view",
     "emergency_alerts:create",
     "emergency_alerts:update",
@@ -86,11 +126,31 @@ ADMIN_PERMISSIONS = [
     "users:delete",
     "roles:view",
     "reports:view",
+    "admin_profile:view",
+    "admin_profile:update",
+    "admin_profile:upload_image",
+    "admin_profile:delete_image",
+    "notifications:view",
+    "notifications:update",
+    "bed_allocation:view",
+    "bed_allocation:create",
+    "bed_allocation:update",
+    "bed_allocation:delete",
+    "bed_allocation:assign",
+    "workforce:view",
+    "workforce:create",
+    "workforce:update",
+    "workforce:delete",
+    "roster:manage",
 ]
 
 ROLES_DATA = {
     "admin": {
         "description": "System administrator",
+        "permissions": "__all__",
+    },
+    "super_admin": {
+        "description": "Hospital owner / super administrator",
         "permissions": "__all__",
     },
     "doctor": {
@@ -162,6 +222,12 @@ ROLES_DATA = {
             "appointments:view",
             "appointments:create",
             "appointments:update",
+            "opd_billing_profile:view",
+            "opd_billing_profile:update",
+            "opd_billing_profile:upload_image",
+            "opd_billing_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "pharmacist": {
@@ -170,6 +236,12 @@ ROLES_DATA = {
             "patients:view",
             "prescriptions:view",
             "prescriptions:dispense",
+            "pharmacist_profile:view",
+            "pharmacist_profile:update",
+            "pharmacist_profile:upload_image",
+            "pharmacist_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "lab_technician": {
@@ -180,6 +252,12 @@ ROLES_DATA = {
             "lab:create",
             "lab:update",
             "lab:upload_report",
+            "lab_technician_profile:view",
+            "lab_technician_profile:update",
+            "lab_technician_profile:upload_image",
+            "lab_technician_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
     "receptionist": {
@@ -188,6 +266,12 @@ ROLES_DATA = {
             "patients:view",
             "opd:view",
             "receptionist:view_doctor_schedule",
+            "receptionist_profile:view",
+            "receptionist_profile:update",
+            "receptionist_profile:upload_image",
+            "receptionist_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
         ],
     },
 }
@@ -410,6 +494,236 @@ def ensure_doctor_profiles(db, role_ids: dict[str, int]) -> None:
     print(f"Doctor profiles synced: {added} new ({len(doctors)} doctor users)")
 
 
+def ensure_receptionist_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty receptionist_profiles for receptionist-role users missing a row."""
+    receptionist_role_id = role_ids.get("receptionist")
+    if not receptionist_role_id:
+        print(
+            "WARNING: receptionist role not found — skipped receptionist profile backfill"
+        )
+        return
+
+    receptionists = (
+        db.query(User)
+        .filter(User.role_id == receptionist_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for receptionist in receptionists:
+        exists = (
+            db.query(ReceptionistProfile.id)
+            .filter(ReceptionistProfile.user_id == receptionist.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            ReceptionistProfile(
+                user_id=receptionist.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Receptionist profiles synced: {added} new "
+        f"({len(receptionists)} receptionist users)"
+    )
+
+
+def ensure_lab_technician_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty lab_technician_profiles for lab technician users missing a row."""
+    lab_role_id = role_ids.get("lab_technician")
+    if not lab_role_id:
+        print(
+            "WARNING: lab_technician role not found — skipped lab profile backfill"
+        )
+        return
+
+    lab_techs = (
+        db.query(User)
+        .filter(User.role_id == lab_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for lab_tech in lab_techs:
+        exists = (
+            db.query(LabTechnicianProfile.id)
+            .filter(LabTechnicianProfile.user_id == lab_tech.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            LabTechnicianProfile(
+                user_id=lab_tech.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Lab technician profiles synced: {added} new "
+        f"({len(lab_techs)} lab technician users)"
+    )
+
+
+def ensure_opd_billing_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty opd_billing_profiles for OPD billing users missing a row."""
+    opd_role_id = role_ids.get("opd_billing")
+    if not opd_role_id:
+        print(
+            "WARNING: opd_billing role not found — skipped OPD billing profile backfill"
+        )
+        return
+
+    opd_users = (
+        db.query(User)
+        .filter(User.role_id == opd_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for opd_user in opd_users:
+        exists = (
+            db.query(OpdBillingProfile.id)
+            .filter(OpdBillingProfile.user_id == opd_user.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            OpdBillingProfile(
+                user_id=opd_user.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"OPD billing profiles synced: {added} new "
+        f"({len(opd_users)} opd_billing users)"
+    )
+
+
+def ensure_pharmacist_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty pharmacist_profiles for pharmacist-role users missing a row."""
+    pharmacist_role_id = role_ids.get("pharmacist")
+    if not pharmacist_role_id:
+        print(
+            "WARNING: pharmacist role not found — skipped pharmacist profile backfill"
+        )
+        return
+
+    pharmacists = (
+        db.query(User)
+        .filter(User.role_id == pharmacist_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for pharmacist in pharmacists:
+        exists = (
+            db.query(PharmacistProfile.id)
+            .filter(PharmacistProfile.user_id == pharmacist.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            PharmacistProfile(
+                user_id=pharmacist.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Pharmacist profiles synced: {added} new "
+        f"({len(pharmacists)} pharmacist users)"
+    )
+
+
+def ensure_admin_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty admin_profiles for admin-role users missing a row."""
+    admin_role_id = role_ids.get("admin")
+    if not admin_role_id:
+        print("WARNING: admin role not found — skipped admin profile backfill")
+        return
+
+    admins = (
+        db.query(User)
+        .filter(User.role_id == admin_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for admin in admins:
+        exists = (
+            db.query(AdminProfile.id)
+            .filter(AdminProfile.user_id == admin.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            AdminProfile(
+                user_id=admin.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Admin profiles synced: {added} new "
+        f"({len(admins)} admin users)"
+    )
+
+
+def ensure_super_admin_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty super_admin_profiles for super_admin-role users missing a row."""
+    super_role_id = role_ids.get("super_admin")
+    if not super_role_id:
+        print("WARNING: super_admin role not found — skipped super admin profile backfill")
+        return
+
+    owners = (
+        db.query(User)
+        .filter(User.role_id == super_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for owner in owners:
+        exists = (
+            db.query(SuperAdminProfile.id)
+            .filter(SuperAdminProfile.user_id == owner.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            SuperAdminProfile(
+                user_id=owner.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Super Admin profiles synced: {added} new "
+        f"({len(owners)} super_admin users)"
+    )
+
+
 def ensure_super_admin_user(
     db,
     role_ids: dict[str, int],
@@ -440,6 +754,7 @@ def ensure_super_admin_user(
         user.deleted_at = None
         db.commit()
         print(f"Super admin user updated: {email}")
+        ensure_super_admin_profiles(db, role_ids)
         return
 
     user = User(
@@ -453,6 +768,7 @@ def ensure_super_admin_user(
     db.add(user)
     db.commit()
     print(f"Super admin user created: {email}")
+    ensure_super_admin_profiles(db, role_ids)
 
 
 def main() -> None:
@@ -502,6 +818,12 @@ def main() -> None:
         ensure_hospital_settings(db)
         ensure_nurse_profiles(db, role_ids)
         ensure_doctor_profiles(db, role_ids)
+        ensure_receptionist_profiles(db, role_ids)
+        ensure_lab_technician_profiles(db, role_ids)
+        ensure_opd_billing_profiles(db, role_ids)
+        ensure_pharmacist_profiles(db, role_ids)
+        ensure_admin_profiles(db, role_ids)
+        ensure_super_admin_profiles(db, role_ids)
 
         if args.super_admin_email and args.super_admin_password:
             ensure_super_admin_user(

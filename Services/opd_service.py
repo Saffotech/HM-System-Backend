@@ -30,7 +30,8 @@ from Schemas.opd_schema import (
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
 from Services import opd_helpers as h
 from Services import appointment_service
-from Services.queue_enqueue_service import enqueue_after_payment_if_eligible
+from Services.queue_enqueue_service import enqueue_after_payment_with_notifications
+from Services.opd_notification_helpers import notify_opd_payment_pending
 
 # Re-export helpers used by router
 get_patient = h.get_patient
@@ -48,7 +49,9 @@ def _finalize_visit_appointment_and_queue(
     if apt is not None:
         visit.appointment_id = apt.id
         db.flush()
-    enqueue_after_payment_if_eligible(db, visit, handled_by=handled_by)
+    enqueue_after_payment_with_notifications(db, visit, handled_by=handled_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=handled_by)
 
 
 def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
@@ -292,7 +295,9 @@ def generate_bill(
     )
     # Link to an existing same-day appointment when one already exists (no auto walk-in create).
     apt = appointment_service.link_orphan_visit_to_appointment(db, visit)
-    enqueue_after_payment_if_eligible(db, visit, handled_by=registered_by)
+    enqueue_after_payment_with_notifications(db, visit, handled_by=registered_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -548,7 +553,9 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
     h.record_payment(db, visit, data.paid_amount, data.payment_mode, recorded_by, data.transaction_reference)
     # Link orphan visit → same-day appointment so receptionist + queue see paid status
     appointment_service.link_orphan_visit_to_appointment(db, visit)
-    queue = enqueue_after_payment_if_eligible(db, visit, handled_by=recorded_by)
+    queue = enqueue_after_payment_with_notifications(db, visit, handled_by=recorded_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=recorded_by)
     db.commit()
     db.refresh(visit)
 
@@ -683,8 +690,10 @@ def list_payment_history(
 ) -> dict:
     def _norm_mode(mode: Optional[str]) -> str:
         key = (mode or "").strip().lower()
-        if key in {"online", "upi"}:
+        if key == "upi":
             return "upi"
+        if key == "online":
+            return "insurance"
         if key in {"cash", "card", "insurance"}:
             return key
         return key or "cash"

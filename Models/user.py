@@ -36,6 +36,42 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    receptionist_profile = relationship(
+        "ReceptionistProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    lab_technician_profile = relationship(
+        "LabTechnicianProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    opd_billing_profile = relationship(
+        "OpdBillingProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    pharmacist_profile = relationship(
+        "PharmacistProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    admin_profile = relationship(
+        "AdminProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    super_admin_profile = relationship(
+        "SuperAdminProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
 
     specialization = Column(String(120), nullable=True)
 
@@ -47,6 +83,8 @@ class User(Base):
     address         = Column(String, nullable=True)
     city            = Column(String(100), nullable=True)
     state           = Column(String(100), nullable=True)
+    country         = Column(String(100), nullable=True)
+    postal_code     = Column(String(20), nullable=True)
     emergency_contact_name = Column(String(120), nullable=True)
     emergency_contact_phone = Column(String(20), nullable=True)
     profile_picture = Column(String, nullable=True)

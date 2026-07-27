@@ -109,6 +109,11 @@ def get_alerts(
         le=100
     ),
 
+    allocated_only: bool = Query(
+        default=False,
+        description="If true, only alerts for patients on beds allocated to the current nurse.",
+    ),
+
     db: Session = Depends(
         get_db
     ),
@@ -132,7 +137,9 @@ def get_alerts(
         to_date=to_date,
         search=search,
         page=page,
-        limit=limit
+        limit=limit,
+        allocated_only=allocated_only,
+        allocation_nurse_id=current_user.id if allocated_only else None,
     )
 
 

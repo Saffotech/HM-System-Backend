@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from Models.doctor_patient_queue import PatientQueue, QueueStatus
 from Models.opd_billing import Appointment, AppointmentStatus
+from Models.patient import OpdVisit
 from Services.opd_helpers import IST, today_ist_date
 from Services.queue_helpers import persist, status_value
 
@@ -49,6 +50,35 @@ def mark_past_open_appointments_cancelled(
     appointment_ids = [apt.id for apt in appointments]
     for apt in appointments:
         apt.status = AppointmentStatus.cancelled
+
+    if appointment_ids:
+        paid_visit_rows = (
+            db.query(OpdVisit.appointment_id)
+            .filter(
+                OpdVisit.appointment_id.in_(appointment_ids),
+                OpdVisit.payment_status == "paid",
+            )
+            .all()
+        )
+        paid_appointment_ids = {row[0] for row in paid_visit_rows if row[0] is not None}
+        if paid_appointment_ids:
+            from Models.patient import Patient
+            from Services.opd_notification_helpers import notify_opd_appointment_no_show
+
+            for apt in appointments:
+                if apt.id not in paid_appointment_ids:
+                    continue
+                patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+                patient_name = (
+                    f"{patient.first_name or ''} {patient.last_name or ''}".strip()
+                    if patient
+                    else "Patient"
+                )
+                notify_opd_appointment_no_show(
+                    db,
+                    apt,
+                    patient_name=patient_name,
+                )
 
     queues = (
         db.query(PatientQueue)

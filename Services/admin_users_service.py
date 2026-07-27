@@ -10,6 +10,7 @@ from Models.role import Role
 from Models.user import User
 from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
 from Services import audit_service
+from Services.notification_service import notify_staff_admin_update_if_inbox
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -124,6 +125,14 @@ def activate_staff(
     db.commit()
 
     status = "activated" if is_active else "deactivated"
+    refreshed = _get_staff_or_404(db, user_id)
+    notify_staff_admin_update_if_inbox(
+        db,
+        staff_user=refreshed,
+        title="Account Updated",
+        message=f"Your account was {status} by an administrator.",
+        admin_user=actor,
+    )
     audit_service.log_event(
         db,
         actor=actor,
@@ -170,7 +179,8 @@ def update_staff(
     effective_role_name = effective_role.name if effective_role else None
 
     if "department_id" in updates:
-        # Department is only assigned to doctors
+        # Department is REQUIRED for doctors only.
+        # Nurses never keep users.department_id — responsibility is via bed allocation.
         if effective_role_name != "doctor":
             user.department_id = None
         elif updates["department_id"] is None:
@@ -192,18 +202,28 @@ def update_staff(
             setattr(user, field, updates[field])
 
     db.commit()
-    db.refresh(user)
+
+    refreshed = _get_staff_or_404(db, user_id)
+    if "role_id" in updates:
+        new_role = refreshed.role_obj.name if refreshed.role_obj else "updated"
+        notify_staff_admin_update_if_inbox(
+            db,
+            staff_user=refreshed,
+            title="Role Updated",
+            message=f"Your role was changed to {new_role} by an administrator.",
+            admin_user=actor,
+        )
 
     audit_service.log_event(
         db,
         actor=actor,
         action="staff.update",
         resource_type="user",
-        resource_id=user.id,
+        resource_id=refreshed.id,
         summary=f"Updated staff {user.email}",
         details={**audit_details, "fields": list(updates.keys())},
     )
-    return _to_detail(user)
+    return _to_detail(refreshed)
 
 
 def delete_staff(db: Session, user_id: int, actor: User) -> dict:
@@ -213,6 +233,15 @@ def delete_staff(db: Session, user_id: int, actor: User) -> dict:
     user.deleted_at = datetime.now(IST)
     user.is_active = False
     db.commit()
+
+    refreshed = _get_staff_or_404(db, user_id)
+    notify_staff_admin_update_if_inbox(
+        db,
+        staff_user=refreshed,
+        title="Account Removed",
+        message="Your account was removed by an administrator.",
+        admin_user=actor,
+    )
 
     audit_service.log_event(
         db,

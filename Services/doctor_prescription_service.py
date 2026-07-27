@@ -125,6 +125,12 @@ def create_prescription_for_appointment(
         .filter(Prescription.id == _pk(rx.id))
         .first()
     )
+    if commit and rx is not None:
+        from Services.pharmacy_notification_helpers import (
+            notify_pharmacists_prescription_created,
+        )
+
+        notify_pharmacists_prescription_created(db, rx, doctor_id=doctor_id)
     return rx
 
 
@@ -210,6 +216,12 @@ def update_prescription_service(
         .filter(Prescription.id == rx_id)
         .first()
     )
+    if rx is not None:
+        from Services.pharmacy_notification_helpers import (
+            notify_pharmacists_prescription_updated,
+        )
+
+        notify_pharmacists_prescription_updated(db, rx, doctor_id=doctor_id)
     return _serialize_prescription(rx)
 
 

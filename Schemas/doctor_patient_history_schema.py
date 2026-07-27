@@ -50,7 +50,13 @@ class PatientHistoryItem(BaseModel):
 
     reason: Optional[str] = None
 
+    symptoms: Optional[str] = None
+
+    diagnosis: Optional[str] = None
+
     notes: Optional[str] = None
+
+    follow_up: Optional[str] = None
 
 
 

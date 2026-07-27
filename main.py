@@ -12,6 +12,12 @@ from Models.hospital_settings import HospitalSettings  # noqa: F401
 from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
 from Models.doctor_profile import DoctorProfile  # noqa: F401
 from Models.nurse_profile import NurseProfile  # noqa: F401
+from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
+from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401
+from Models.opd_billing_profile import OpdBillingProfile  # noqa: F401
+from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
+from Models.admin_profile import AdminProfile  # noqa: F401
+from Models.super_admin_profile import SuperAdminProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
@@ -22,11 +28,21 @@ from Models.nurse_medication_administration import MedicationAdministration  # n
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
 from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient  # noqa: F401
+from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation  # noqa: F401
+from Models.nurse_shift_bed_allocation_history import (  # noqa: F401
+    NurseShiftBedAllocationHistory,
+)
+from Models.nurse_workforce import (  # noqa: F401
+    NurseWorkforceRoster,
+    NurseWorkforceShift,
+)
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 
 from Routers import auth
 from Routers.admin_reports_router import router as admin_reports_router
 from Routers.admin_router import router as admin_router
+from Routers.admin_profile_router import router as admin_profile_router
+from Routers.admin_notification_router import router as admin_notification_router
 from Routers.admin_users_router import router as admin_users_router
 from Routers.departments_router import router as departments_router
 from Routers.doctor_appointment_router import router as appointments_router
@@ -48,11 +64,32 @@ from Routers.nurse_patient_vitals_router import router as nurse_vitals_router
 from Routers.nurse_profile_router import router as nurse_profile_router
 from Routers.nurse_notification_router import router as nurse_notification_router
 from Routers.nurse_shift_handover_router import router as nurse_shift_handover_router
+from Routers.nurse_shift_bed_allocation_router import (
+    router as nurse_bed_allocation_router,
+)
+from Routers.nurse_workforce_router import router as nurse_workforce_router
 from Routers.opd import router as opd_router
 from Routers.pharmacy import router as pharmacy_router
+from Routers.pharmacist_profile_router import router as pharmacist_profile_router
+from Routers.pharmacist_notification_router import (
+    router as pharmacist_notification_router,
+)
 from Routers.receptionist_router import router as receptionist_router
+from Routers.receptionist_profile_router import router as receptionist_profile_router
+from Routers.receptionist_notification_router import (
+    router as receptionist_notification_router,
+)
+from Routers.lab_technician_profile_router import router as lab_technician_profile_router
+from Routers.lab_technician_notification_router import (
+    router as lab_technician_notification_router,
+)
+from Routers.opd_billing_profile_router import router as opd_billing_profile_router
+from Routers.opd_billing_notification_router import (
+    router as opd_billing_notification_router,
+)
 from Routers.roles import router as roles_router
 from Routers.super_admin_router import router as super_admin_router
+from Routers.super_admin_profile_router import router as super_admin_profile_router
 
 Base.metadata.create_all(bind=engine)
 
@@ -73,11 +110,15 @@ app.add_middleware(
 
 app.include_router(auth.router)
 app.include_router(admin_router)
+app.include_router(admin_profile_router)
+app.include_router(admin_notification_router)
 app.include_router(admin_reports_router)
 app.include_router(admin_users_router)
 app.include_router(departments_router)
 app.include_router(roles_router)
 app.include_router(opd_router)
+app.include_router(opd_billing_profile_router)
+app.include_router(opd_billing_notification_router)
 app.include_router(appointments_router)
 app.include_router(consultation_router)
 app.include_router(patient_queue_router)
@@ -93,11 +134,20 @@ app.include_router(nurse_vitals_router)
 app.include_router(nurse_notes_router)
 app.include_router(medication_administration_router)
 app.include_router(nurse_shift_handover_router)
+app.include_router(nurse_bed_allocation_router)
+app.include_router(nurse_workforce_router)
 app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
+app.include_router(pharmacist_profile_router)
+app.include_router(pharmacist_notification_router)
 app.include_router(lab_router)
+app.include_router(lab_technician_profile_router)
+app.include_router(lab_technician_notification_router)
 app.include_router(super_admin_router)
+app.include_router(super_admin_profile_router)
 app.include_router(receptionist_router)
+app.include_router(receptionist_profile_router)
+app.include_router(receptionist_notification_router)
 
 # Serve uploaded files (profile images, etc.) — additive, no API route changes
 _uploads_dir = Path("uploads")

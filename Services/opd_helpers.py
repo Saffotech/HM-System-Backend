@@ -207,7 +207,7 @@ def record_payment(
 ) -> PaymentTransaction:
     mode = (payment_mode or "cash").strip().lower()
     if mode == "online":
-        mode = "upi"
+        mode = "insurance"
     ensure_immediate_payment_valid(mode, pay_later=False, paid=amount, transaction_reference=transaction_reference)
     txn = PaymentTransaction(
         visit_id=visit.id,

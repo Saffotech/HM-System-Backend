@@ -31,7 +31,7 @@ emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergen
 | Field | Required |
 |-------|----------|
 | first_name, email, password, role_id | Yes |
-| department_id | **Yes** — ward/department |
+| department_id | **No** for nurses (Doctor only). Nurse responsibility is via bed allocation. |
 
 **Profile fields (not same as doctor):**
 

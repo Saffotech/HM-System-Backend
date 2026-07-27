@@ -334,6 +334,17 @@ def create_alert_service(
 
         db.refresh(alert)
 
+        if alert.severity == AlertSeverity.CRITICAL:
+            from Services.admin_notification_helpers import (
+                notify_admins_emergency_alert,
+            )
+
+            notify_admins_emergency_alert(
+                db,
+                alert,
+                created_by=nurse_id,
+            )
+
     except Exception as e:
 
         db.rollback()
@@ -1219,6 +1230,15 @@ def create_auto_alert_service(
                 alert,
                 triggered_by=triggered_by,
             )
+            from Services.admin_notification_helpers import (
+                notify_admins_emergency_alert,
+            )
+
+            notify_admins_emergency_alert(
+                db,
+                alert,
+                created_by=triggered_by,
+            )
 
         # Notify the nurse who triggered a high/critical auto alert
         if (
@@ -1271,7 +1291,11 @@ def get_alerts_service(
     to_date: date | None = None,
     search: str | None = None,
     page: int = 1,
-    limit: int = 20
+    limit: int = 20,
+    allocated_only: bool = False,
+    allocation_nurse_id: int | None = None,
+    assignment_date: date | None = None,
+    shift_name: str | None = None,
 ):
 
     if page < 1:
@@ -1401,6 +1425,22 @@ def get_alerts_service(
                 )
             )
         )
+
+    if allocated_only:
+        from Services.nurse_shift_bed_allocation_service import (
+            get_allocated_patient_ids_for_nurse,
+        )
+
+        patient_ids = get_allocated_patient_ids_for_nurse(
+            db,
+            allocation_nurse_id,
+            assignment_date=assignment_date,
+            shift_name=shift_name,
+        ) if allocation_nurse_id else []
+        if not patient_ids:
+            query = query.filter(EmergencyAlert.patient_id == -1)
+        else:
+            query = query.filter(EmergencyAlert.patient_id.in_(patient_ids))
 
     total = query.count()
 

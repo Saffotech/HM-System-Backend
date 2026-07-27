@@ -1,12 +1,21 @@
 from collections import defaultdict
-from datetime import date
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
+_IST = ZoneInfo("Asia/Kolkata")
+
+
+def _today_ist() -> date:
+    return datetime.now(_IST).date()
+
 from Models.department import Department
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
+from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
 from Models.nurse_emergency_alert import AlertSeverity, AlertStatus, EmergencyAlert
 from Models.nurse_medication_administration import (
     MedicationAdministration,
@@ -285,6 +294,39 @@ def _vital_summary(vital: PatientVitals | None) -> dict | None:
     }
 
 
+def _apply_allocated_only_filter(
+    query,
+    db: Session,
+    *,
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
+):
+    """Optional filter — default False preserves hospital-wide behaviour.
+
+    Joins allocation data only when allocated_only is True.
+    """
+    if not allocated_only:
+        return query
+    if nurse_id is None:
+        return query.filter(Bed.id == -1)
+
+    from Services.nurse_shift_bed_allocation_service import (
+        get_allocated_bed_ids_for_nurse,
+    )
+
+    bed_ids = get_allocated_bed_ids_for_nurse(
+        db,
+        nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
+    )
+    if not bed_ids:
+        return query.filter(Bed.id == -1)
+    return query.filter(Bed.id.in_(bed_ids))
+
+
 def get_nurse_bed_patients_summary_service(
     db: Session,
     search: str | None = None,
@@ -293,6 +335,10 @@ def get_nurse_bed_patients_summary_service(
     department_id: int | None = None,
     patient_id: int | None = None,
     patient_uid: str | None = None,
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
 ):
     query = _base_bed_patients_query(
         db=db,
@@ -302,6 +348,14 @@ def get_nurse_bed_patients_summary_service(
         department_id=department_id,
         patient_id=patient_id,
         patient_uid=patient_uid,
+    )
+    query = _apply_allocated_only_filter(
+        query,
+        db,
+        allocated_only=allocated_only,
+        nurse_id=nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
     )
     return {"success": True, "occupied_count": query.count()}
 
@@ -316,6 +370,10 @@ def get_nurse_bed_patients_service(
     patient_uid: str | None = None,
     page: int = 1,
     page_size: int = 20,
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
 ):
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
@@ -328,6 +386,14 @@ def get_nurse_bed_patients_service(
         department_id=department_id,
         patient_id=patient_id,
         patient_uid=patient_uid,
+    )
+    query = _apply_allocated_only_filter(
+        query,
+        db,
+        allocated_only=allocated_only,
+        nurse_id=nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
     )
 
     total = query.count()
@@ -370,6 +436,188 @@ def get_nurse_bed_patients_service(
         "page": page,
         "page_size": page_size,
         "items": items,
+    }
+
+
+def _consecutive_roster_span(dates: list[date], anchor: date) -> tuple[date, date] | None:
+    """Expand consecutive roster dates around `anchor`. Returns None if anchor is absent."""
+    if not dates or anchor not in dates:
+        return None
+    date_set = set(dates)
+    start = anchor
+    while (start - timedelta(days=1)) in date_set:
+        start = start - timedelta(days=1)
+    end = anchor
+    while (end + timedelta(days=1)) in date_set:
+        end = end + timedelta(days=1)
+    return start, end
+
+
+def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
+    """Read-only nurse self-service: roster span + active bed allocations for current shift."""
+    from Services.nurse_shift_bed_allocation_service import (
+        get_nurse_allocation_summary_service,
+        resolve_current_shift_name,
+    )
+
+    today = _today_ist()
+    # Upcoming only: today through ~2 weeks (never include past days).
+    roster_to = today + timedelta(days=13)
+
+    current_shift_name = resolve_current_shift_name()
+    allocation_summary = get_nurse_allocation_summary_service(
+        db,
+        nurse_id,
+        assignment_date=today,
+        shift_name=current_shift_name,
+    )
+    shift_name = allocation_summary.get("shift_name") or current_shift_name
+
+    current_shift = {
+        "shift_name": shift_name,
+        "shift_start": allocation_summary.get("shift_start"),
+        "shift_end": allocation_summary.get("shift_end"),
+    }
+
+    # Fetch a short lookback only to expand consecutive "from" when today is mid-span.
+    roster_lookback_from = today - timedelta(days=14)
+    roster_rows = (
+        db.query(
+            NurseWorkforceRoster.roster_date,
+            NurseWorkforceShift.name.label("shift_name"),
+            NurseWorkforceShift.start_time.label("shift_start"),
+            NurseWorkforceShift.end_time.label("shift_end"),
+        )
+        .join(NurseWorkforceShift, NurseWorkforceShift.id == NurseWorkforceRoster.shift_id)
+        .filter(
+            NurseWorkforceRoster.nurse_id == nurse_id,
+            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+            NurseWorkforceRoster.roster_date >= roster_lookback_from,
+            NurseWorkforceRoster.roster_date <= roster_to,
+        )
+        .order_by(NurseWorkforceRoster.roster_date.asc())
+        .all()
+    )
+
+    all_roster_items = [
+        {
+            "roster_date": r.roster_date,
+            "shift_name": r.shift_name,
+            "shift_start": r.shift_start,
+            "shift_end": r.shift_end,
+        }
+        for r in roster_rows
+    ]
+
+    # Upcoming list: today + future only (past days must not appear).
+    roster_items = [r for r in all_roster_items if r["roster_date"] >= today]
+
+    # Roster period for the hero:
+    # 1) Prefer consecutive span of today's rostered shift (any shift on today).
+    # 2) Else consecutive span of current clock shift if rostered today.
+    # 3) Else next upcoming roster day for current shift (never fall back to past-only).
+    roster_period = {"from_date": None, "to_date": None}
+
+    today_rows = [r for r in all_roster_items if r["roster_date"] == today]
+    period_shift = None
+    if today_rows:
+        # Prefer the current clock shift if rostered today; otherwise use today's first roster shift.
+        matched = next(
+            (
+                r
+                for r in today_rows
+                if str(r.get("shift_name") or "").lower() == str(shift_name or "").lower()
+            ),
+            today_rows[0],
+        )
+        period_shift = matched.get("shift_name")
+    else:
+        period_shift = shift_name
+
+    if period_shift:
+        dates_for_shift = sorted(
+            {
+                r["roster_date"]
+                for r in all_roster_items
+                if str(r.get("shift_name") or "").lower() == str(period_shift or "").lower()
+            }
+        )
+        span = _consecutive_roster_span(dates_for_shift, today)
+        if span is None:
+            # Not rostered today for that shift — use nearest future date only.
+            future = next((d for d in dates_for_shift if d >= today), None)
+            if future is not None:
+                span = _consecutive_roster_span(dates_for_shift, future)
+        if span is not None:
+            roster_period = {"from_date": span[0], "to_date": span[1]}
+
+    # Bed allocations active today (kab se kab tak) for the current shift.
+    allocation_rows = (
+        db.query(
+            NurseShiftBedAllocation.id.label("id"),
+            NurseShiftBedAllocation.bed_id.label("bed_id"),
+            NurseShiftBedAllocation.shift_date.label("shift_date"),  # assigned_from
+            NurseShiftBedAllocation.assigned_until.label("assigned_until"),
+            NurseShiftBedAllocation.shift_name.label("shift_name"),
+            NurseShiftBedAllocation.shift_start.label("shift_start"),
+            NurseShiftBedAllocation.shift_end.label("shift_end"),
+            NurseShiftBedAllocation.department_id.label("department_id"),
+            Bed.bed_number.label("bed_number"),
+            Bed.ward_name.label("ward_name"),
+            Bed.patient_id.label("patient_id"),
+            Bed.status.label("bed_status"),
+            Department.name.label("department_name"),
+            Patient.first_name.label("patient_first_name"),
+            Patient.last_name.label("patient_last_name"),
+            Patient.patient_uid.label("patient_uid"),
+        )
+        .join(Bed, Bed.id == NurseShiftBedAllocation.bed_id)
+        .outerjoin(Department, Department.id == NurseShiftBedAllocation.department_id)
+        .outerjoin(Patient, Patient.id == Bed.patient_id)
+        .filter(
+            NurseShiftBedAllocation.nurse_id == nurse_id,
+            NurseShiftBedAllocation.shift_name == shift_name,
+            NurseShiftBedAllocation.is_active.is_(True),
+            NurseShiftBedAllocation.shift_date <= today,
+            or_(
+                NurseShiftBedAllocation.assigned_until.is_(None),
+                NurseShiftBedAllocation.assigned_until >= today,
+            ),
+        )
+        .order_by(Bed.ward_name.asc(), Bed.bed_number.asc())
+        .all()
+    )
+
+    my_beds = []
+    for r in allocation_rows:
+        is_occupied = r.bed_status == "occupied" and r.patient_id is not None
+        patient_name = (
+            h.display_name(r.patient_first_name, r.patient_last_name) if is_occupied else None
+        )
+
+        my_beds.append(
+            {
+                "id": r.id,
+                "bed_number": r.bed_number,
+                "ward_name": r.ward_name,
+                "patient_id": r.patient_id,
+                "patient_name": patient_name,
+                "assigned_from": r.shift_date,
+                "assigned_until": r.assigned_until,
+                "shift_name": r.shift_name,
+                "shift_start": r.shift_start,
+                "shift_end": r.shift_end,
+                "department_name": r.department_name,
+                "is_occupied": is_occupied,
+            }
+        )
+
+    return {
+        "success": True,
+        "current_shift": current_shift,
+        "roster_period": roster_period,
+        "my_beds": my_beds,
+        "roster_items": roster_items,
     }
 
 

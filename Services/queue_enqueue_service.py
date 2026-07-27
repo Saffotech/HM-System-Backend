@@ -20,6 +20,26 @@ def _get_linked_appointment(
     return link_orphan_visit_to_appointment(db, visit)
 
 
+def describe_enqueue_failure(db: Session, visit: OpdVisit) -> str | None:
+    """Human-readable reason when payment succeeded but queue row was not created."""
+    if not is_visit_paid(visit):
+        return None
+
+    appointment = _get_linked_appointment(db, visit)
+    if appointment is None:
+        return "No appointment linked to this visit. Book an appointment first."
+    if not is_appointment_active(appointment):
+        status = getattr(appointment.status, "value", appointment.status)
+        return f"Appointment status is {status} and cannot enter the queue."
+
+    from Services.doctor_patient_queue_service import find_queue_for_appointment_today
+
+    if find_queue_for_appointment_today(db, appointment.id):
+        return None
+
+    return "Patient could not be added to the doctor queue."
+
+
 def enqueue_after_payment_if_eligible(
     db: Session,
     visit: OpdVisit,
@@ -61,3 +81,34 @@ def enqueue_after_payment_if_eligible(
         if exc.status_code in {400, 409}:
             return find_queue_for_appointment_today(db, appointment.id)
         raise
+
+
+def enqueue_after_payment_with_notifications(
+    db: Session,
+    visit: OpdVisit,
+    *,
+    handled_by: int | None = None,
+) -> PatientQueue | None:
+    """Enqueue after payment and notify OPD staff when check-in fails."""
+    queue = enqueue_after_payment_if_eligible(db, visit, handled_by=handled_by)
+    if queue is None:
+        reason = describe_enqueue_failure(db, visit)
+        if reason:
+            from Services.opd_notification_helpers import notify_opd_enqueue_failed
+            from Services.admin_notification_helpers import (
+                notify_admins_queue_enqueue_failed,
+            )
+
+            notify_opd_enqueue_failed(
+                db,
+                visit,
+                reason=reason,
+                created_by=handled_by,
+            )
+            notify_admins_queue_enqueue_failed(
+                db,
+                visit,
+                reason=reason,
+                created_by=handled_by,
+            )
+    return queue

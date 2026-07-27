@@ -194,10 +194,13 @@ class LabReportListItem(BaseModel):
     patient_name: str
     patient_uid: str
 
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
+
     test_name: str
 
     uploaded_by: int
-    uploaded_by_name: str
+    uploaded_by_name: Optional[str] = None
 
     report_file: Optional[str] = None
 
@@ -223,6 +226,7 @@ class LabReportOrderSummary(BaseModel):
     patient_name: str
     patient_uid: str
     doctor_id: int
+    doctor_name: Optional[str] = None
     test_name: str
     category: str
     priority: str

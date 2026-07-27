@@ -712,22 +712,38 @@ def get_reports(
         .all()
     )
 
+    doctor_ids = {
+        report.lab_order.doctor_id
+        for report in reports
+        if report.lab_order and report.lab_order.doctor_id
+    }
+    doctors = {
+        u.id: u
+        for u in db.query(User).filter(User.id.in_(doctor_ids)).all()
+    } if doctor_ids else {}
+
     items = []
     for report in reports:
         uploader_name = " ".join(
             filter(
                 None,
                 [
-                    report.uploaded_by_user.first_name,
-                    report.uploaded_by_user.last_name,
+                    report.uploaded_by_user.first_name if report.uploaded_by_user else None,
+                    report.uploaded_by_user.last_name if report.uploaded_by_user else None,
                 ],
             )
+        ) or None
+        doctor = doctors.get(report.lab_order.doctor_id) if report.lab_order else None
+        doctor_name = (
+            h.display_name(doctor.first_name, doctor.last_name) if doctor else None
         )
         items.append({
             "report_id": report.id,
             "order_id": report.lab_test_order_id,
             "patient_name": report.lab_order.patient_name,
             **_order_patient_fields(report.lab_order),
+            "doctor_id": report.lab_order.doctor_id if report.lab_order else None,
+            "doctor_name": doctor_name,
             "test_name": report.lab_order.test_name,
             "uploaded_by": report.uploaded_by,
             "uploaded_by_name": uploader_name,

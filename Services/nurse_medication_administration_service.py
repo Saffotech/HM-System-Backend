@@ -101,6 +101,10 @@ def get_medication_patients_service(
     patient_name: str | None = None,
     patient_uid: str | None = None,
     bed_number: str | None = None,
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
 
     page: int = 1,
     page_size: int = 20
@@ -170,6 +174,18 @@ def get_medication_patients_service(
             Bed.bed_number.ilike(
                 f"%{bed_number}%"
             )
+        )
+
+    if allocated_only:
+        from Services.nurse_dashboard_service import _apply_allocated_only_filter
+
+        query = _apply_allocated_only_filter(
+            query,
+            db,
+            allocated_only=True,
+            nurse_id=nurse_id,
+            assignment_date=assignment_date,
+            shift_name=shift_name,
         )
 
     # ======================================================
