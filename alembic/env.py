@@ -25,6 +25,8 @@ from Models.nurse_nursing_notes import NursingNote
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient
 from Models.pharmacy_dispensing import Dispensing, DispensingItem
+from Models.hospital_settings import HospitalSettings
+from Models.opd_settings import OpdSettings  # noqa: F401
 from Models.lab_result import LabResult, LabResultParameter
 
 config = context.config

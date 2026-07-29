@@ -124,6 +124,10 @@ class GenerateBillRequest(BaseModel):
     payment_mode: str = "cash"
     amount_received: Optional[float] = None
     transaction_reference: Optional[str] = None
+    appointment_id: Optional[int] = Field(
+        None, description="Link bill to this appointment when provided"
+    )
+    discount_percent: float = Field(0.0, ge=0, le=100)
 
 
 class BillUpdateRequest(BaseModel):
@@ -135,6 +139,7 @@ class BillUpdateRequest(BaseModel):
     consultation_fee: Optional[float] = Field(None, ge=0)
     gst_percent: Optional[float] = Field(None, ge=0, le=100)
     extra_items: Optional[List[ExtraBillItem]] = None
+    discount_percent: Optional[float] = Field(None, ge=0, le=100)
 
 
 class BillLineItem(BaseModel):

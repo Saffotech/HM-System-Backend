@@ -12,6 +12,7 @@ from database import SessionLocal
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.opd_settings import OPD_SETTINGS_ROW_ID, OpdSettings
 from Models.nurse_profile import NurseProfile
 from Models.receptionist_profile import ReceptionistProfile
 from Models.lab_technician_profile import LabTechnicianProfile
@@ -426,6 +427,26 @@ def ensure_hospital_settings(db) -> None:
     print("Hospital settings default row created (id=1)")
 
 
+def ensure_opd_settings(db) -> None:
+    row = db.query(OpdSettings).filter(OpdSettings.id == OPD_SETTINGS_ROW_ID).first()
+    if row:
+        print("OPD settings row already exists")
+        return
+
+    db.add(
+        OpdSettings(
+            id=OPD_SETTINGS_ROW_ID,
+            allow_patient_delete=True,
+            allow_appointment_delete=True,
+            allow_unpaid_bill_delete=True,
+            require_admin_approval_for_delete=True,
+            extra={},
+        )
+    )
+    db.commit()
+    print("OPD settings default row created (id=1)")
+
+
 def ensure_nurse_profiles(db, role_ids: dict[str, int]) -> None:
     """Backfill empty nurse_profiles for nurse-role users missing a profile row."""
     nurse_role_id = role_ids.get("nurse")
@@ -816,6 +837,7 @@ def main() -> None:
         role_ids = upsert_roles(db, perm_ids)
         upsert_departments(db)
         ensure_hospital_settings(db)
+        ensure_opd_settings(db)
         ensure_nurse_profiles(db, role_ids)
         ensure_doctor_profiles(db, role_ids)
         ensure_receptionist_profiles(db, role_ids)

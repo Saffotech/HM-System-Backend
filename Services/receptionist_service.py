@@ -15,6 +15,7 @@ from Models.patient import OpdVisit, Patient
 from Models.role import Role
 from Models.user import User
 from Services import opd_helpers
+from Services import opd_settings_service as opd_settings_svc
 from Services.queue_helpers import (
     apply_receptionist_payment_filter,
     is_visit_paid,
@@ -804,9 +805,17 @@ def _appointment_counts_by_doctor(db: Session, target_date: date) -> dict[int, d
 
 
 def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> list[dict]:
-    """30-min slots (9:00–16:30 IST) with booked/available — mirrors OPD doctor_availability."""
+    """Slots from Admin OPD settings (hospital default or per-doctor override)."""
+    day = datetime.combine(schedule_date, time.min, tzinfo=IST)
+    config = opd_settings_svc.resolve_doctor_slot_settings(db, doctor_id)
+    weekday = opd_settings_svc.slot_weekday_key(day)
+    working_days = {str(d).lower()[:3] for d in (config.get("working_days") or [])}
+    if weekday not in working_days:
+        return []
+
     day_start = datetime.combine(schedule_date, time.min, tzinfo=IST)
     day_end = datetime.combine(schedule_date, time.max, tzinfo=IST)
+    duration = max(5, min(240, int(config.get("slot_duration_minutes") or 30)))
 
     booked = (
         db.query(Appointment)
@@ -829,20 +838,17 @@ def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> lis
         booked_hm.add((apt_ist.hour, apt_ist.minute))
 
     slots = []
-    for hour in range(9, 17):
-        for minute in (0, 30):
-            taken = (hour, minute) in booked_hm
-            end_minute = minute + 30
-            end_hour = hour + (1 if end_minute >= 60 else 0)
-            end_minute %= 60
-            slots.append(
-                {
-                    "slot_start": f"{hour:02d}:{minute:02d}",
-                    "slot_end": f"{end_hour:02d}:{end_minute:02d}",
-                    "is_available": not taken,
-                    "status": "booked" if taken else "available",
-                }
-            )
+    for slot_time in opd_settings_svc.iter_slot_datetimes(day, config):
+        taken = (slot_time.hour, slot_time.minute) in booked_hm
+        end_dt = slot_time + timedelta(minutes=duration)
+        slots.append(
+            {
+                "slot_start": slot_time.strftime("%H:%M"),
+                "slot_end": end_dt.strftime("%H:%M"),
+                "is_available": not taken,
+                "status": "booked" if taken else "available",
+            }
+        )
     return slots
 
 

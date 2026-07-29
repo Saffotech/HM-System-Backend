@@ -27,8 +27,9 @@ from Schemas.opd_schema import (
     VisitSuccessResponse,
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate
+from Schemas.opd_settings_schema import OpdSettingsOut
 from dependencies import PermissionChecker, get_current_user
-from Services import appointment_service, bed_service, opd_service
+from Services import appointment_service, bed_service, opd_service, opd_settings_service
 from Utils.deprecation import mark_deprecated
 
 router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
@@ -43,6 +44,16 @@ def dashboard(
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
     return opd_service.get_dashboard(db)
+
+
+@router.get("/settings", response_model=OpdSettingsOut)
+def get_opd_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    """Read-only OPD operational settings for Billing Counter."""
+    return opd_settings_service.get_settings(db)
 
 
 # ── Patients ──────────────────────────────────────────────────
@@ -107,6 +118,9 @@ def delete_patient(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:delete")),
 ):
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="patient"
+    )
     return opd_service.delete_patient(db, patient_id)
 
 
@@ -181,6 +195,8 @@ def register_and_pay(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:create")),
 ):
+    if not pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=payment_mode)
     return opd_service.register_new_patient(
         db,
         data,
@@ -203,6 +219,8 @@ def create_visit_for_patient(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:create")),
 ):
+    if not pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=payment_mode)
     return opd_service.create_visit_for_existing_patient(
         db,
         data,
@@ -221,6 +239,12 @@ def generate_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:create")),
 ):
+    if data.discount_percent and data.discount_percent > 0:
+        opd_settings_service.validate_discount(
+            db, current_user=current_user, discount_percent=data.discount_percent,
+        )
+    if not data.pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
     return opd_service.generate_bill(db, data, current_user.id)
 
 
@@ -258,6 +282,7 @@ def list_bills(
         to_date=to_date,
         page=page,
         limit=limit,
+        registered_by=current_user.id,
     )
 
 
@@ -269,6 +294,10 @@ def update_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:update")),
 ):
+    if data.discount_percent is not None and data.discount_percent > 0:
+        opd_settings_service.validate_discount(
+            db, current_user=current_user, discount_percent=data.discount_percent,
+        )
     return opd_service.update_bill(db, visit_id, data)
 
 
@@ -279,7 +308,10 @@ def delete_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:delete")),
 ):
-    return opd_service.delete_bill(db, visit_id)
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="bill"
+    )
+    return opd_service.delete_bill(db, visit_id, current_user=current_user)
 
 
 @router.post("/visit/{visit_id}/pay")
@@ -290,6 +322,7 @@ def collect_payment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:update")),
 ):
+    opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
     return opd_service.collect_payment(db, visit_id, data, current_user.id)
 
 
@@ -398,6 +431,21 @@ def list_appointments(
     )
 
 
+@router.post(
+    "/appointments/{appointment_id}/ensure-bill",
+    status_code=201,
+    response_model=VisitSuccessResponse,
+)
+def ensure_bill_for_appointment(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("billing:create")),
+):
+    """Create (or return) the unpaid OPD bill linked to an appointment."""
+    return opd_service.ensure_bill_for_appointment(db, appointment_id, current_user.id)
+
+
 @router.patch("/appointments/{appointment_id}", response_model=AppointmentOut)
 def update_appointment(
     appointment_id: int,
@@ -426,6 +474,9 @@ def delete_appointment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="appointment"
+    )
     return appointment_service.delete_appointment(db, appointment_id)
 
 
