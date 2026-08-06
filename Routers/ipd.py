@@ -124,14 +124,7 @@ def update_admission(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:create")),
 ):
-    return ipd_service.update_admission(
-        db,
-        admission_id,
-        doctor_id=data.doctor_id,
-        department_id=data.department_id,
-        diagnosis=data.diagnosis,
-        notes=data.notes,
-    )
+    return ipd_service.update_admission(db, admission_id, data)
 
 
 @router.post("/admissions/{admission_id}/visits", status_code=201)
@@ -233,7 +226,7 @@ def transfer_bed(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:beds:transfer")),
 ):
-    return ipd_service.transfer_bed(db, data)
+    return ipd_service.transfer_bed(db, data, transferred_by=current_user.id)
 
 
 @router.get("/billing/running")

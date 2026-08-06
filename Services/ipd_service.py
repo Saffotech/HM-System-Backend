@@ -18,6 +18,7 @@ from Models.user import User
 from Schemas.ipd_schema import (
     IpdAdmitRequest,
     IpdAdmissionOut,
+    IpdAdmissionUpdate,
     IpdBillItemOut,
     IpdBillOut,
     IpdBillPreviewOut,
@@ -53,6 +54,20 @@ def _parse_dt(value: Optional[str]) -> datetime:
         raise HTTPException(status_code=400, detail="Invalid datetime format") from exc
 
 
+def _admission_doctor_name(db: Session, row: IpdAdmission) -> Optional[str]:
+    if row.doctor_id:
+        return h.doctor_display(db, row.doctor_id)
+    visit = (
+        db.query(IpdDoctorVisit)
+        .filter(IpdDoctorVisit.admission_id == row.id)
+        .order_by(IpdDoctorVisit.visited_at.desc())
+        .first()
+    )
+    if visit:
+        return h.doctor_display(db, visit.doctor_id)
+    return None
+
+
 def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
     patient = db.query(Patient).filter(Patient.id == row.patient_id).first()
     dept = (
@@ -71,7 +86,7 @@ def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
         bed_number=row.bed_number,
         ward_name=row.ward_name,
         doctor_id=row.doctor_id,
-        doctor_name=h.doctor_display(db, row.doctor_id),
+        doctor_name=_admission_doctor_name(db, row),
         department_id=row.department_id,
         department_name=dept.name if dept else None,
         diagnosis=row.diagnosis,
@@ -126,30 +141,43 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
 def update_admission(
     db: Session,
     admission_id: int,
-    *,
-    doctor_id: Optional[int] = None,
-    department_id: Optional[int] = None,
-    diagnosis: Optional[str] = None,
-    notes: Optional[str] = None,
+    data: IpdAdmissionUpdate,
 ) -> IpdAdmissionOut:
     admission = h.get_admission(db, admission_id)
     if admission.status != "admitted":
         raise HTTPException(status_code=400, detail="Only active admissions can be updated")
-    if doctor_id is not None:
+
+    updates = data.model_dump(exclude_unset=True)
+    next_department_id = updates.get("department_id", admission.department_id)
+
+    if "department_id" in updates:
+        admission.department_id = updates["department_id"]
+    if "doctor_id" in updates:
+        doctor_id = updates["doctor_id"]
+        if doctor_id is not None and next_department_id:
+            oh.get_doctor_in_department(db, doctor_id, next_department_id)
         admission.doctor_id = doctor_id
-    if department_id is not None:
-        admission.department_id = department_id
-    if diagnosis is not None:
-        admission.diagnosis = diagnosis
-    if notes is not None:
-        admission.notes = notes
+    if "diagnosis" in updates:
+        admission.diagnosis = updates["diagnosis"]
+    if "notes" in updates:
+        admission.notes = updates["notes"]
+
     db.commit()
     db.refresh(admission)
     return _admission_out(db, admission)
 
 
-def transfer_bed(db: Session, data: IpdTransferBedRequest) -> IpdAdmissionOut:
-    admission = h.get_admission(db, data.admission_id)
+def transfer_bed(
+    db: Session, data: IpdTransferBedRequest, transferred_by: Optional[int] = None
+) -> IpdAdmissionOut:
+    if data.admission_id:
+        admission = h.get_admission(db, data.admission_id)
+    else:
+        from_bed = h.get_bed(db, data.from_bed_id)
+        admission = h.ensure_admission_for_occupied_bed(
+            db, from_bed, admitted_by=transferred_by
+        )
+
     if admission.status != "admitted":
         raise HTTPException(status_code=400, detail="Only active admissions can transfer beds")
 
