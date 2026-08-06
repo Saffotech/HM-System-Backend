@@ -21,6 +21,11 @@ from Schemas.opd_settings_schema import (
     PricingOut,
     PricingUpdate,
 )
+from Services.admin_edit_policy import (
+    GLOBAL_FEE_KEYS,
+    merge_admin_edit_patch,
+    normalize_admin_edit,
+)
 from Services import audit_service
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -88,6 +93,7 @@ def _role_name(user: Optional[User]) -> str:
     return (user.role_obj.name or "").strip().lower()
 
 
+
 def ensure_opd_settings(db: Session) -> OpdSettings:
     row = db.query(OpdSettings).filter(OpdSettings.id == OPD_SETTINGS_ROW_ID).first()
     if row:
@@ -108,6 +114,34 @@ def ensure_opd_settings(db: Session) -> OpdSettings:
 
 def get_settings_row(db: Session) -> OpdSettings:
     return ensure_opd_settings(db)
+
+
+def get_admin_edit_controls(db: Session) -> dict[str, bool]:
+    row = get_settings_row(db)
+    extra = row.extra if isinstance(row.extra, dict) else {}
+    return normalize_admin_edit(extra.get("admin_edit"))
+
+
+def assert_admin_may_edit_bed_section(db: Session, actor: User, section: str) -> None:
+    """Block Hospital Admin bed writes when Super Admin locked the section card."""
+    if _role_name(actor) == "super_admin":
+        return
+    locks = get_admin_edit_controls(db)
+    if not locks.get(section, True):
+        labels = {
+            "bed_inventory": "Bed inventory",
+            "wards": "Wards",
+            "all_beds": "All beds",
+        }
+        label = labels.get(section, section)
+        raise HTTPException(
+            status_code=403,
+            detail=f"{label} is locked by Super Admin",
+        )
+
+
+def assert_admin_may_edit_bed_inventory(db: Session, actor: User) -> None:
+    assert_admin_may_edit_bed_section(db, actor, "bed_inventory")
 
 
 def default_pricing() -> PricingOut:
@@ -562,6 +596,7 @@ def _to_out(row: OpdSettings) -> OpdSettingsOut:
         discount_refund=normalize_discount_refund(extra.get("discount_refund")),
         appointment_slots=extra.get("appointment_slots"),
         payment_modes=normalize_payment_settings(extra.get("payment_modes")),
+        admin_edit=normalize_admin_edit(extra.get("admin_edit")),
         updated_at=row.updated_at.isoformat() if row.updated_at else None,
         updated_by=row.updated_by,
     )
@@ -577,9 +612,98 @@ def update_settings(
     actor: User,
 ) -> OpdSettingsOut:
     row = get_settings_row(db)
-    updates = data.model_dump(exclude_unset=True)
-    if not updates:
+    requested = data.model_dump(exclude_unset=True)
+    if not requested:
         raise HTTPException(status_code=400, detail="No fields to update")
+
+    is_super_admin = _role_name(actor) == "super_admin"
+    extra = dict(row.extra) if isinstance(row.extra, dict) else {}
+    locks = normalize_admin_edit(extra.get("admin_edit"))
+    updates = dict(requested)
+
+    # Only Super Admin may change Admin-edit gates.
+    admin_edit_changed = False
+    if "admin_edit" in updates:
+        updates.pop("admin_edit", None)
+        if is_super_admin and data.admin_edit is not None:
+            extra["admin_edit"] = merge_admin_edit_patch(locks, data.admin_edit)
+            locks = normalize_admin_edit(extra["admin_edit"])
+            admin_edit_changed = True
+
+    # Hospital Admin cannot mutate locked cards — strip locked fields.
+    if not is_super_admin:
+        if "delete_controls" in updates and not locks.get("delete_controls", True):
+            updates.pop("delete_controls", None)
+        if "discount_refund" in updates and not locks.get("discount_refund", True):
+            updates.pop("discount_refund", None)
+        if "appointment_slots" in updates:
+            # Slots payload is one blob; lock either hospital or doctor overrides by
+            # forcing current stored value for locked parts.
+            if not locks.get("hospital_default_slots", True) and not locks.get(
+                "doctor_slot_overrides", True
+            ):
+                updates.pop("appointment_slots", None)
+            elif "appointment_slots" in updates and updates["appointment_slots"] is not None:
+                current_slots = (
+                    extra.get("appointment_slots")
+                    if isinstance(extra.get("appointment_slots"), dict)
+                    else {}
+                )
+                incoming = dict(updates["appointment_slots"] or {})
+                if not locks.get("hospital_default_slots", True):
+                    for key in (
+                        "start_time",
+                        "end_time",
+                        "slot_duration_minutes",
+                        "working_days",
+                    ):
+                        if key in current_slots:
+                            incoming[key] = current_slots[key]
+                if not locks.get("doctor_slot_overrides", True):
+                    incoming["doctor_slots"] = current_slots.get("doctor_slots", [])
+                updates["appointment_slots"] = incoming
+        if "payment_modes" in updates and updates.get("payment_modes") is not None:
+            payment_update = dict(updates["payment_modes"] or {})
+            current_pm = normalize_payment_settings(extra.get("payment_modes")).model_dump()
+            if not locks.get("payment_modes", True):
+                payment_update.pop("modes", None)
+            if not locks.get("bank_upi_details", True):
+                payment_update["bank_details"] = current_pm.get("bank_details")
+            if not locks.get("insurance_providers", True):
+                payment_update["insurance_providers"] = current_pm.get(
+                    "insurance_providers", []
+                )
+            if payment_update:
+                updates["payment_modes"] = payment_update
+            else:
+                updates.pop("payment_modes", None)
+        if "pricing" in updates and updates.get("pricing") is not None:
+            pricing_update = dict(updates["pricing"] or {})
+            if not locks.get("global_fees_tax", True):
+                for key in GLOBAL_FEE_KEYS:
+                    pricing_update.pop(key, None)
+            if not locks.get("bed_tariff", True):
+                pricing_update.pop("bed_tariff", None)
+            if not locks.get("consultation_fee_by_department", True):
+                pricing_update.pop("department_consultation_fees", None)
+            if not locks.get("consultation_fee_by_doctor", True):
+                pricing_update.pop("doctor_consultation_fees", None)
+            if not locks.get("bill_item_price_list", True):
+                pricing_update.pop("bill_items", None)
+            if pricing_update:
+                updates["pricing"] = pricing_update
+            else:
+                updates.pop("pricing", None)
+
+    if not updates and not admin_edit_changed:
+        raise HTTPException(
+            status_code=403 if not is_super_admin else 400,
+            detail=(
+                "These settings are locked by Super Admin"
+                if not is_super_admin
+                else "No fields to update"
+            ),
+        )
 
     before = {
         "allow_patient_delete": row.allow_patient_delete,
@@ -600,15 +724,14 @@ def update_settings(
             delete_controls["require_admin_approval_for_delete"]
         )
 
-    extra = dict(row.extra) if isinstance(row.extra, dict) else {}
-
     if "pricing" in updates and updates["pricing"] is not None:
         current = normalize_pricing(extra.get("pricing"))
-        if isinstance(data.pricing, PricingUpdate):
+        # Prefer stripped dict for Admin; full typed dump for Super Admin.
+        if is_super_admin and isinstance(data.pricing, PricingUpdate):
             raw = data.pricing.model_dump(exclude_unset=True)
-            merged = _merge_pricing_update(current, raw)
         else:
-            merged = _merge_pricing_update(current, updates["pricing"])
+            raw = updates["pricing"] if isinstance(updates["pricing"], dict) else {}
+        merged = _merge_pricing_update(current, raw)
         extra["pricing"] = merged.model_dump()
 
     if "discount_refund" in updates and updates["discount_refund"] is not None:
@@ -659,7 +782,12 @@ def update_settings(
         resource_type="opd_settings",
         resource_id=row.id,
         summary="Updated OPD settings",
-        details={"before": before, "after": after, "pricing_updated": "pricing" in updates},
+        details={
+            "before": before,
+            "after": after,
+            "pricing_updated": "pricing" in updates,
+            "admin_edit_updated": admin_edit_changed,
+        },
     )
 
     return _to_out(row)

@@ -80,7 +80,12 @@ class PermissionChecker:
 
             live_permissions = set(_permissions_for_user(user))
             token_permissions = set(payload.get("permissions") or [])
-            permissions = live_permissions | token_permissions
+            # Prefer live DB always when the user has a role. Empty live set means
+            # admin revoked all role permissions — do NOT fall back to stale JWT.
+            if user.role_obj is not None:
+                permissions = live_permissions
+            else:
+                permissions = token_permissions
 
             if self.required_permission not in permissions:
                 raise HTTPException(

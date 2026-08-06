@@ -1,7 +1,7 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, ConfigDict, EmailStr, Field
 
 
 class StaffListItem(BaseModel):
@@ -28,6 +28,13 @@ class StaffListResponse(BaseModel):
 class StaffDetailOut(StaffListItem):
     phone: Optional[str] = None
     login_count: int = 0
+    # Role-profile Account fields (admin / super-admin managed)
+    employee_id: Optional[str] = None
+    joining_date: Optional[date] = None
+    shift_name: Optional[str] = None
+    shift_start_time: Optional[str] = None
+    shift_end_time: Optional[str] = None
+    supports_shift: bool = False
 
 
 class StaffActivateRequest(BaseModel):
@@ -35,11 +42,20 @@ class StaffActivateRequest(BaseModel):
 
 
 class StaffUpdateRequest(BaseModel):
+    """Admin-managed staff fields only. Email / is_active / metrics cannot be patched here."""
+
+    model_config = ConfigDict(extra="forbid")
+
     first_name: Optional[str] = None
     last_name: Optional[str] = None
     role_id: Optional[int] = None
     department_id: Optional[int] = None
     phone: Optional[str] = None
+    employee_id: Optional[str] = Field(default=None, max_length=50)
+    joining_date: Optional[date] = None
+    shift_name: Optional[str] = Field(default=None, max_length=100)
+    shift_start_time: Optional[str] = Field(default=None, max_length=10)
+    shift_end_time: Optional[str] = Field(default=None, max_length=10)
 
 
 class StaffActionResponse(BaseModel):

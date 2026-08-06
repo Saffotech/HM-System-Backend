@@ -15,6 +15,14 @@ from Models.nurse_profile import NurseProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
 from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401
 from Models.opd_billing_profile import OpdBillingProfile  # noqa: F401
+from Models.ipd import (  # noqa: F401
+    IpdAdmission,
+    IpdBill,
+    IpdBillItem,
+    IpdDoctorVisit,
+    IpdPaymentTransaction,
+)
+from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
 from Models.super_admin_profile import SuperAdminProfile  # noqa: F401
@@ -69,6 +77,8 @@ from Routers.nurse_shift_bed_allocation_router import (
 )
 from Routers.nurse_workforce_router import router as nurse_workforce_router
 from Routers.opd import router as opd_router
+from Routers.ipd import router as ipd_router
+from Routers.ipd_profile_router import router as ipd_profile_router
 from Routers.pharmacy import router as pharmacy_router
 from Routers.pharmacist_profile_router import router as pharmacist_profile_router
 from Routers.pharmacist_notification_router import (
@@ -119,6 +129,8 @@ app.include_router(roles_router)
 app.include_router(opd_router)
 app.include_router(opd_billing_profile_router)
 app.include_router(opd_billing_notification_router)
+app.include_router(ipd_router)
+app.include_router(ipd_profile_router)
 app.include_router(appointments_router)
 app.include_router(consultation_router)
 app.include_router(patient_queue_router)

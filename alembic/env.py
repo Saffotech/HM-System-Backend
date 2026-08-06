@@ -13,6 +13,14 @@ from Models.user import User
 from Models.department import Department
 from Models.patient import Patient, OpdVisit
 from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
+from Models.ipd import (
+    IpdAdmission,
+    IpdBill,
+    IpdBillItem,
+    IpdDoctorVisit,
+    IpdPaymentTransaction,
+)
+from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem

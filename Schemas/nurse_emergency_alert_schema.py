@@ -19,14 +19,6 @@ class EmergencyAlertCreate(BaseModel):
     title: Optional[str] = None
     description: Optional[str] = None
 
-# ==========================================================
-# ASSIGN ALERT
-# ==========================================================
-
-class EmergencyAlertAssign(BaseModel):
-
-    assigned_nurse_id: Optional[int] = None
-
 
 # ==========================================================
 # RESOLVE ALERT
@@ -35,17 +27,6 @@ class EmergencyAlertAssign(BaseModel):
 class EmergencyAlertResolve(BaseModel):
 
     resolution_notes: Optional[str] = None
-
-
-# ==========================================================
-# ESCALATE ALERT
-# ==========================================================
-
-class EmergencyAlertEscalate(BaseModel):
-
-    doctor_id: Optional[int] = None
-
-    escalation_notes: Optional[str] = None
 
 
 class AlertTimelineItem(BaseModel):

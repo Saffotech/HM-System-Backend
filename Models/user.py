@@ -54,6 +54,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    ipd_profile = relationship(
+        "IpdProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     pharmacist_profile = relationship(
         "PharmacistProfile",
         back_populates="user",

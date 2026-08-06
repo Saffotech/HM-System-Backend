@@ -287,6 +287,28 @@ class BedOut(BaseModel):
     admitted_at: Optional[str]
 
 
+class BedCreate(BaseModel):
+    bed_number: str
+    ward_name: str
+    department_id: Optional[int] = None
+
+
+class BedBulkCreate(BaseModel):
+    """Add multiple beds to a ward, e.g. prefix=G-, start=105, count=3 → G-105..G-107."""
+    ward_name: str
+    prefix: str = ""
+    start_number: int = 1
+    count: int = 1
+    pad_width: int = 0
+    department_id: Optional[int] = None
+
+
+class BedUpdate(BaseModel):
+    bed_number: Optional[str] = None
+    ward_name: Optional[str] = None
+    department_id: Optional[int] = None
+
+
 class AssignBedRequest(BaseModel):
     bed_id: int
     patient_id: int

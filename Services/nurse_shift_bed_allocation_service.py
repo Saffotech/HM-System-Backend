@@ -97,13 +97,57 @@ def _find_active_conflict(
     exclude_id: int | None = None,
 ) -> NurseShiftBedAllocation | None:
     """One active nurse responsibility per bed (persistent until admin changes)."""
+    expire_stale_allocations(db)
+    today = _now_ist().date()
     q = db.query(NurseShiftBedAllocation).filter(
         NurseShiftBedAllocation.bed_id == bed_id,
         NurseShiftBedAllocation.is_active.is_(True),
+        NurseShiftBedAllocation.shift_date <= today,
+        or_(
+            NurseShiftBedAllocation.assigned_until.is_(None),
+            NurseShiftBedAllocation.assigned_until >= today,
+        ),
     )
     if exclude_id is not None:
         q = q.filter(NurseShiftBedAllocation.id != exclude_id)
     return q.first()
+
+
+def expire_stale_allocations(db: Session, *, actor_id: int | None = None) -> int:
+    """Deactivate allocations whose assigned_until date has already passed (IST).
+
+    Beds become free for reassignment. Inclusive end date: active through
+    assigned_until; expired when today > assigned_until.
+    """
+    today = _now_ist().date()
+    rows = (
+        db.query(NurseShiftBedAllocation)
+        .filter(
+            NurseShiftBedAllocation.is_active.is_(True),
+            NurseShiftBedAllocation.assigned_until.isnot(None),
+            NurseShiftBedAllocation.assigned_until < today,
+        )
+        .all()
+    )
+    if not rows:
+        return 0
+
+    now = _now_ist()
+    for row in rows:
+        row.is_active = False
+        row.updated_at = now
+        _record_history(
+            db,
+            allocation=row,
+            action="deactivated",
+            actor_id=actor_id,
+            remarks=(
+                f"Auto-expired: assigned_until {row.assigned_until.isoformat()} "
+                "has passed"
+            ),
+        )
+    db.commit()
+    return len(rows)
 
 
 def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
@@ -571,6 +615,7 @@ def delete_allocation_service(
 
 
 def get_allocation_service(db: Session, allocation_id: int) -> dict:
+    expire_stale_allocations(db)
     row = (
         db.query(NurseShiftBedAllocation)
         .filter(NurseShiftBedAllocation.id == allocation_id)
@@ -596,6 +641,7 @@ def list_allocations_service(
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
+    expire_stale_allocations(db)
     if filters is not None:
         nurse_id = filters.nurse_id if filters.nurse_id is not None else nurse_id
         bed_id = filters.bed_id if filters.bed_id is not None else bed_id
@@ -763,6 +809,7 @@ def get_allocated_bed_ids_for_nurse(
     shift_name: str | None = None,
 ) -> list[int]:
     """Active allocation bed ids for a nurse (for optional dashboard filtering)."""
+    expire_stale_allocations(db)
     target_date = assignment_date or _now_ist().date()
     resolved_shift = (
         _normalize_shift_name(shift_name)
@@ -773,9 +820,13 @@ def get_allocated_bed_ids_for_nurse(
         db.query(NurseShiftBedAllocation.bed_id)
         .filter(
             NurseShiftBedAllocation.nurse_id == nurse_id,
-            NurseShiftBedAllocation.shift_date == target_date,
             NurseShiftBedAllocation.shift_name == resolved_shift,
             NurseShiftBedAllocation.is_active.is_(True),
+            NurseShiftBedAllocation.shift_date <= target_date,
+            or_(
+                NurseShiftBedAllocation.assigned_until.is_(None),
+                NurseShiftBedAllocation.assigned_until >= target_date,
+            ),
         )
         .distinct()
         .all()

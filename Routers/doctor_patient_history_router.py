@@ -37,7 +37,7 @@ def get_patients(
     search: Optional[str] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
+    _: bool = Depends(PermissionChecker("patients:view"))
 ):
     return get_patients_service(
         db=db,
@@ -64,7 +64,7 @@ def get_patient_details(
     patient_uid: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("appointments:view"))
+    _: bool = Depends(PermissionChecker("patients:view"))
 ):
     patient = get_patient_details_service(
         db=db,

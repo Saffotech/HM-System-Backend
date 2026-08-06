@@ -17,6 +17,7 @@ from Models.nurse_profile import NurseProfile
 from Models.receptionist_profile import ReceptionistProfile
 from Models.lab_technician_profile import LabTechnicianProfile
 from Models.opd_billing_profile import OpdBillingProfile
+from Models.ipd_profile import IpdProfile
 from Models.pharmacist_profile import PharmacistProfile
 from Models.admin_profile import AdminProfile
 from Models.super_admin_profile import SuperAdminProfile
@@ -115,8 +116,25 @@ PERMISSIONS_LIST = [
     "emergency_alerts:view",
     "emergency_alerts:create",
     "emergency_alerts:update",
-    "emergency_alerts:escalate",
+    "receptionist:view_queues",
     "receptionist:view_doctor_schedule",
+    "ipd:dashboard",
+    "ipd:patients:list",
+    "ipd:patients:view",
+    "ipd:admission:create",
+    "ipd:admission:discharge",
+    "ipd:beds:view",
+    "ipd:beds:assign",
+    "ipd:beds:transfer",
+    "ipd:visits:create",
+    "ipd:bill:view",
+    "ipd:bill:generate",
+    "ipd:bill:pay",
+    "ipd:bill:history",
+    "ipd_profile:view",
+    "ipd_profile:update",
+    "ipd_profile:upload_image",
+    "ipd_profile:delete_image",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -158,15 +176,12 @@ ROLES_DATA = {
         "description": "Clinical doctor",
         "permissions": [
             "patients:view",
-            "opd:view",
             "prescriptions:create",
-            "prescriptions:view",
             "prescriptions:update",
             "prescriptions:delete",
             "lab:create",
             "lab:view",
             "appointments:view",
-            "appointments:create",
             "appointments:update",
             "doctor_profile:view",
             "doctor_profile:update",
@@ -204,7 +219,6 @@ ROLES_DATA = {
             "emergency_alerts:view",
             "emergency_alerts:create",
             "emergency_alerts:update",
-            "emergency_alerts:escalate",
         ],
     },
     "opd_billing": {
@@ -231,10 +245,37 @@ ROLES_DATA = {
             "notifications:update",
         ],
     },
+    "ipd": {
+        "description": "IPD admissions, beds, stay billing, and discharge",
+        "permissions": [
+            "patients:view",
+            "patients:create",
+            "patients:update",
+            "ipd:dashboard",
+            "ipd:patients:list",
+            "ipd:patients:view",
+            "ipd:admission:create",
+            "ipd:admission:discharge",
+            "ipd:beds:view",
+            "ipd:beds:assign",
+            "ipd:beds:transfer",
+            "ipd:visits:create",
+            "ipd:bill:view",
+            "ipd:bill:generate",
+            "ipd:bill:pay",
+            "ipd:bill:history",
+            "ipd_profile:view",
+            "ipd_profile:update",
+            "ipd_profile:upload_image",
+            "ipd_profile:delete_image",
+            "notifications:view",
+            "notifications:update",
+        ],
+    },
     "pharmacist": {
         "description": "Pharmacy staff",
         "permissions": [
-            "patients:view",
+            # FE-backed only (patients:view unused — allergies come on prescription payloads)
             "prescriptions:view",
             "prescriptions:dispense",
             "pharmacist_profile:view",
@@ -248,9 +289,8 @@ ROLES_DATA = {
     "lab_technician": {
         "description": "Laboratory technician",
         "permissions": [
-            "patients:view",
+            # FE-backed only (patients:view unused; lab:create is doctor-owned)
             "lab:view",
-            "lab:create",
             "lab:update",
             "lab:upload_report",
             "lab_technician_profile:view",
@@ -264,8 +304,7 @@ ROLES_DATA = {
     "receptionist": {
         "description": "Reception / front desk queue monitoring (view only)",
         "permissions": [
-            "patients:view",
-            "opd:view",
+            "receptionist:view_queues",
             "receptionist:view_doctor_schedule",
             "receptionist_profile:view",
             "receptionist_profile:update",
@@ -632,6 +671,32 @@ def ensure_opd_billing_profiles(db, role_ids: dict[str, int]) -> None:
     )
 
 
+def ensure_ipd_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty ipd_profiles for IPD users missing a row."""
+    ipd_role_id = role_ids.get("ipd")
+    if not ipd_role_id:
+        print("WARNING: ipd role not found — skipped IPD profile backfill")
+        return
+
+    ipd_users = (
+        db.query(User)
+        .filter(User.role_id == ipd_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for staff in ipd_users:
+        exists = (
+            db.query(IpdProfile.id).filter(IpdProfile.user_id == staff.id).first()
+        )
+        if exists:
+            continue
+        db.add(IpdProfile(user_id=staff.id, languages=[], is_profile_completed=False))
+        added += 1
+    if added:
+        db.commit()
+    print(f"IPD profiles synced: {added} new ({len(ipd_users)} ipd users)")
+
+
 def ensure_pharmacist_profiles(db, role_ids: dict[str, int]) -> None:
     """Backfill empty pharmacist_profiles for pharmacist-role users missing a row."""
     pharmacist_role_id = role_ids.get("pharmacist")
@@ -843,6 +908,7 @@ def main() -> None:
         ensure_receptionist_profiles(db, role_ids)
         ensure_lab_technician_profiles(db, role_ids)
         ensure_opd_billing_profiles(db, role_ids)
+        ensure_ipd_profiles(db, role_ids)
         ensure_pharmacist_profiles(db, role_ids)
         ensure_admin_profiles(db, role_ids)
         ensure_super_admin_profiles(db, role_ids)
@@ -857,10 +923,11 @@ def main() -> None:
                 last_name=args.super_admin_last_name.strip(),
             )
 
+        # Beds are admin-managed (Settings → OPD → Beds & wards). No hardcoded seed.
         from Services.bed_service import seed_default_beds
 
         seed_default_beds(db)
-        print("Default beds seeded (if empty)")
+        print("Bed inventory: admin-managed (no hardcoded defaults)")
 
         print("\nSeed completed successfully!")
         print("\nRole IDs:")

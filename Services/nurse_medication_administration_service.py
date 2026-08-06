@@ -62,7 +62,7 @@ def _enrich_administrations_batch(
         nurse = getattr(record, "nurse", None) or nurses.get(record.administered_by)
         if nurse:
             record.administered_by_name = _user_display_name(nurse)
-
+  
     return administrations
 
 

@@ -14,21 +14,13 @@ from Models.nurse_emergency_alert import (
     AlertSeverity
 )
 
-from Schemas.nurse_emergency_alert_schema import (
-    EmergencyAlertCreate
-)
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_medication_administration import MedicationAdministration
-from Models.nurse_medication_administration import (
-    MedicationAdministration
-)
 from Models.opd_billing import Appointment
-from Models.doctor_prescriptions import Prescription
 
 from Schemas.nurse_emergency_alert_schema import (
-    EmergencyAlertAssign,
+    EmergencyAlertCreate,
     EmergencyAlertResolve,
-    EmergencyAlertEscalate
 )
 from Enums.notification import (
     NotificationPriority,
@@ -376,81 +368,75 @@ def create_alert_service(
 # ==========================================================
 
 def get_alert_summary_service(
-    db: Session
+    db: Session,
+    *,
+    allocated_only: bool = False,
+    allocation_nurse_id: int | None = None,
+    assignment_date: date | None = None,
+    shift_name: str | None = None,
 ):
+    query = db.query(EmergencyAlert)
+
+    if allocated_only:
+        from Services.nurse_shift_bed_allocation_service import (
+            get_allocated_patient_ids_for_nurse,
+        )
+
+        patient_ids = (
+            get_allocated_patient_ids_for_nurse(
+                db,
+                allocation_nurse_id,
+                assignment_date=assignment_date,
+                shift_name=shift_name,
+            )
+            if allocation_nurse_id
+            else []
+        )
+        if not patient_ids:
+            query = query.filter(EmergencyAlert.patient_id == -1)
+        else:
+            query = query.filter(EmergencyAlert.patient_id.in_(patient_ids))
 
     active_total = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.status
-            == AlertStatus.ACTIVE
-        )
-        .count()
+        query.filter(
+            EmergencyAlert.status == AlertStatus.ACTIVE
+        ).count()
     )
 
     critical_count = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.status
-            == AlertStatus.ACTIVE,
-
-            EmergencyAlert.severity
-            == AlertSeverity.CRITICAL
-        )
-        .count()
+        query.filter(
+            EmergencyAlert.status == AlertStatus.ACTIVE,
+            EmergencyAlert.severity == AlertSeverity.CRITICAL,
+        ).count()
     )
 
     high_count = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.status
-            == AlertStatus.ACTIVE,
-
-            EmergencyAlert.severity
-            == AlertSeverity.HIGH
-        )
-        .count()
+        query.filter(
+            EmergencyAlert.status == AlertStatus.ACTIVE,
+            EmergencyAlert.severity == AlertSeverity.HIGH,
+        ).count()
     )
 
     medium_count = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.status
-            == AlertStatus.ACTIVE,
-
-            EmergencyAlert.severity
-            == AlertSeverity.MEDIUM
-        )
-        .count()
+        query.filter(
+            EmergencyAlert.status == AlertStatus.ACTIVE,
+            EmergencyAlert.severity == AlertSeverity.MEDIUM,
+        ).count()
     )
 
     unassigned_count = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.status
-            == AlertStatus.ACTIVE,
-
-            EmergencyAlert.assigned_nurse_id.is_(None)
-        )
-        .count()
+        query.filter(
+            EmergencyAlert.status == AlertStatus.ACTIVE,
+            EmergencyAlert.assigned_nurse_id.is_(None),
+        ).count()
     )
 
     return {
-
-        "active_total":
-            active_total,
-
-        "critical_count":
-            critical_count,
-
-        "high_count":
-            high_count,
-
-        "medium_count":
-            medium_count,
-
-        "unassigned_count":
-            unassigned_count
+        "active_total": active_total,
+        "critical_count": critical_count,
+        "high_count": high_count,
+        "medium_count": medium_count,
+        "unassigned_count": unassigned_count,
     }
 
 # ==========================================================
@@ -749,114 +735,6 @@ def get_alert_detail_service(
     }
 
 # ==========================================================
-# ASSIGN ALERT
-# ==========================================================
-
-def assign_alert_service(
-    db: Session,
-    alert_id: int,
-    assign_data: EmergencyAlertAssign,
-    nurse_id: int
-):
-
-    alert = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.id == alert_id
-        )
-        .first()
-    )
-
-    if not alert:
-        raise HTTPException(
-            status_code=404,
-            detail="Alert not found"
-        )
-
-    if alert.status == AlertStatus.RESOLVED:
-        raise HTTPException(
-            status_code=400,
-            detail="Resolved alert cannot be assigned"
-        )
-
-    assigned_nurse_id = (
-        assign_data.assigned_nurse_id
-        or nurse_id
-    )
-
-    nurse = (
-        db.query(User)
-        .filter(
-            User.id == assigned_nurse_id,
-            User.is_active == True
-        )
-        .first()
-    )
-
-    if not nurse:
-        raise HTTPException(
-            status_code=404,
-            detail="Nurse not found"
-        )
-
-    alert.assigned_nurse_id = (
-        assigned_nurse_id
-    )
-
-    alert.assigned_at = (
-        _now()
-    )
-
-    try:
-
-        db.add(alert)
-
-        db.commit()
-
-        db.refresh(alert)
-
-    except Exception as e:
-
-        db.rollback()
-
-        print(
-            "ASSIGN ALERT ERROR:",
-            repr(e)
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to assign alert"
-        )
-
-    assigner = db.query(User).filter(User.id == nurse_id).first()
-    assigner_name = (
-        h.display_name(assigner.first_name, assigner.last_name)
-        if assigner
-        else "Nurse"
-    )
-    _notify_assigned_nurse_alert(
-        db,
-        alert,
-        nurse_user_id=assigned_nurse_id,
-        title=alert.title or "Alert assigned to you",
-        created_by=nurse_id,
-        created_by_name=assigner_name,
-    )
-
-    return {
-
-        "message":
-            "Alert assigned successfully",
-
-        "alert_id":
-            alert.id,
-
-        "assigned_nurse_id":
-            assigned_nurse_id
-    }
-
-# ==========================================================
 # RESOLVE ALERT
 # ==========================================================
 
@@ -935,179 +813,6 @@ def resolve_alert_service(
 
         "status":
             alert.status
-    }
-
-# ==========================================================
-# ESCALATE ALERT
-# ==========================================================
-
-def _find_patient_doctor_id(
-    db: Session,
-    patient_id: int,
-) -> int | None:
-    latest_appointment = (
-        db.query(Appointment)
-        .filter(Appointment.patient_id == patient_id)
-        .order_by(Appointment.created_at.desc())
-        .first()
-    )
-    if latest_appointment and latest_appointment.doctor_id:
-        return latest_appointment.doctor_id
-
-    latest_prescription = (
-        db.query(Prescription)
-        .filter(Prescription.patient_id == patient_id)
-        .order_by(Prescription.created_at.desc())
-        .first()
-    )
-    if latest_prescription and latest_prescription.doctor_id:
-        return latest_prescription.doctor_id
-
-    patient = (
-        db.query(Patient)
-        .filter(Patient.id == patient_id)
-        .first()
-    )
-    if patient and patient.doctor_id:
-        return patient.doctor_id
-
-    return None
-
-
-def escalate_alert_service(
-    db: Session,
-    alert_id: int,
-    escalate_data: EmergencyAlertEscalate,
-    nurse_id: int
-):
-
-    alert = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.id == alert_id
-        )
-        .first()
-    )
-
-    if not alert:
-        raise HTTPException(
-            status_code=404,
-            detail="Alert not found"
-        )
-
-    if alert.status == AlertStatus.RESOLVED:
-        raise HTTPException(
-            status_code=400,
-            detail="Resolved alert cannot be escalated"
-        )
-
-    doctor_id = escalate_data.doctor_id
-
-    if not doctor_id:
-        doctor_id = _find_patient_doctor_id(db, alert.patient_id)
-        if not doctor_id:
-            raise HTTPException(
-                status_code=404,
-                detail="No doctor assigned to patient"
-            )
-
-    doctor = (
-        db.query(User)
-        .filter(
-            User.id == doctor_id,
-            User.is_active == True
-        )
-        .first()
-    )
-
-    if not doctor:
-        raise HTTPException(
-            status_code=404,
-            detail="Doctor not found"
-        )
-
-    alert.escalated = True
-
-    alert.escalated_at = (
-        _now()
-    )
-
-    alert.escalated_to_doctor_id = (
-        doctor_id
-    )
-
-    alert.escalation_notes = (
-        escalate_data.escalation_notes
-    )
-
-    try:
-
-        db.add(alert)
-
-        db.commit()
-
-        db.refresh(alert)
-
-    except Exception as e:
-
-        db.rollback()
-
-        print(
-            "ESCALATE ALERT ERROR:",
-            repr(e)
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to escalate alert"
-        )
-
-    patient = (
-        db.query(Patient)
-        .filter(Patient.id == alert.patient_id)
-        .first()
-    )
-    patient_name = (
-        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
-    )
-    nurse = db.query(User).filter(User.id == nurse_id).first()
-    nurse_name = h.display_name(nurse.first_name, nurse.last_name) if nurse else "Nurse"
-    location_parts = [part for part in (alert.ward_name, alert.bed_number) if part]
-    location = " — ".join(location_parts)
-    severity_label = (
-        alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
-    )
-    message_lines = [f"{severity_label.upper()} — {patient_name}"]
-    if location:
-        message_lines.append(location)
-    if escalate_data.escalation_notes:
-        message_lines.append(escalate_data.escalation_notes)
-
-    # Critical alerts already notify the doctor when auto-created.
-    if alert.severity != AlertSeverity.CRITICAL:
-        create_notification(
-            db,
-            user_id=doctor_id,
-            title=alert.title or "Emergency alert escalated",
-            message="\n".join(message_lines),
-            notification_type=NotificationType.EMERGENCY_ALERT,
-            source_module=SourceModule.NURSE,
-            reference_type=ReferenceType.PATIENT,
-            reference_id=alert.patient_id,
-            created_by=nurse_id,
-            created_by_name=nurse_name,
-        )
-
-    return {
-
-        "message":
-            "Alert escalated successfully",
-
-        "alert_id":
-            alert.id,
-
-        "doctor_id":
-            doctor_id
     }
 
 # ==========================================================

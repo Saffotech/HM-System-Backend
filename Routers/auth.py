@@ -139,7 +139,7 @@ def get_me(
     user = (
         db.query(User)
         .options(
-            joinedload(User.role_obj),
+            joinedload(User.role_obj).joinedload(Role.permissions),
             joinedload(User.doctor_profile),
             joinedload(User.nurse_profile),
             joinedload(User.receptionist_profile),
@@ -165,4 +165,5 @@ def get_me(
         "is_active": user.is_active,
         "created_at": str(user.created_at),
         "profile_image_url": profile_image_url_for_user(user),
+        "permissions": _permissions_for_user(user),
     }

@@ -12,8 +12,10 @@ from Schemas.opd_schema import (
     AppointmentCreate,
     AppointmentOut,
     AppointmentUpdate,
-    AssignBedRequest,
+    BedBulkCreate,
+    BedCreate,
     BedOut,
+    BedUpdate,
     BillPreviewRequest,
     BillPreviewResponse,
     BillUpdateRequest,
@@ -492,7 +494,7 @@ def doctor_slots(
     return appointment_service.doctor_availability(db, doctor_id, department_id, date)
 
 
-# ── Beds ──────────────────────────────────────────────────────
+# ── Beds (inventory only — assign / release / ward occupancy owned by IPD) ─
 
 @router.get("/beds")
 def list_beds(
@@ -501,36 +503,82 @@ def list_beds(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
+    """Admin Settings → OPD: bed inventory list (not IPD occupancy workflows)."""
     return bed_service.list_beds(db, ward=ward, status=status, search=search)
 
 
-@router.get("/beds/ward/{ward_name}")
-def ward_beds(
+@router.get("/beds/inventory-summary")
+def beds_inventory_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin Settings → OPD: ward bed counts."""
+    return bed_service.ward_inventory_summary(db)
+
+
+@router.post("/beds", response_model=BedOut, status_code=201)
+def create_bed(
+    data: BedCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: add one bed to inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(
+        db, current_user, "bed_inventory"
+    )
+    return bed_service.create_bed(db, data)
+
+
+@router.post("/beds/bulk", status_code=201)
+def create_beds_bulk(
+    data: BedBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: add multiple beds to a ward (e.g. G-105..G-110)."""
+    opd_settings_service.assert_admin_may_edit_bed_section(
+        db, current_user, "bed_inventory"
+    )
+    return bed_service.create_beds_bulk(db, data)
+
+
+@router.put("/beds/{bed_id}", response_model=BedOut)
+def update_bed(
+    bed_id: int,
+    data: BedUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: rename / move an available bed."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
+    return bed_service.update_bed(db, bed_id, data)
+
+
+@router.delete("/beds/by-ward/{ward_name}")
+def delete_ward(
     ward_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
-    return bed_service.ward_status(db, ward_name)
+    """Admin: delete a ward and all its beds (blocked if any bed is occupied)."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "wards")
+    return bed_service.delete_ward(db, ward_name)
 
 
-@router.post("/beds/assign", response_model=BedOut)
-def assign_bed(
-    data: AssignBedRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:create")),
-):
-    return bed_service.assign_bed(db, data)
-
-
-@router.post("/beds/{bed_id}/release", response_model=BedOut)
-def release_bed(
+@router.delete("/beds/{bed_id}")
+def delete_bed(
     bed_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:create")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
-    return bed_service.release_bed(db, bed_id)
+    """Admin: remove an available bed from inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
+    return bed_service.delete_bed(db, bed_id)

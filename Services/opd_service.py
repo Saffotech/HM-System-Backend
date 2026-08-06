@@ -7,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
-from Models.opd_billing import Appointment, AppointmentStatus, Bed, BillItem, PaymentTransaction
+from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import (
@@ -32,6 +32,7 @@ from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_lab
 from Services import opd_helpers as h
 from Services import appointment_service
 from Services import opd_settings_service
+from Services import patient_service
 from Services.queue_enqueue_service import enqueue_after_payment_with_notifications
 from Services.opd_notification_helpers import notify_opd_payment_pending
 
@@ -39,18 +40,6 @@ from Services.opd_notification_helpers import notify_opd_payment_pending
 get_patient = h.get_patient
 list_doctors_in_department = h.list_doctors_in_department
 display_name = h.display_name
-
-
-def _active_bed_for_patient(db: Session, patient_id: int) -> Optional[Bed]:
-    return (
-        db.query(Bed)
-        .filter(
-            Bed.patient_id == patient_id,
-            Bed.status == "occupied",
-        )
-        .order_by(Bed.admitted_at.desc(), Bed.id.desc())
-        .first()
-    )
 
 
 def _finalize_visit_appointment_and_queue(
@@ -82,24 +71,8 @@ def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
 
 
 def patient_to_model(data: PatientRegisterRequest, patient_uid: str, registered_by: int) -> Patient:
-    return Patient(
-        patient_uid=patient_uid,
-        first_name=data.first_name,
-        last_name=data.last_name,
-        date_of_birth=data.date_of_birth,
-        gender=gender_code_to_label(data.gender),
-        blood_group=data.blood_group,
-        phone=data.phone,
-        email=data.email,
-        address=data.address,
-        state=data.state,
-        aadhaar_number=data.aadhaar_number,
-        emergency_contact_name=data.emergency_contact_name,
-        emergency_contact_phone=data.emergency_contact_phone,
-        allergies=data.allergies,
-        insurance_policy_no=data.insurance_policy_no,
-        registered_by=registered_by,
-    )
+    """Back-compat wrapper — shared Patient Master builder lives in patient_service."""
+    return patient_service.patient_to_model(data, patient_uid, registered_by)
 
 
 def create_visit(
@@ -186,25 +159,16 @@ def register_new_patient(
     amount_received: Optional[float] = None,
     transaction_reference: Optional[str] = None,
 ) -> RegisterSuccessResponse:
-    aadhaar = h.normalize_aadhaar(data.aadhaar_number)
-    data = data.model_copy(update={"aadhaar_number": aadhaar})
-    existing = (
-        db.query(Patient)
-        .filter(
-            Patient.aadhaar_number == data.aadhaar_number,
-            Patient.is_active.is_(True),
-        )
-        .first()
+    # Shared Patient Master only — visit/appointment/bill still owned by OPD below.
+    patient = patient_service.create_patient_record(
+        db,
+        data,
+        registered_by,
+        require_aadhaar=True,
+        commit=False,
     )
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Patient with this Aadhaar already exists. UID: {existing.patient_uid}",
-        )
-
-    patient = patient_to_model(data, h.next_patient_uid(db), registered_by)
-    db.add(patient)
-    db.flush()
+    # Keep aadhaar-normalized payload for appointment/visit fields on `data`.
+    data = data.model_copy(update={"aadhaar_number": patient.aadhaar_number})
 
     # Resolve ONE appointment for the selected slot (reuse same patient+doctor+day).
     apt = appointment_service.resolve_appointment_for_visit(
@@ -301,30 +265,6 @@ def generate_bill(
 ) -> VisitSuccessResponse:
     patient = h.get_patient(db, data.patient_id)
     extra = [{"description": i.description, "qty": i.qty, "unit_price": i.unit_price} for i in data.extra_items]
-    pricing = opd_settings_service.get_pricing(db)
-
-    active_bed = _active_bed_for_patient(db, patient.id)
-    if active_bed:
-        bed_rate = opd_settings_service.resolve_bed_rate(
-            pricing,
-            bed_number=active_bed.bed_number,
-            ward_name=active_bed.ward_name,
-        )
-        bed_days = opd_settings_service.calculate_bed_days(active_bed.admitted_at)
-        bed_label = active_bed.bed_number or active_bed.ward_name or "Assigned Bed"
-        bed_item = {
-            "description": f"Bed Charge ({bed_label})",
-            "qty": bed_days,
-            "unit_price": float(bed_rate),
-        }
-        idx = next(
-            (i for i, row in enumerate(extra) if str(row.get("description", "")).strip().lower().startswith("bed charge (")),
-            -1,
-        )
-        if idx >= 0:
-            extra[idx] = bed_item
-        else:
-            extra.append(bed_item)
 
     billing = VisitBillingFields(
         department_id=data.department_id,
@@ -513,7 +453,6 @@ def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limi
 
 def get_patient_profile(db: Session, patient_id: int) -> dict:
     patient = h.get_patient(db, patient_id)
-    active_bed = _active_bed_for_patient(db, patient_id)
     visits = (
         db.query(OpdVisit)
         .filter(OpdVisit.patient_id == patient_id)
@@ -546,12 +485,6 @@ def get_patient_profile(db: Session, patient_id: int) -> dict:
 
     return {
         "patient": PatientOut.model_validate(patient),
-        "active_bed": {
-            "bed_number": active_bed.bed_number,
-            "ward_name": active_bed.ward_name,
-            "admitted_at": active_bed.admitted_at.isoformat() if active_bed.admitted_at else None,
-            "status": active_bed.status,
-        } if active_bed else None,
         "summary": {
             "total_visits": len(visits),
             "total_billed": round(total_billed, 2),
@@ -1006,16 +939,12 @@ def get_dashboard(db: Session) -> dict:
     patients_total = db.query(Patient).filter(Patient.is_active.is_(True)).count()
     pending_bills = db.query(OpdVisit).filter(OpdVisit.payment_status.in_(["pending", "partial"])).count()
 
-    from Models.opd_billing import Appointment, Bed
-    from Services import bed_service
+    from Models.opd_billing import Appointment
 
     appointments_today = db.query(Appointment).filter(
         Appointment.scheduled_at >= today,
         Appointment.status == "scheduled",
     ).count()
-    beds_free = db.query(Bed).filter(Bed.status == "available").count()
-    beds_total = db.query(Bed).count()
-    ward_bed_stats = bed_service.get_ward_bed_stats(db)
 
     recent = fetch_today_queue(db)
     return {
@@ -1023,9 +952,6 @@ def get_dashboard(db: Session) -> dict:
         "patients_total": patients_total,
         "pending_bills": pending_bills,
         "appointments_today": appointments_today,
-        "beds_free": beds_free,
-        "beds_total": beds_total,
-        "ward_bed_stats": ward_bed_stats,
         "recent_visits": recent.visits[:5],
     }
 

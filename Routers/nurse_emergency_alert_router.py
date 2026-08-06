@@ -17,9 +17,7 @@ from dependencies import (
 
 from Schemas.nurse_emergency_alert_schema import (
     EmergencyAlertCreate,
-    EmergencyAlertAssign,
     EmergencyAlertResolve,
-    EmergencyAlertEscalate
 )
 
 from Services.nurse_emergency_alert_service import (
@@ -27,9 +25,7 @@ from Services.nurse_emergency_alert_service import (
     get_alerts_service,
     get_alert_detail_service,
     get_alert_summary_service,
-    assign_alert_service,
     resolve_alert_service,
-    escalate_alert_service
 )
 
 router = APIRouter(
@@ -159,6 +155,11 @@ def get_alerts(
 )
 def get_alert_summary(
 
+    allocated_only: bool = Query(
+        default=False,
+        description="If true, summary counts only alerts for patients on beds allocated to the current nurse.",
+    ),
+
     db: Session = Depends(
         get_db
     ),
@@ -169,7 +170,9 @@ def get_alert_summary(
 ):
 
     return get_alert_summary_service(
-        db
+        db,
+        allocated_only=allocated_only,
+        allocation_nurse_id=current_user.id if allocated_only else None,
     )
 
 
@@ -241,43 +244,6 @@ def get_alert_detail(
 
 
 # ==========================================================
-# ASSIGN ALERT
-# ==========================================================
-
-@router.put(
-    "/{alert_id}/assign",
-    dependencies=[
-        Depends(
-            PermissionChecker(
-                "emergency_alerts:update"
-            )
-        )
-    ]
-)
-def assign_alert(
-
-    alert_id: int,
-
-    assign_data: EmergencyAlertAssign,
-
-    db: Session = Depends(
-        get_db
-    ),
-
-    current_user=Depends(
-        get_current_user
-    )
-):
-
-    return assign_alert_service(
-        db=db,
-        alert_id=alert_id,
-        assign_data=assign_data,
-        nurse_id=current_user.id
-    )
-
-
-# ==========================================================
 # RESOLVE ALERT
 # ==========================================================
 
@@ -310,42 +276,5 @@ def resolve_alert(
         db=db,
         alert_id=alert_id,
         resolve_data=resolve_data,
-        nurse_id=current_user.id
-    )
-
-
-# ==========================================================
-# ESCALATE ALERT
-# ==========================================================
-
-@router.put(
-    "/{alert_id}/escalate",
-    dependencies=[
-        Depends(
-            PermissionChecker(
-                "emergency_alerts:escalate"
-            )
-        )
-    ]
-)
-def escalate_alert(
-
-    alert_id: int,
-
-    escalate_data: EmergencyAlertEscalate,
-
-    db: Session = Depends(
-        get_db
-    ),
-
-    current_user=Depends(
-        get_current_user
-    )
-):
-
-    return escalate_alert_service(
-        db=db,
-        alert_id=alert_id,
-        escalate_data=escalate_data,
         nurse_id=current_user.id
     )

@@ -192,6 +192,7 @@ class OpdSettingsOut(BaseModel):
     discount_refund: DiscountRefundOut
     appointment_slots: Optional[dict[str, Any]] = None
     payment_modes: PaymentSettingsOut
+    admin_edit: dict[str, bool] = Field(default_factory=dict)
     updated_at: Optional[str] = None
     updated_by: Optional[int] = None
 
@@ -202,5 +203,6 @@ class OpdSettingsUpdate(BaseModel):
     discount_refund: Optional[DiscountRefundUpdate] = None
     appointment_slots: Optional[dict[str, Any]] = None
     payment_modes: Optional[PaymentSettingsUpdate] = None
+    admin_edit: Optional[dict[str, bool]] = None
 
     model_config = {"extra": "ignore"}

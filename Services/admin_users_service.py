@@ -3,6 +3,7 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from Models.department import Department
@@ -10,10 +11,154 @@ from Models.role import Role
 from Models.user import User
 from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
 from Services import audit_service
+from Services.admin_profile_service import create_empty_admin_profile
+from Services.doctor_profile_service import create_empty_doctor_profile
+from Services.lab_technician_profile_service import create_empty_lab_technician_profile
 from Services.notification_service import notify_staff_admin_update_if_inbox
+from Services.nurse_profile_service import create_empty_nurse_profile
+from Services.opd_billing_profile_service import create_empty_opd_billing_profile
+from Services.ipd_profile_service import create_empty_ipd_profile
+from Services.pharmacist_profile_service import create_empty_pharmacist_profile
+from Services.receptionist_profile_service import create_empty_receptionist_profile
 from Services.role_policy import assert_can_assign_role, caller_role_name
+from Services.super_admin_profile_service import create_empty_super_admin_profile
 
 IST = ZoneInfo("Asia/Kolkata")
+
+# Role → User relationship attribute for the 1:1 module profile
+_ROLE_PROFILE_ATTR = {
+    "doctor": "doctor_profile",
+    "nurse": "nurse_profile",
+    "receptionist": "receptionist_profile",
+    "lab_technician": "lab_technician_profile",
+    "opd_billing": "opd_billing_profile",
+    "ipd": "ipd_profile",
+    "pharmacist": "pharmacist_profile",
+    "admin": "admin_profile",
+    "super_admin": "super_admin_profile",
+}
+
+_PROFILE_CREATE = {
+    "doctor": create_empty_doctor_profile,
+    "nurse": create_empty_nurse_profile,
+    "receptionist": create_empty_receptionist_profile,
+    "lab_technician": create_empty_lab_technician_profile,
+    "opd_billing": create_empty_opd_billing_profile,
+    "ipd": create_empty_ipd_profile,
+    "pharmacist": create_empty_pharmacist_profile,
+    "admin": create_empty_admin_profile,
+    "super_admin": create_empty_super_admin_profile,
+}
+
+_ACCOUNT_PROFILE_KEYS = (
+    "employee_id",
+    "joining_date",
+    "shift_name",
+    "shift_start_time",
+    "shift_end_time",
+)
+
+_SHIFT_KEYS = ("shift_name", "shift_start_time", "shift_end_time")
+
+
+def _role_name(user: User) -> Optional[str]:
+    return user.role_obj.name if user.role_obj else None
+
+
+def _supports_shift(role_name: Optional[str]) -> bool:
+    return bool(role_name) and role_name != "super_admin" and role_name in _ROLE_PROFILE_ATTR
+
+
+def _get_profile(user: User, role_name: Optional[str] = None):
+    name = role_name if role_name is not None else _role_name(user)
+    attr = _ROLE_PROFILE_ATTR.get(name or "")
+    if not attr:
+        return None
+    return getattr(user, attr, None)
+
+
+def _ensure_profile(db: Session, user: User, role_name: str):
+    profile = _get_profile(user, role_name)
+    if profile is not None:
+        return profile
+    create_fn = _PROFILE_CREATE.get(role_name)
+    if not create_fn:
+        raise HTTPException(
+            status_code=400,
+            detail=f"No profile table for role '{role_name}'",
+        )
+    profile = create_fn(db, user.id)
+    attr = _ROLE_PROFILE_ATTR[role_name]
+    setattr(user, attr, profile)
+    return profile
+
+
+def _profile_account_fields(user: User) -> dict:
+    role = _role_name(user)
+    profile = _get_profile(user, role)
+    supports = _supports_shift(role)
+    if not profile:
+        return {
+            "employee_id": None,
+            "joining_date": None,
+            "shift_name": None,
+            "shift_start_time": None,
+            "shift_end_time": None,
+            "supports_shift": supports,
+        }
+    return {
+        "employee_id": getattr(profile, "employee_id", None),
+        "joining_date": getattr(profile, "joining_date", None),
+        "shift_name": getattr(profile, "shift_name", None) if supports else None,
+        "shift_start_time": getattr(profile, "shift_start_time", None) if supports else None,
+        "shift_end_time": getattr(profile, "shift_end_time", None) if supports else None,
+        "supports_shift": supports,
+    }
+
+
+def _apply_account_profile_updates(
+    db: Session,
+    user: User,
+    role_name: Optional[str],
+    updates: dict,
+) -> None:
+    account_updates = {k: updates[k] for k in _ACCOUNT_PROFILE_KEYS if k in updates}
+    if not account_updates or not role_name:
+        return
+    if role_name not in _ROLE_PROFILE_ATTR:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot set account profile fields for role '{role_name}'",
+        )
+
+    supports = _supports_shift(role_name)
+    if not supports:
+        for key in _SHIFT_KEYS:
+            account_updates.pop(key, None)
+        if not account_updates:
+            return
+
+    profile = _ensure_profile(db, user, role_name)
+
+    if "employee_id" in account_updates:
+        raw = account_updates["employee_id"]
+        if raw is None or (isinstance(raw, str) and not raw.strip()):
+            profile.employee_id = None
+        else:
+            profile.employee_id = str(raw).strip()
+
+    if "joining_date" in account_updates:
+        profile.joining_date = account_updates["joining_date"]
+
+    if supports:
+        for key in _SHIFT_KEYS:
+            if key not in account_updates:
+                continue
+            raw = account_updates[key]
+            if raw is None or (isinstance(raw, str) and not str(raw).strip()):
+                setattr(profile, key, None)
+            else:
+                setattr(profile, key, str(raw).strip())
 
 
 def _to_list_item(user: User) -> StaffListItem:
@@ -38,6 +183,7 @@ def _to_detail(user: User) -> StaffDetailOut:
         **base.model_dump(),
         phone=user.phone,
         login_count=user.login_count or 0,
+        **_profile_account_fields(user),
     )
 
 
@@ -47,6 +193,14 @@ def _base_query(db: Session):
         .options(
             joinedload(User.role_obj),
             joinedload(User.department),
+            joinedload(User.doctor_profile),
+            joinedload(User.nurse_profile),
+            joinedload(User.receptionist_profile),
+            joinedload(User.lab_technician_profile),
+            joinedload(User.opd_billing_profile),
+            joinedload(User.pharmacist_profile),
+            joinedload(User.admin_profile),
+            joinedload(User.super_admin_profile),
         )
         .filter(User.deleted_at.is_(None))
     )
@@ -201,7 +355,20 @@ def update_staff(
         if field in updates:
             setattr(user, field, updates[field])
 
-    db.commit()
+    # Ensure role_obj is current for profile resolution after role change
+    if "role_id" in updates and effective_role is not None:
+        user.role_obj = effective_role
+
+    _apply_account_profile_updates(db, user, effective_role_name, updates)
+
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Employee ID is already in use for this role",
+        ) from None
 
     refreshed = _get_staff_or_404(db, user_id)
     if "role_id" in updates:
@@ -211,6 +378,14 @@ def update_staff(
             staff_user=refreshed,
             title="Role Updated",
             message=f"Your role was changed to {new_role} by an administrator.",
+            admin_user=actor,
+        )
+    elif any(k in updates for k in _ACCOUNT_PROFILE_KEYS):
+        notify_staff_admin_update_if_inbox(
+            db,
+            staff_user=refreshed,
+            title="Account Updated",
+            message="Your account details were updated by an administrator.",
             admin_user=actor,
         )
 
