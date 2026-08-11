@@ -18,10 +18,13 @@ Doctor views GET /queue/today (paid patients in queue only)
 
 ## Permissions
 
+Controlled from **Admin → Settings → Receptionist** (role `receptionist`):
+
 ```
-patients:view
-opd:view
+receptionist:view_queues
 receptionist:view_doctor_schedule
+receptionist_profile:view | update | upload_image | delete_image
+notifications:view | update
 ```
 
 ## What receptionist sees
@@ -37,11 +40,15 @@ Unpaid patients appear in receptionist lists but are **not** in the doctor's liv
 
 | Method | Path | Permission |
 |--------|------|------------|
-| GET | `/receptionist/dashboard` | `opd:view` |
-| GET | `/receptionist/today-queue` | `opd:view` |
-| GET | `/receptionist/doctor-queue/{doctor_id}` | `opd:view` |
-| GET | `/receptionist/queue-history` | `opd:view` |
+| GET | `/receptionist/dashboard` | `receptionist:view_queues` |
+| GET | `/receptionist/today-queue` | `receptionist:view_queues` |
+| GET | `/receptionist/doctor-queue/{doctor_id}` | `receptionist:view_queues` |
+| GET | `/receptionist/queue-history` | `receptionist:view_queues` |
 | GET | `/receptionist/doctors/schedule` | `receptionist:view_doctor_schedule` |
+| GET | `/receptionist/profile` | `receptionist_profile:view` |
+| PUT | `/receptionist/profile` | `receptionist_profile:update` |
+| POST | `/receptionist/profile/image` | `receptionist_profile:upload_image` |
+| DELETE | `/receptionist/profile/image` | `receptionist_profile:delete_image` |
 
 ### Payment filter (today-queue, doctor-queue, queue-history)
 

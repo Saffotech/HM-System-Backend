@@ -8,7 +8,10 @@ ADMIN_REGISTERABLE_ROLES = frozenset({
     "doctor",
     "nurse",
     "opd_billing",
+    "ipd",
     "pharmacist",
+    "receptionist",
+    "lab_technician",
 })
 
 

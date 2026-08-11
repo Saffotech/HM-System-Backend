@@ -12,8 +12,10 @@ from Schemas.opd_schema import (
     AppointmentCreate,
     AppointmentOut,
     AppointmentUpdate,
-    AssignBedRequest,
+    BedBulkCreate,
+    BedCreate,
     BedOut,
+    BedUpdate,
     BillPreviewRequest,
     BillPreviewResponse,
     BillUpdateRequest,
@@ -27,8 +29,9 @@ from Schemas.opd_schema import (
     VisitSuccessResponse,
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate
+from Schemas.opd_settings_schema import OpdSettingsOut
 from dependencies import PermissionChecker, get_current_user
-from Services import appointment_service, bed_service, opd_service
+from Services import appointment_service, bed_service, opd_service, opd_settings_service
 from Utils.deprecation import mark_deprecated
 
 router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
@@ -43,6 +46,16 @@ def dashboard(
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
     return opd_service.get_dashboard(db)
+
+
+@router.get("/settings", response_model=OpdSettingsOut)
+def get_opd_settings(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("opd:view")),
+):
+    """Read-only OPD operational settings for Billing Counter."""
+    return opd_settings_service.get_settings(db)
 
 
 # ── Patients ──────────────────────────────────────────────────
@@ -107,6 +120,9 @@ def delete_patient(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:delete")),
 ):
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="patient"
+    )
     return opd_service.delete_patient(db, patient_id)
 
 
@@ -181,6 +197,8 @@ def register_and_pay(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:create")),
 ):
+    if not pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=payment_mode)
     return opd_service.register_new_patient(
         db,
         data,
@@ -203,6 +221,8 @@ def create_visit_for_patient(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:create")),
 ):
+    if not pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=payment_mode)
     return opd_service.create_visit_for_existing_patient(
         db,
         data,
@@ -221,6 +241,12 @@ def generate_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:create")),
 ):
+    if data.discount_percent and data.discount_percent > 0:
+        opd_settings_service.validate_discount(
+            db, current_user=current_user, discount_percent=data.discount_percent,
+        )
+    if not data.pay_later:
+        opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
     return opd_service.generate_bill(db, data, current_user.id)
 
 
@@ -258,6 +284,7 @@ def list_bills(
         to_date=to_date,
         page=page,
         limit=limit,
+        registered_by=current_user.id,
     )
 
 
@@ -269,6 +296,10 @@ def update_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:update")),
 ):
+    if data.discount_percent is not None and data.discount_percent > 0:
+        opd_settings_service.validate_discount(
+            db, current_user=current_user, discount_percent=data.discount_percent,
+        )
     return opd_service.update_bill(db, visit_id, data)
 
 
@@ -279,7 +310,10 @@ def delete_bill(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:delete")),
 ):
-    return opd_service.delete_bill(db, visit_id)
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="bill"
+    )
+    return opd_service.delete_bill(db, visit_id, current_user=current_user)
 
 
 @router.post("/visit/{visit_id}/pay")
@@ -290,6 +324,7 @@ def collect_payment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:update")),
 ):
+    opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
     return opd_service.collect_payment(db, visit_id, data, current_user.id)
 
 
@@ -398,6 +433,21 @@ def list_appointments(
     )
 
 
+@router.post(
+    "/appointments/{appointment_id}/ensure-bill",
+    status_code=201,
+    response_model=VisitSuccessResponse,
+)
+def ensure_bill_for_appointment(
+    appointment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("billing:create")),
+):
+    """Create (or return) the unpaid OPD bill linked to an appointment."""
+    return opd_service.ensure_bill_for_appointment(db, appointment_id, current_user.id)
+
+
 @router.patch("/appointments/{appointment_id}", response_model=AppointmentOut)
 def update_appointment(
     appointment_id: int,
@@ -426,6 +476,9 @@ def delete_appointment(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
+    opd_settings_service.assert_delete_allowed(
+        db, current_user=current_user, kind="appointment"
+    )
     return appointment_service.delete_appointment(db, appointment_id)
 
 
@@ -441,7 +494,7 @@ def doctor_slots(
     return appointment_service.doctor_availability(db, doctor_id, department_id, date)
 
 
-# ── Beds ──────────────────────────────────────────────────────
+# ── Beds (inventory only — assign / release / ward occupancy owned by IPD) ─
 
 @router.get("/beds")
 def list_beds(
@@ -450,36 +503,82 @@ def list_beds(
     search: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
+    """Admin Settings → OPD: bed inventory list (not IPD occupancy workflows)."""
     return bed_service.list_beds(db, ward=ward, status=status, search=search)
 
 
-@router.get("/beds/ward/{ward_name}")
-def ward_beds(
+@router.get("/beds/inventory-summary")
+def beds_inventory_summary(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin Settings → OPD: ward bed counts."""
+    return bed_service.ward_inventory_summary(db)
+
+
+@router.post("/beds", response_model=BedOut, status_code=201)
+def create_bed(
+    data: BedCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: add one bed to inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(
+        db, current_user, "bed_inventory"
+    )
+    return bed_service.create_bed(db, data)
+
+
+@router.post("/beds/bulk", status_code=201)
+def create_beds_bulk(
+    data: BedBulkCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: add multiple beds to a ward (e.g. G-105..G-110)."""
+    opd_settings_service.assert_admin_may_edit_bed_section(
+        db, current_user, "bed_inventory"
+    )
+    return bed_service.create_beds_bulk(db, data)
+
+
+@router.put("/beds/{bed_id}", response_model=BedOut)
+def update_bed(
+    bed_id: int,
+    data: BedUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: rename / move an available bed."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
+    return bed_service.update_bed(db, bed_id, data)
+
+
+@router.delete("/beds/by-ward/{ward_name}")
+def delete_ward(
     ward_name: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:view")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
-    return bed_service.ward_status(db, ward_name)
+    """Admin: delete a ward and all its beds (blocked if any bed is occupied)."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "wards")
+    return bed_service.delete_ward(db, ward_name)
 
 
-@router.post("/beds/assign", response_model=BedOut)
-def assign_bed(
-    data: AssignBedRequest,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:create")),
-):
-    return bed_service.assign_bed(db, data)
-
-
-@router.post("/beds/{bed_id}/release", response_model=BedOut)
-def release_bed(
+@router.delete("/beds/{bed_id}")
+def delete_bed(
     bed_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("opd:create")),
+    _: bool = Depends(PermissionChecker("users:list")),
 ):
-    return bed_service.release_bed(db, bed_id)
+    """Admin: remove an available bed from inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
+    return bed_service.delete_bed(db, bed_id)

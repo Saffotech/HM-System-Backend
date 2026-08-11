@@ -172,6 +172,11 @@ def search_vitals(
         le=100
     ),
 
+    allocated_only: bool = Query(
+        False,
+        description="If true, only vitals for patients on beds allocated to the current nurse.",
+    ),
+
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
@@ -201,6 +206,9 @@ def search_vitals(
         from_date=from_date,
         to_date=to_date,
 
+        allocated_only=allocated_only,
+        nurse_id=current_user.id if allocated_only else None,
+
         page=page,
         page_size=page_size
     )
@@ -229,6 +237,11 @@ def get_all_vitals(
         description="Records Per Page"
     ),
 
+    allocated_only: bool = Query(
+        False,
+        description="If true, only vitals for patients on beds allocated to the current nurse.",
+    ),
+
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
@@ -245,7 +258,9 @@ def get_all_vitals(
     return get_all_vitals_service(
         db=db,
         page=page,
-        page_size=page_size
+        page_size=page_size,
+        allocated_only=allocated_only,
+        nurse_id=current_user.id if allocated_only else None,
     )
 
 

@@ -19,6 +19,7 @@ from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
+from Services import opd_settings_service as opd_settings_svc
 from Services.queue_helpers import appointment_status_value
 
 LIST_FILTERS = frozenset({"all", "scheduled", "pending", "completed", "cancelled"})
@@ -686,9 +687,29 @@ def create_appointment(db: Session, data: AppointmentCreate, created_by: int) ->
         notes=data.notes,
         appointment_type=data.appointment_type,
     )
+    # If a same-day orphan visit already exists (bill-before-book race), attach it now.
+    visit = _visit_for_appointment(db, apt)
+    if visit is None:
+        orphan = (
+            db.query(OpdVisit)
+            .filter(
+                OpdVisit.patient_id == apt.patient_id,
+                OpdVisit.doctor_id == apt.doctor_id,
+                OpdVisit.department_id == apt.department_id,
+                OpdVisit.appointment_id.is_(None),
+                OpdVisit.status != "cancelled",
+            )
+            .order_by(OpdVisit.id.desc())
+            .first()
+        )
+        if orphan is not None and apt.scheduled_at is not None and orphan.visit_date is not None:
+            if _to_ist(orphan.visit_date).date() == _to_ist(apt.scheduled_at).date():
+                orphan.appointment_id = apt.id
+                visit = orphan
+                db.flush()
     db.commit()
     db.refresh(apt)
-    return _appointment_out(db, apt, _visit_for_appointment(db, apt))
+    return _appointment_out(db, apt, visit or _visit_for_appointment(db, apt))
 
 
 def create_walk_in_appointment(
@@ -860,6 +881,12 @@ def doctor_availability(db: Session, doctor_id: int, department_id: int, date_st
     day = datetime.fromisoformat(date_str).replace(tzinfo=h.IST)
     day_end = day.replace(hour=23, minute=59, second=59)
 
+    config = opd_settings_svc.resolve_doctor_slot_settings(db, doctor_id)
+    weekday = opd_settings_svc.slot_weekday_key(day)
+    working_days = {str(d).lower()[:3] for d in (config.get("working_days") or [])}
+    if weekday not in working_days:
+        return {"doctor_id": doctor_id, "date": date_str, "slots": []}
+
     booked = (
         db.query(Appointment)
         .filter(
@@ -888,13 +915,11 @@ def doctor_availability(db: Session, doctor_id: int, department_id: int, date_st
         return False
 
     slots = []
-    for hour in range(9, 17):
-        for minute in (0, 30):
-            slot_time = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
-            taken = _slot_taken(slot_time)
-            slots.append({
-                "time": slot_time.strftime("%H:%M"),
-                "status": "booked" if taken else "available",
-            })
+    for slot_time in opd_settings_svc.iter_slot_datetimes(day, config):
+        taken = _slot_taken(slot_time)
+        slots.append({
+            "time": slot_time.strftime("%H:%M"),
+            "status": "booked" if taken else "available",
+        })
 
     return {"doctor_id": doctor_id, "date": date_str, "slots": slots}

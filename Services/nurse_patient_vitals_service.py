@@ -2,7 +2,7 @@ from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 from Models.user import User
 from Models.opd_billing import Appointment, Bed
@@ -18,6 +18,50 @@ from Services.nurse_emergency_alert_triggers import process_vital_alerts
 
 IST = ZoneInfo("Asia/Kolkata")
 
+
+def _paginate_vitals(
+    db: Session,
+    query,
+    *,
+    page: int,
+    page_size: int,
+    latest_per_patient: bool,
+):
+    """
+    Registry lists use latest_per_patient=True (one row per patient).
+    Patient timeline / filtered history keep latest_per_patient=False (all rows).
+    Updates still append new recordings — detail payload includes full history.
+    """
+    if not latest_per_patient:
+        vitals = (
+            query.order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        enriched = _enrich_vitals_batch(db, vitals)
+        return [_serialize_vital(vital, db) for vital in enriched]
+
+    latest_subq = (
+        query.enable_eagerloads(False)
+        .order_by(None)
+        .with_entities(
+            PatientVitals.patient_id.label("patient_id"),
+            func.max(PatientVitals.id).label("max_id"),
+        )
+        .group_by(PatientVitals.patient_id)
+        .subquery()
+    )
+    vitals = (
+        _vital_query(db)
+        .join(latest_subq, PatientVitals.id == latest_subq.c.max_id)
+        .order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    enriched = _enrich_vitals_batch(db, vitals)
+    return [_serialize_vital(vital, db) for vital in enriched]
 
 def _user_display_name(user: User | None) -> str | None:
     if not user:
@@ -474,25 +518,38 @@ def get_vital_by_id_service(
 def get_all_vitals_service(
     db: Session,
     page: int = 1,
-    page_size: int = 20
+    page_size: int = 20,
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
 ):
 
-    vitals = (
-        _vital_query(db)
-        .order_by(
-            PatientVitals.recorded_at.desc()
-        )
-        .offset(
-            (page - 1) * page_size
-        )
-        .limit(
-            page_size
-        )
-        .all()
-    )
+    query = _vital_query(db)
 
-    enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital, db) for vital in enriched]
+    if allocated_only:
+        from Services.nurse_shift_bed_allocation_service import (
+            get_allocated_patient_ids_for_nurse,
+        )
+
+        patient_ids = get_allocated_patient_ids_for_nurse(
+            db,
+            nurse_id,
+            assignment_date=assignment_date,
+            shift_name=shift_name,
+        ) if nurse_id else []
+        if not patient_ids:
+            query = query.filter(PatientVitals.patient_id == -1)
+        else:
+            query = query.filter(PatientVitals.patient_id.in_(patient_ids))
+
+    return _paginate_vitals(
+        db,
+        query,
+        page=page,
+        page_size=page_size,
+        latest_per_patient=True,
+    )
 
 
 # ==========================================================
@@ -514,6 +571,11 @@ def search_vitals_service(
 
     from_date: date | None = None,
     to_date: date | None = None,
+
+    allocated_only: bool = False,
+    nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
 
     page: int = 1,
     page_size: int = 20
@@ -578,19 +640,28 @@ def search_vitals_service(
             (to_date + timedelta(days=1))
         )
 
-    vitals = (
-        query
-        .order_by(
-            PatientVitals.recorded_at.desc()
+    if allocated_only:
+        from Services.nurse_shift_bed_allocation_service import (
+            get_allocated_patient_ids_for_nurse,
         )
-        .offset(
-            (page - 1) * page_size
-        )
-        .limit(
-            page_size
-        )
-        .all()
-    )
 
-    enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital, db) for vital in enriched]
+        patient_ids = get_allocated_patient_ids_for_nurse(
+            db,
+            nurse_id,
+            assignment_date=assignment_date,
+            shift_name=shift_name,
+        ) if nurse_id else []
+        if not patient_ids:
+            query = query.filter(PatientVitals.patient_id == -1)
+        else:
+            query = query.filter(PatientVitals.patient_id.in_(patient_ids))
+
+    # Patient/appointment history views need every snapshot; registry wants one row each.
+    latest_per_patient = patient_id is None and appointment_id is None
+    return _paginate_vitals(
+        db,
+        query,
+        page=page,
+        page_size=page_size,
+        latest_per_patient=latest_per_patient,
+    )

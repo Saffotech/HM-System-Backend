@@ -13,8 +13,8 @@ class Role(str, enum.Enum):
     RECEPTIONIST = "receptionist"
     PHARMACIST   = "pharmacist"    
 
-# Token expiry
-ACCESS_TOKEN_EXPIRE_MINUTES = 30
+# Token expiry (defaults; runtime values come from .env via jwt_token.py)
+ACCESS_TOKEN_EXPIRE_MINUTES = 5
 REFRESH_TOKEN_EXPIRE_DAYS   = 7
 
 # Pagination

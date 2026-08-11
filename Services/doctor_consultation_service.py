@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_prescriptions import Prescription
@@ -188,6 +188,24 @@ def save_consultation_service(
         persist(db)
         db.refresh(queue)
         db.refresh(appointment)
+
+        if payload.prescription is not None and prescription_out is not None:
+            from Services.pharmacy_notification_helpers import (
+                notify_pharmacists_prescription_created,
+            )
+
+            rx_id = prescription_out.get("id")
+            if rx_id is not None:
+                notified_rx = (
+                    db.query(Prescription)
+                    .options(joinedload(Prescription.items))
+                    .filter(Prescription.id == rx_id)
+                    .first()
+                )
+                if notified_rx is not None:
+                    notify_pharmacists_prescription_created(
+                        db, notified_rx, doctor_id=doctor_id
+                    )
 
         appointment_dict = h.appointment_to_dict(db, appointment)
         return {

@@ -23,7 +23,9 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
     if role.name == "doctor" and not data.department_id:
         raise HTTPException(status_code=400, detail="department_id required for doctor")
 
-    # Department is only assigned to doctors; clear for all other roles
+    # Department is REQUIRED for doctors only.
+    # Nurses (and all other non-doctor roles) never store department_id —
+    # bed allocation assigns daily nurse responsibility, not department.
     department_id = data.department_id if role.name == "doctor" else None
 
     new_user = User(

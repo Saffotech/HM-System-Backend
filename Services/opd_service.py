@@ -1,4 +1,5 @@
 """OPD & billing — patients, visits, bills, payments, dashboard."""
+from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import HTTPException
@@ -6,7 +7,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
-from Models.opd_billing import Appointment, BillItem, PaymentTransaction
+from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient
 from Models.user import User
 from Schemas.opd_schema import (
@@ -30,7 +31,10 @@ from Schemas.opd_schema import (
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
 from Services import opd_helpers as h
 from Services import appointment_service
-from Services.queue_enqueue_service import enqueue_after_payment_if_eligible
+from Services import opd_settings_service
+from Services import patient_service
+from Services.queue_enqueue_service import enqueue_after_payment_with_notifications
+from Services.opd_notification_helpers import notify_opd_payment_pending
 
 # Re-export helpers used by router
 get_patient = h.get_patient
@@ -48,7 +52,9 @@ def _finalize_visit_appointment_and_queue(
     if apt is not None:
         visit.appointment_id = apt.id
         db.flush()
-    enqueue_after_payment_if_eligible(db, visit, handled_by=handled_by)
+    enqueue_after_payment_with_notifications(db, visit, handled_by=handled_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=handled_by)
 
 
 def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
@@ -65,24 +71,8 @@ def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
 
 
 def patient_to_model(data: PatientRegisterRequest, patient_uid: str, registered_by: int) -> Patient:
-    return Patient(
-        patient_uid=patient_uid,
-        first_name=data.first_name,
-        last_name=data.last_name,
-        date_of_birth=data.date_of_birth,
-        gender=gender_code_to_label(data.gender),
-        blood_group=data.blood_group,
-        phone=data.phone,
-        email=data.email,
-        address=data.address,
-        state=data.state,
-        aadhaar_number=data.aadhaar_number,
-        emergency_contact_name=data.emergency_contact_name,
-        emergency_contact_phone=data.emergency_contact_phone,
-        allergies=data.allergies,
-        insurance_policy_no=data.insurance_policy_no,
-        registered_by=registered_by,
-    )
+    """Back-compat wrapper — shared Patient Master builder lives in patient_service."""
+    return patient_service.patient_to_model(data, patient_uid, registered_by)
 
 
 def create_visit(
@@ -100,12 +90,22 @@ def create_visit(
     h.get_department(db, billing.department_id)
     doctor = h.get_doctor_in_department(db, billing.doctor_id, billing.department_id)
 
-    subtotal = billing.registration_fee + billing.consultation_fee
+    # Admin Pricing & tax (opd_settings.extra.pricing) is the source of truth.
+    pricing = opd_settings_service.get_pricing(db)
+    registration_fee, consultation_fee, gst_percent = opd_settings_service.resolve_visit_fees(
+        pricing,
+        doctor_id=billing.doctor_id,
+        department_id=billing.department_id,
+        registration_fee=billing.registration_fee,
+    )
+    extra_items = opd_settings_service.validate_extra_bill_items(pricing, extra_items)
+
+    subtotal = registration_fee + consultation_fee
     if extra_items:
         for item in extra_items:
             subtotal += round(item["qty"] * item["unit_price"], 2)
 
-    subtotal, gst_amount, grand_total = h.bill_totals_from_subtotal(subtotal, billing.gst_percent)
+    subtotal, gst_amount, grand_total = h.bill_totals_from_subtotal(subtotal, gst_percent)
     bill_number, token_number = h.next_visit_numbers(db)
 
     if pay_later:
@@ -123,10 +123,10 @@ def create_visit(
         patient_id=patient.id,
         department_id=billing.department_id,
         doctor_id=billing.doctor_id,
-        registration_fee=billing.registration_fee,
-        consultation_fee=billing.consultation_fee,
+        registration_fee=registration_fee,
+        consultation_fee=consultation_fee,
         subtotal=subtotal,
-        gst_percent=billing.gst_percent,
+        gst_percent=gst_percent,
         gst_amount=gst_amount,
         grand_total=grand_total,
         payment_status=status,
@@ -159,25 +159,16 @@ def register_new_patient(
     amount_received: Optional[float] = None,
     transaction_reference: Optional[str] = None,
 ) -> RegisterSuccessResponse:
-    aadhaar = h.normalize_aadhaar(data.aadhaar_number)
-    data = data.model_copy(update={"aadhaar_number": aadhaar})
-    existing = (
-        db.query(Patient)
-        .filter(
-            Patient.aadhaar_number == data.aadhaar_number,
-            Patient.is_active.is_(True),
-        )
-        .first()
+    # Shared Patient Master only — visit/appointment/bill still owned by OPD below.
+    patient = patient_service.create_patient_record(
+        db,
+        data,
+        registered_by,
+        require_aadhaar=True,
+        commit=False,
     )
-    if existing:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Patient with this Aadhaar already exists. UID: {existing.patient_uid}",
-        )
-
-    patient = patient_to_model(data, h.next_patient_uid(db), registered_by)
-    db.add(patient)
-    db.flush()
+    # Keep aadhaar-normalized payload for appointment/visit fields on `data`.
+    data = data.model_copy(update={"aadhaar_number": patient.aadhaar_number})
 
     # Resolve ONE appointment for the selected slot (reuse same patient+doctor+day).
     apt = appointment_service.resolve_appointment_for_visit(
@@ -290,9 +281,31 @@ def generate_bill(
         extra_items=extra or None,
         transaction_reference=data.transaction_reference,
     )
-    # Link to an existing same-day appointment when one already exists (no auto walk-in create).
-    apt = appointment_service.link_orphan_visit_to_appointment(db, visit)
-    enqueue_after_payment_if_eligible(db, visit, handled_by=registered_by)
+    # Prefer explicit appointment link (book-then-bill); else same-day orphan match.
+    # If still missing, resolve/create the canonical walk-in appointment using the
+    # existing appointment service (includes same-day de-dup + validation rules).
+    apt = None
+    if data.appointment_id:
+        apt = db.query(Appointment).filter(Appointment.id == data.appointment_id).first()
+        if apt is None:
+            raise HTTPException(status_code=404, detail="Appointment not found")
+        visit.appointment_id = apt.id
+        db.flush()
+    else:
+        apt = appointment_service.link_orphan_visit_to_appointment(db, visit)
+        if apt is None:
+            apt = appointment_service.create_walk_in_appointment(
+                db,
+                patient_id=patient.id,
+                doctor_id=visit.doctor_id,
+                department_id=visit.department_id,
+                created_by=registered_by,
+            )
+            visit.appointment_id = apt.id
+            db.flush()
+    enqueue_after_payment_with_notifications(db, visit, handled_by=registered_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=registered_by)
     db.commit()
     db.refresh(visit)
 
@@ -309,6 +322,118 @@ def generate_bill(
         appointment_uid=apt.appointment_uid if apt else None,
         scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at) if apt else None,
     )
+
+
+def ensure_bill_for_appointment(
+    db: Session, appointment_id: int, registered_by: int
+) -> VisitSuccessResponse:
+    """
+    Ensure an OPD bill (visit) exists for an appointment.
+
+    Used when Book Appointment pay-later left an appointment without a visit,
+    or Collect Payment is opened for a pending/unpaid appointment with no_bill.
+    """
+    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    if not apt:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+    if apt.status and str(getattr(apt.status, "value", apt.status)).lower() == "cancelled":
+        raise HTTPException(status_code=400, detail="Cannot bill a cancelled appointment")
+
+    existing = appointment_service._visit_for_appointment(db, apt)
+    if existing is not None:
+        if existing.appointment_id != apt.id:
+            existing.appointment_id = apt.id
+            db.flush()
+        patient = h.get_patient(db, apt.patient_id)
+        db.commit()
+        db.refresh(existing)
+        return VisitSuccessResponse(
+            message="Bill already exists for appointment",
+            patient_id=patient.id,
+            patient_uid=patient.patient_uid,
+            bill_number=existing.bill_number,
+            token_number=existing.token_number,
+            visit_id=existing.id,
+            grand_total=existing.grand_total,
+            payment_status=existing.payment_status,
+            appointment_id=apt.id,
+            appointment_uid=apt.appointment_uid,
+            scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at),
+        )
+
+    patient = h.get_patient(db, apt.patient_id)
+    pricing = opd_settings_service.get_pricing(db)
+    consultation_fee = opd_settings_service.resolve_consultation_fee(
+        pricing,
+        doctor_id=apt.doctor_id,
+        department_id=apt.department_id,
+    )
+    billing = VisitBillingFields(
+        department_id=apt.department_id,
+        doctor_id=apt.doctor_id,
+        registration_fee=0.0,
+        consultation_fee=consultation_fee,
+        gst_percent=float(pricing.gst_percent),
+    )
+    visit = create_visit(
+        db,
+        patient,
+        billing,
+        registered_by,
+        pay_later=True,
+        payment_mode="cash",
+        amount_received=None,
+    )
+    visit.appointment_id = apt.id
+    if apt.scheduled_at is not None:
+        # Align visit day with appointment day for Billing "Today" filters.
+        visit.visit_date = apt.scheduled_at
+    db.flush()
+    notify_opd_payment_pending(db, visit, created_by=registered_by)
+    db.commit()
+    db.refresh(visit)
+
+    return VisitSuccessResponse(
+        message="Bill created for appointment",
+        patient_id=patient.id,
+        patient_uid=patient.patient_uid,
+        bill_number=visit.bill_number,
+        token_number=visit.token_number,
+        visit_id=visit.id,
+        grand_total=visit.grand_total,
+        payment_status=visit.payment_status,
+        appointment_id=apt.id,
+        appointment_uid=apt.appointment_uid,
+        scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at),
+    )
+
+
+def ensure_pending_appointment_bills(db: Session, registered_by: int) -> int:
+    """
+    Create missing unpaid bills for today's active appointments.
+
+    Keeps Billing "Today" / Collect Payment in sync with Appointments that were
+    booked without an OpdVisit (pay-later / link race).
+    """
+    start = h.today_start_ist()
+    end = start + timedelta(days=1)
+    apts = (
+        db.query(Appointment)
+        .filter(
+            Appointment.scheduled_at >= start,
+            Appointment.scheduled_at < end,
+            Appointment.status == AppointmentStatus.scheduled,
+        )
+        .order_by(Appointment.id.asc())
+        .all()
+    )
+    created = 0
+    for apt in apts:
+        if appointment_service._visit_for_appointment(db, apt) is not None:
+            continue
+        ensure_bill_for_appointment(db, apt.id, registered_by)
+        created += 1
+    return created
 
 
 def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limit: int = 20) -> dict:
@@ -496,7 +621,13 @@ def list_bills(
     to_date=None,
     page: int = 1,
     limit: int = 20,
+    registered_by: Optional[int] = None,
 ) -> dict:
+    # Self-heal: today's unpaid appointments without visits get pending bills
+    # so Billing list + Collect Payment stay in sync with Appointments.
+    if registered_by is not None:
+        ensure_pending_appointment_bills(db, registered_by)
+
     q = _bills_query(db, status, search, today_only, from_date, to_date)
     all_rows = q.all()
     total_billed = sum(v.grand_total for v, _ in all_rows)
@@ -548,7 +679,9 @@ def collect_payment(db: Session, visit_id: int, data: CollectPayment, recorded_b
     h.record_payment(db, visit, data.paid_amount, data.payment_mode, recorded_by, data.transaction_reference)
     # Link orphan visit → same-day appointment so receptionist + queue see paid status
     appointment_service.link_orphan_visit_to_appointment(db, visit)
-    queue = enqueue_after_payment_if_eligible(db, visit, handled_by=recorded_by)
+    queue = enqueue_after_payment_with_notifications(db, visit, handled_by=recorded_by)
+    if visit.payment_status in ("pending", "partial"):
+        notify_opd_payment_pending(db, visit, created_by=recorded_by)
     db.commit()
     db.refresh(visit)
 
@@ -579,6 +712,7 @@ def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
 
     updates = data.model_dump(exclude_unset=True)
     extra_items_raw = updates.pop("extra_items", "__unset__")
+    pricing = opd_settings_service.get_pricing(db)
 
     new_dept = updates.get("department_id", visit.department_id)
     new_doc = updates.get("doctor_id", visit.doctor_id)
@@ -587,40 +721,78 @@ def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
         visit.department_id = new_dept
         visit.doctor_id = new_doc
 
-    for field in ("registration_fee", "consultation_fee", "gst_percent"):
-        if field in updates:
-            setattr(visit, field, updates[field])
-
-    fees_or_doctor_changed = any(
-        k in updates for k in ("registration_fee", "consultation_fee", "gst_percent", "department_id", "doctor_id")
+    # Apply Admin pricing as source of truth (unless manual overrides are allowed).
+    prev_reg = float(visit.registration_fee or 0)
+    prev_consult = float(visit.consultation_fee or 0)
+    prev_gst = float(visit.gst_percent or 0)
+    client_reg = updates.get("registration_fee", prev_reg)
+    registration_fee, consultation_fee, gst_percent = opd_settings_service.resolve_visit_fees(
+        pricing,
+        doctor_id=visit.doctor_id,
+        department_id=visit.department_id,
+        registration_fee=client_reg,
     )
+    doctor_or_dept_changed = "department_id" in updates or "doctor_id" in updates
+    if pricing.allow_manual_price_entry:
+        if "registration_fee" in updates:
+            registration_fee = float(updates["registration_fee"])
+        elif not doctor_or_dept_changed:
+            registration_fee = prev_reg
 
-    if extra_items_raw != "__unset__" or fees_or_doctor_changed:
-        db.query(BillItem).filter(BillItem.visit_id == visit_id).delete()
-        doctor = db.query(User).filter(User.id == visit.doctor_id).first()
-        h.save_default_bill_items(db, visit, doctor)
-        if extra_items_raw != "__unset__" and extra_items_raw:
-            extra_subtotal = h.save_extra_bill_items(
-                db,
-                visit.id,
-                [
-                    {
-                        "description": item["description"],
-                        "qty": item["qty"],
-                        "unit_price": item["unit_price"],
-                    }
-                    for item in extra_items_raw
-                ],
-            )
+        if "consultation_fee" in updates:
+            consultation_fee = float(updates["consultation_fee"])
+        elif not doctor_or_dept_changed:
+            consultation_fee = prev_consult
+
+        if "gst_percent" in updates:
+            gst_percent = float(updates["gst_percent"])
+        elif not doctor_or_dept_changed:
+            gst_percent = prev_gst
         else:
-            extra_subtotal = 0.0
-    else:
-        items = h.list_bill_items(db, visit_id)
-        extra_subtotal = sum(
-            i.amount
-            for i in items
-            if i.description != "Registration Fee" and "Consultation" not in i.description
+            gst_percent = float(pricing.gst_percent)
+
+    visit.registration_fee = registration_fee
+    visit.consultation_fee = consultation_fee
+    visit.gst_percent = gst_percent
+
+    # Capture existing extra lines before rebuild (when client did not send extras).
+    preserved_extras: List[dict] = []
+    if extra_items_raw == "__unset__":
+        existing_items = h.list_bill_items(db, visit_id)
+        for item in existing_items:
+            if item.description == "Registration Fee" or "Consultation" in (item.description or ""):
+                continue
+            preserved_extras.append(
+                {
+                    "description": item.description,
+                    "qty": item.qty,
+                    "unit_price": float(item.unit_price),
+                }
+            )
+
+    db.query(BillItem).filter(BillItem.visit_id == visit_id).delete()
+    doctor = db.query(User).filter(User.id == visit.doctor_id).first()
+    h.save_default_bill_items(db, visit, doctor)
+
+    if extra_items_raw != "__unset__":
+        extras_source = [
+            {
+                "description": item["description"],
+                "qty": item["qty"],
+                "unit_price": item["unit_price"],
+            }
+            for item in (extra_items_raw or [])
+        ]
+        validated = opd_settings_service.validate_extra_bill_items(
+            pricing, extras_source, strict=True
         )
+    else:
+        validated = opd_settings_service.validate_extra_bill_items(
+            pricing, preserved_extras, strict=False
+        )
+    extra_subtotal = (
+        h.save_extra_bill_items(db, visit.id, validated) if validated else 0.0
+    )
 
     subtotal = visit.registration_fee + visit.consultation_fee + extra_subtotal
     subtotal, gst_amount, grand_total = h.bill_totals_from_subtotal(subtotal, visit.gst_percent)
@@ -652,16 +824,23 @@ def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
     }
 
 
-def delete_bill(db: Session, visit_id: int) -> dict:
+def delete_bill(db: Session, visit_id: int, *, current_user: Optional[User] = None) -> dict:
     visit, _, _, _ = h.get_visit_with_relations(db, visit_id)
 
     if visit.status == "cancelled":
         raise HTTPException(status_code=400, detail="Bill already cancelled")
+
     if (visit.paid_amount or 0) > 0:
-        raise HTTPException(
-            status_code=400,
-            detail="Cannot cancel bill with payments recorded",
-        )
+        if current_user is not None:
+            from Services import opd_settings_service
+            opd_settings_service.validate_paid_bill_cancellation(
+                db, current_user=current_user,
+            )
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot cancel bill with payments recorded",
+            )
 
     visit.status = "cancelled"
     visit.payment_status = "cancelled"
@@ -683,8 +862,10 @@ def list_payment_history(
 ) -> dict:
     def _norm_mode(mode: Optional[str]) -> str:
         key = (mode or "").strip().lower()
-        if key in {"online", "upi"}:
+        if key == "upi":
             return "upi"
+        if key == "online":
+            return "insurance"
         if key in {"cash", "card", "insurance"}:
             return key
         return key or "cash"
@@ -758,16 +939,12 @@ def get_dashboard(db: Session) -> dict:
     patients_total = db.query(Patient).filter(Patient.is_active.is_(True)).count()
     pending_bills = db.query(OpdVisit).filter(OpdVisit.payment_status.in_(["pending", "partial"])).count()
 
-    from Models.opd_billing import Appointment, Bed
-    from Services import bed_service
+    from Models.opd_billing import Appointment
 
     appointments_today = db.query(Appointment).filter(
         Appointment.scheduled_at >= today,
         Appointment.status == "scheduled",
     ).count()
-    beds_free = db.query(Bed).filter(Bed.status == "available").count()
-    beds_total = db.query(Bed).count()
-    ward_bed_stats = bed_service.get_ward_bed_stats(db)
 
     recent = fetch_today_queue(db)
     return {
@@ -775,9 +952,6 @@ def get_dashboard(db: Session) -> dict:
         "patients_total": patients_total,
         "pending_bills": pending_bills,
         "appointments_today": appointments_today,
-        "beds_free": beds_free,
-        "beds_total": beds_total,
-        "ward_bed_stats": ward_bed_stats,
         "recent_visits": recent.visits[:5],
     }
 

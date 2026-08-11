@@ -22,12 +22,19 @@ IST = ZoneInfo("Asia/Kolkata")
 DEFAULT_PRIORITY_BY_TYPE: dict[NotificationType, NotificationPriority] = {
     NotificationType.NEW_APPOINTMENT: NotificationPriority.NORMAL,
     NotificationType.LAB_REPORT_READY: NotificationPriority.HIGH,
+    NotificationType.LAB_ORDER_CREATED: NotificationPriority.NORMAL,
+    NotificationType.LAB_ORDER_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_RESCHEDULED: NotificationPriority.HIGH,
     NotificationType.EMERGENCY_ALERT: NotificationPriority.CRITICAL,
     NotificationType.ADMIN_UPDATE: NotificationPriority.HIGH,
     NotificationType.HANDOVER_TAKEN_OVER: NotificationPriority.HIGH,
     NotificationType.SHIFT_UPDATED: NotificationPriority.HIGH,
+    NotificationType.PAYMENT_PENDING: NotificationPriority.NORMAL,
+    NotificationType.QUEUE_ENQUEUE_FAILED: NotificationPriority.HIGH,
+    NotificationType.APPOINTMENT_NO_SHOW: NotificationPriority.NORMAL,
+    NotificationType.PRESCRIPTION_CREATED: NotificationPriority.NORMAL,
+    NotificationType.PRESCRIPTION_UPDATED: NotificationPriority.HIGH,
 }
 
 
@@ -105,6 +112,46 @@ def notify_staff_admin_update(
         created_by=admin_user.id,
         created_by_name=admin_name,
         priority=priority,
+    )
+
+
+NOTIFICATION_INBOX_ROLES = frozenset(
+    {
+        "doctor",
+        "nurse",
+        "receptionist",
+        "lab_technician",
+        "opd_billing",
+        "pharmacist",
+        "admin",
+    }
+)
+
+
+def notify_staff_admin_update_if_inbox(
+    db: Session,
+    *,
+    staff_user: User,
+    title: str,
+    message: str,
+    admin_user: User,
+    reference_type: ReferenceType = ReferenceType.USER,
+    reference_id: Optional[int] = None,
+    notification_type: NotificationType = NotificationType.ADMIN_UPDATE,
+) -> Optional[Notification]:
+    """Send admin/shift inbox notification when the staff role has a notification module."""
+    role_name = staff_user.role_obj.name if staff_user.role_obj else None
+    if role_name not in NOTIFICATION_INBOX_ROLES:
+        return None
+    return notify_staff_admin_update(
+        db,
+        staff_user_id=staff_user.id,
+        title=title,
+        message=message,
+        admin_user=admin_user,
+        reference_type=reference_type,
+        reference_id=reference_id,
+        notification_type=notification_type,
     )
 
 

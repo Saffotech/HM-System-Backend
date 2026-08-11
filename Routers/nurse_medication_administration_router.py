@@ -67,6 +67,11 @@ def get_medication_patients(
         le=100
     ),
 
+    allocated_only: bool = Query(
+        False,
+        description="If true, only medication patients on beds allocated to the current nurse.",
+    ),
+
     db: Session = Depends(get_db),
 
     current_user: User = Depends(
@@ -86,6 +91,8 @@ def get_medication_patients(
         patient_name=patient_name,
         patient_uid=patient_uid,
         bed_number=bed_number,
+        allocated_only=allocated_only,
+        nurse_id=current_user.id if allocated_only else None,
         page=page,
         page_size=page_size
     )
