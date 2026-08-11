@@ -25,6 +25,7 @@ from Schemas.opd_schema import (
     PatientCreate,
     PatientRegisterRequest,
     BillingVisitsTodayResponse,
+    OpdDashboardResponse,
     RegisterSuccessResponse,
     VisitSuccessResponse,
 )
@@ -39,7 +40,7 @@ router = APIRouter(prefix="/opd", tags=["OPD-Billing"])
 
 # ── Dashboard ─────────────────────────────────────────────────
 
-@router.get("/dashboard")
+@router.get("/dashboard", response_model=OpdDashboardResponse)
 def dashboard(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),

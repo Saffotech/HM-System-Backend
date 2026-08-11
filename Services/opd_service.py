@@ -3,7 +3,7 @@ from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
@@ -24,6 +24,8 @@ from Schemas.opd_schema import (
     QueueResponse,
     QueueVisitItem,
     BillingVisitsTodayResponse,
+    DashboardRecentPatient,
+    OpdDashboardResponse,
     RegisterSuccessResponse,
     VisitBillingFields,
     VisitSuccessResponse,
@@ -629,13 +631,25 @@ def list_bills(
         ensure_pending_appointment_bills(db, registered_by)
 
     q = _bills_query(db, status, search, today_only, from_date, to_date)
-    all_rows = q.all()
-    total_billed = sum(v.grand_total for v, _ in all_rows)
-    total_collected = sum(v.paid_amount or 0 for v, _ in all_rows)
-    total_outstanding = sum(v.balance_due for v, _ in all_rows)
+    total, total_billed, total_collected, total_outstanding = (
+        q.with_entities(
+            func.count(OpdVisit.id),
+            func.coalesce(func.sum(OpdVisit.grand_total), 0.0),
+            func.coalesce(func.sum(OpdVisit.paid_amount), 0.0),
+            func.coalesce(func.sum(OpdVisit.balance_due), 0.0),
+        ).one()
+    )
+    total = int(total or 0)
+    total_billed = float(total_billed or 0)
+    total_collected = float(total_collected or 0)
+    total_outstanding = float(total_outstanding or 0)
 
-    total = len(all_rows)
-    rows = all_rows[(page - 1) * limit : page * limit]
+    rows = (
+        q.order_by(OpdVisit.id.desc())
+        .offset((page - 1) * limit)
+        .limit(limit)
+        .all()
+    )
 
     bills = [
         BillListItem(
@@ -933,58 +947,127 @@ def list_payment_history(
     }
 
 
-def get_dashboard(db: Session) -> dict:
-    today = h.today_start_ist()
-    visits_today = db.query(OpdVisit).filter(OpdVisit.visit_date >= today).count()
-    patients_total = db.query(Patient).filter(Patient.is_active.is_(True)).count()
-    pending_bills = db.query(OpdVisit).filter(OpdVisit.payment_status.in_(["pending", "partial"])).count()
-
-    from Models.opd_billing import Appointment
-
-    appointments_today = db.query(Appointment).filter(
-        Appointment.scheduled_at >= today,
-        Appointment.status == "scheduled",
-    ).count()
-
-    recent = fetch_today_queue(db)
-    return {
-        "visits_today": visits_today,
-        "patients_total": patients_total,
-        "pending_bills": pending_bills,
-        "appointments_today": appointments_today,
-        "recent_visits": recent.visits[:5],
-    }
+_DASHBOARD_RECENT_VISITS = 5
+_DASHBOARD_RECENT_PATIENTS = 20
+_DASHBOARD_TODAY_APPOINTMENTS = 8
 
 
-def fetch_today_billing_visits(db: Session) -> BillingVisitsTodayResponse:
-    """Today's OPD visits (billing counter list). Not patient_queue / receptionist queue."""
-    rows = (
+def _today_billing_visits_query(db: Session):
+    """Today's OPD visits with patient/doctor/department — shared by list + dashboard."""
+    return (
         db.query(OpdVisit, Patient, User, Department)
         .join(Patient, OpdVisit.patient_id == Patient.id)
         .outerjoin(User, OpdVisit.doctor_id == User.id)
         .outerjoin(Department, OpdVisit.department_id == Department.id)
         .filter(OpdVisit.visit_date >= h.today_start_ist())
         .order_by(OpdVisit.visit_date.asc())
+    )
+
+
+def _queue_visit_from_row(v: OpdVisit, p: Patient, d: Optional[User], dept: Optional[Department]) -> QueueVisitItem:
+    return QueueVisitItem(
+        visit_id=v.id,
+        token_number=v.token_number,
+        bill_number=v.bill_number,
+        visit_date=v.visit_date.isoformat() if v.visit_date else None,
+        patient_id=p.id,
+        patient_uid=p.patient_uid,
+        patient_name=h.display_name(p.first_name, p.last_name),
+        doctor_name=h.display_name(d.first_name, d.last_name, prefix="Dr. ") if d else None,
+        department=dept.name if dept else None,
+        status=v.status,
+        payment_status=v.payment_status,
+        grand_total=v.grand_total,
+        payment_mode=v.payment_mode,
+    )
+
+
+def _today_bills_aggregates(db: Session) -> tuple[int, float, int]:
+    """Today's non-cancelled bills: count, collected, pending-payment count."""
+    today = h.today_start_ist()
+    bills_count, collected, pending_payments = (
+        db.query(
+            func.count(OpdVisit.id),
+            func.coalesce(func.sum(OpdVisit.paid_amount), 0.0),
+            func.coalesce(
+                func.sum(case((OpdVisit.balance_due > 0.01, 1), else_=0)),
+                0,
+            ),
+        )
+        .filter(
+            OpdVisit.visit_date >= today,
+            OpdVisit.status != "cancelled",
+        )
+        .one()
+    )
+    return int(bills_count or 0), round(float(collected or 0), 2), int(pending_payments or 0)
+
+
+def _recent_patients_for_dashboard(db: Session) -> list[DashboardRecentPatient]:
+    rows = (
+        db.query(Patient)
+        .filter(Patient.is_active.is_(True))
+        .order_by(Patient.id.desc())
+        .limit(_DASHBOARD_RECENT_PATIENTS)
         .all()
     )
-    visits = [
-        QueueVisitItem(
-            visit_id=v.id,
-            token_number=v.token_number,
-            bill_number=v.bill_number,
-            visit_date=v.visit_date.isoformat() if v.visit_date else None,
-            patient_id=p.id,
+    return [
+        DashboardRecentPatient(
+            id=p.id,
             patient_uid=p.patient_uid,
-            patient_name=h.display_name(p.first_name, p.last_name),
-            doctor_name=h.display_name(d.first_name, d.last_name, prefix="Dr. ") if d else None,
-            department=dept.name if dept else None,
-            status=v.status,
-            payment_status=v.payment_status,
-            grand_total=v.grand_total,
-            payment_mode=v.payment_mode,
+            name=h.display_name(p.first_name, p.last_name),
+            phone=p.phone,
+            created_at=p.created_at.isoformat() if p.created_at else None,
         )
-        for v, p, d, dept in rows
+        for p in rows
     ]
+
+
+def get_dashboard(db: Session) -> OpdDashboardResponse:
+    today = h.today_start_ist()
+    visits_today = db.query(func.count(OpdVisit.id)).filter(OpdVisit.visit_date >= today).scalar() or 0
+    patients_total = (
+        db.query(func.count(Patient.id)).filter(Patient.is_active.is_(True)).scalar() or 0
+    )
+    pending_bills = (
+        db.query(func.count(OpdVisit.id))
+        .filter(OpdVisit.payment_status.in_(["pending", "partial"]))
+        .scalar()
+        or 0
+    )
+    appointments_today = (
+        db.query(func.count(Appointment.id))
+        .filter(
+            Appointment.scheduled_at >= today,
+            Appointment.status == AppointmentStatus.scheduled,
+        )
+        .scalar()
+        or 0
+    )
+
+    recent_rows = _today_billing_visits_query(db).limit(_DASHBOARD_RECENT_VISITS).all()
+    today_bills_count, today_collected, today_pending_payments = _today_bills_aggregates(db)
+
+    return OpdDashboardResponse(
+        visits_today=int(visits_today),
+        patients_total=int(patients_total),
+        pending_bills=int(pending_bills),
+        appointments_today=int(appointments_today),
+        recent_visits=[_queue_visit_from_row(*row) for row in recent_rows],
+        today_collected=today_collected,
+        today_bills_count=today_bills_count,
+        today_pending_payments=today_pending_payments,
+        recent_patients=_recent_patients_for_dashboard(db),
+        today_appointments=appointment_service.preview_today_appointments(
+            db, limit=_DASHBOARD_TODAY_APPOINTMENTS
+        ),
+    )
+
+
+def fetch_today_billing_visits(db: Session) -> BillingVisitsTodayResponse:
+    """Today's OPD visits (billing counter list). Not patient_queue / receptionist queue."""
+    rows = _today_billing_visits_query(db).all()
+    visits = [_queue_visit_from_row(*row) for row in rows]
     return BillingVisitsTodayResponse(total=len(visits), visits=visits)
 
 

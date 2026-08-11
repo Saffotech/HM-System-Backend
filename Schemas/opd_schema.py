@@ -274,6 +274,29 @@ class AppointmentOut(BaseModel):
     balance_amount: float = 0.0
 
 
+class DashboardRecentPatient(BaseModel):
+    id: int
+    patient_uid: str
+    name: str
+    phone: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class OpdDashboardResponse(BaseModel):
+    """GET /opd/dashboard — KPI cards plus compact lists for the billing landing page."""
+
+    visits_today: int
+    patients_total: int
+    pending_bills: int
+    appointments_today: int
+    recent_visits: List[QueueVisitItem]
+    today_collected: float = 0.0
+    today_bills_count: int = 0
+    today_pending_payments: int = 0
+    recent_patients: List[DashboardRecentPatient] = []
+    today_appointments: List[AppointmentOut] = []
+
+
 class BedOut(BaseModel):
     id: int
     bed_number: str

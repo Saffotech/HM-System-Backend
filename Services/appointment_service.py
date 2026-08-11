@@ -528,23 +528,48 @@ def _apply_list_filter(q, db: Session, list_filter: Optional[str]):
 
 def _compute_list_counts(db: Session, q) -> dict[str, int]:
     """UI pill counts for the OPD appointments page (same rules as list_filter)."""
+    _, list_counts = _appointment_list_count_maps(db, q)
+    return list_counts
+
+
+def _appointment_list_count_maps(
+    db: Session, q
+) -> tuple[dict[str, int], dict[str, int]]:
+    """One GROUP BY for status counts + one pending COUNT (visit join)."""
+    grouped = (
+        q.with_entities(
+            Appointment.status,
+            func.count(func.distinct(Appointment.id)),
+        )
+        .group_by(Appointment.status)
+        .all()
+    )
+    by_status: dict[str, int] = {}
+    for status, n in grouped:
+        by_status[appointment_status_value(status)] = int(n or 0)
+
+    counts = {
+        "scheduled": by_status.get("scheduled", 0),
+        "completed": by_status.get("completed", 0),
+        "cancelled": by_status.get("cancelled", 0),
+    }
+
     visible = q.filter(Appointment.status.in_(_OPD_LIST_STATUSES))
     joined, visit_col = _join_matching_visit(visible, db)
-
-    return {
-        "all": visible.count(),
-        "scheduled": joined.filter(
-            Appointment.status == AppointmentStatus.scheduled,
-            ~_scheduled_unpaid_expr(visit_col),
-        ).count(),
-        "pending": joined.filter(_scheduled_unpaid_expr(visit_col)).count(),
-        "completed": visible.filter(
-            Appointment.status == AppointmentStatus.completed
-        ).count(),
-        "cancelled": visible.filter(
-            Appointment.status == AppointmentStatus.cancelled
-        ).count(),
+    pending = int(
+        joined.filter(_scheduled_unpaid_expr(visit_col))
+        .with_entities(func.count(func.distinct(Appointment.id)))
+        .scalar()
+        or 0
+    )
+    list_counts = {
+        "all": counts["scheduled"] + counts["completed"] + counts["cancelled"],
+        "scheduled": max(counts["scheduled"] - pending, 0),
+        "pending": pending,
+        "completed": counts["completed"],
+        "cancelled": counts["cancelled"],
     }
+    return counts, list_counts
 
 
 def _apply_appointment_filters(
@@ -674,6 +699,24 @@ def _appointments_out_list(
     ]
 
 
+def preview_today_appointments(db: Session, *, limit: int = 8) -> list[AppointmentOut]:
+    """Today's non-cancelled appointments for the OPD dashboard table (max ``limit``)."""
+    day_start, day_end = _day_bounds(h.today_ist_date())
+    rows = (
+        db.query(Appointment)
+        .filter(
+            Appointment.scheduled_at >= day_start,
+            Appointment.scheduled_at <= day_end,
+            Appointment.status != AppointmentStatus.cancelled,
+        )
+        .order_by(Appointment.scheduled_at.asc(), Appointment.id.asc())
+        .limit(limit)
+        .all()
+    )
+    visit_map = _load_visits_for_appointments(db, rows)
+    return _appointments_out_list(db, rows, visit_map)
+
+
 def create_appointment(db: Session, data: AppointmentCreate, created_by: int) -> AppointmentOut:
     """Create or reuse one active appointment for the patient+doctor+dept+day."""
     apt = resolve_appointment_for_visit(
@@ -782,15 +825,13 @@ def list_appointments(
         order_key,
     )
 
-    total = result_q.count()
+    total = (
+        result_q.with_entities(func.count(func.distinct(Appointment.id))).scalar()
+        or 0
+    )
     rows = result_q.offset((page - 1) * limit).limit(limit).all()
     visit_map = _load_visits_for_appointments(db, rows)
-
-    counts = {
-        status_name: filters_q.filter(Appointment.status == status_name).count()
-        for status_name in ("scheduled", "completed", "cancelled")
-    }
-    list_counts = _compute_list_counts(db, filters_q)
+    counts, list_counts = _appointment_list_count_maps(db, filters_q)
 
     return {
         "counts": counts,
