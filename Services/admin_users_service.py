@@ -13,6 +13,7 @@ from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateReque
 from Services import audit_service
 from Services.admin_profile_service import create_empty_admin_profile
 from Services.doctor_profile_service import create_empty_doctor_profile
+from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.lab_technician_profile_service import create_empty_lab_technician_profile
 from Services.notification_service import notify_staff_admin_update_if_inbox
 from Services.nurse_profile_service import create_empty_nurse_profile
@@ -333,19 +334,39 @@ def update_staff(
     effective_role_name = effective_role.name if effective_role else None
 
     if "department_id" in updates:
-        # Department is REQUIRED for doctors only.
+        # Department is REQUIRED for doctors and lab technicians (LAB/RAD).
         # Nurses never keep users.department_id — responsibility is via bed allocation.
-        if effective_role_name != "doctor":
-            user.department_id = None
-        elif updates["department_id"] is None:
-            raise HTTPException(status_code=400, detail="department_id required for doctor")
-        else:
-            dept = db.query(Department).filter(Department.id == updates["department_id"]).first()
+        if effective_role_name == "doctor":
+            if updates["department_id"] is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail="department_id required for doctor",
+                )
+            dept = db.query(Department).filter(
+                Department.id == updates["department_id"]
+            ).first()
             if not dept:
                 raise HTTPException(status_code=404, detail="Department not found")
             user.department_id = updates["department_id"]
+        elif effective_role_name == "lab_technician":
+            user.department_id = validate_lab_tech_department_id(
+                db,
+                updates["department_id"],
+            )
+        else:
+            user.department_id = None
+    elif effective_role_name == "lab_technician":
+        # Changing role to lab_technician requires an explicit LAB/RAD department.
+        if "role_id" in updates and not user.department_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "department_id required for lab_technician "
+                    "(Laboratory or Radiology)"
+                ),
+            )
     elif effective_role_name != "doctor":
-        # Role changed away from doctor — clear department even if not in payload
+        # Role changed away from doctor/lab tech — clear department even if not in payload
         if "role_id" in updates:
             user.department_id = None
     elif effective_role_name == "doctor" and not user.department_id:

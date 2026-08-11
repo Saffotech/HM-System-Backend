@@ -25,7 +25,8 @@ class DashboardResponse(BaseModel):
     total_today: int
     pending: int
     sample_collected: int
-    processing: int
+    # Deprecated under Option B (always 0). Kept for older dashboard clients.
+    processing: int = 0
     completed_today: int
     urgent_pending: int
 
@@ -39,6 +40,8 @@ class SampleCollectedRequest(BaseModel):
 
 
 class ProcessingRequest(BaseModel):
+    """Deprecated: processing step removed in Option B."""
+
     test_performed_at: Optional[datetime] = None
 
 
@@ -107,6 +110,8 @@ class LabOrderListItem(BaseModel):
     doctor_id: int
     doctor_name: str
 
+    department_id: int
+
     test_name: str
     category: str
     priority: str
@@ -155,6 +160,8 @@ class LabOrderDetailResponse(BaseModel):
 
     doctor_id: int
     doctor_name: str
+
+    department_id: int
 
     test_name: str
     category: str
@@ -227,6 +234,7 @@ class LabReportOrderSummary(BaseModel):
     patient_uid: str
     doctor_id: int
     doctor_name: Optional[str] = None
+    department_id: Optional[int] = None
     test_name: str
     category: str
     priority: str

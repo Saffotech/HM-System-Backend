@@ -1,9 +1,7 @@
-from datetime import date
-
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
 from sqlalchemy import or_
-from sqlalchemy.orm import Session, joinedload, selectinload
+from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult
@@ -14,22 +12,47 @@ from Schemas.doctor_lab_test_schema import (
     LabTestListResponse,
     LabTestResponse,
 )
-from Schemas.lab_schema import ReportSource
 from Services import doctor_helpers as h
+from Services.lab_department_helpers import resolve_lab_department_id
 from Services.lab_notification_helpers import (
     notify_lab_techs_order_cancelled,
     notify_lab_techs_order_created,
 )
 from Services.lab_service import (
     EXTENSION_MEDIA_TYPES,
-    _apply_report_source_filter,
-    _end_of_day,
     _has_report_file,
     _order_patient_fields,
-    _parse_lab_status,
     _report_source,
     _resolve_report_path,
 )
+
+# Doctor UI only surfaces these lab order statuses.
+DOCTOR_VISIBLE_LAB_STATUSES = frozenset(
+    {
+        LabTestStatus.ORDERED,
+        LabTestStatus.COMPLETED,
+        LabTestStatus.CANCELLED,
+    }
+)
+
+
+def _parse_doctor_lab_status(status: str) -> LabTestStatus:
+    value = (status or "").strip().lower()
+    try:
+        parsed = LabTestStatus(value)
+    except ValueError as exc:
+        allowed = ", ".join(sorted(s.value for s in DOCTOR_VISIBLE_LAB_STATUSES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Allowed values: {allowed}",
+        ) from exc
+    if parsed not in DOCTOR_VISIBLE_LAB_STATUSES:
+        allowed = ", ".join(sorted(s.value for s in DOCTOR_VISIBLE_LAB_STATUSES))
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid status. Allowed values: {allowed}",
+        )
+    return parsed
 
 
 def _serialize_lab_test(order: LabTestOrder) -> LabTestListResponse:
@@ -74,12 +97,20 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
             detail="This test has already been ordered for this appointment",
         )
 
+    department_id = resolve_lab_department_id(
+        db,
+        department_id=payload.department_id,
+        category=payload.category,
+        test_name=payload.test_name,
+    )
+
     lab_test = LabTestOrder(
         appointment_id=appointment.id,
         patient_id=patient.id,
         patient_name=h.display_name(patient.first_name, patient.last_name),
         patient_uhid=patient.patient_uid,
         doctor_id=doctor_id,
+        department_id=department_id,
         test_name=payload.test_name,
         category=payload.category,
         priority=payload.priority,
@@ -117,8 +148,10 @@ def get_lab_tests_service(
 
     if status:
         query = query.filter(
-            LabTestOrder.status == _parse_lab_status(status)
+            LabTestOrder.status == _parse_doctor_lab_status(status)
         )
+    else:
+        query = query.filter(LabTestOrder.status.in_(tuple(DOCTOR_VISIBLE_LAB_STATUSES)))
 
     if search:
         search = search.strip()
@@ -159,64 +192,6 @@ def get_lab_tests_service(
     }
 
 
-def get_lab_test_by_id_service(
-    db: Session,
-    test_id: int,
-    doctor_id: int,
-):
-    order = (
-        db.query(LabTestOrder)
-        .options(
-            joinedload(LabTestOrder.lab_result).selectinload(
-                LabResult.parameters
-            ),
-        )
-        .filter(
-            LabTestOrder.id == test_id,
-            LabTestOrder.doctor_id == doctor_id,
-        )
-        .first()
-    )
-    if not order:
-        raise HTTPException(status_code=404, detail="Lab test not found")
-
-    report = None
-    report_uploaded = False
-    has_report = False
-
-    if order.lab_result:
-        has_report = True
-        report_uploaded = _has_report_file(order.lab_result)
-        report = {
-            "id": order.lab_result.id,
-            "report_file": order.lab_result.report_file,
-            "remarks": order.lab_result.remarks,
-            "created_at": order.lab_result.created_at,
-            "file_name": order.lab_result.file_name,
-            "file_type": order.lab_result.file_type,
-            "file_size": order.lab_result.file_size,
-            "source": _report_source(order.lab_result),
-        }
-
-    return {
-        "id": order.id,
-        "appointment_id": order.appointment_id,
-        "patient_name": order.patient_name,
-        **_order_patient_fields(order),
-        "doctor_id": order.doctor_id,
-        "test_name": order.test_name,
-        "category": order.category,
-        "priority": order.priority,
-        "clinical_notes": order.clinical_notes,
-        "status": order.status.value,
-        "created_at": order.created_at,
-        "updated_at": order.updated_at,
-        "report_uploaded": report_uploaded,
-        "has_report": has_report,
-        "report": report,
-    }
-
-
 def update_lab_test_service(
     db: Session,
     test_id: int,
@@ -236,6 +211,16 @@ def update_lab_test_service(
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update")
+
+    next_category = update_data.get("category", test.category)
+    next_test_name = update_data.get("test_name", test.test_name)
+    if "department_id" in update_data or "category" in update_data or "test_name" in update_data:
+        update_data["department_id"] = resolve_lab_department_id(
+            db,
+            department_id=update_data.get("department_id"),
+            category=next_category,
+            test_name=next_test_name,
+        )
 
     for field, value in update_data.items():
         setattr(test, field, value)
@@ -279,133 +264,6 @@ def _get_doctor_order(
     if not order:
         raise HTTPException(status_code=404, detail="Lab test not found")
     return order
-
-
-def get_doctor_lab_reports_service(
-    db: Session,
-    doctor_id: int,
-    search: str | None = None,
-    patient_id: int | None = None,
-    patient_uid: str | None = None,
-    patient_name: str | None = None,
-    test_name: str | None = None,
-    status: str | None = None,
-    source: ReportSource | None = None,
-    from_date: date | None = None,
-    to_date: date | None = None,
-    page: int = 1,
-    page_size: int = 20,
-):
-    page = max(page, 1)
-    page_size = min(max(page_size, 1), 100)
-
-    query = (
-        db.query(LabResult)
-        .join(
-            LabTestOrder,
-            LabTestOrder.id == LabResult.lab_test_order_id,
-        )
-        .filter(LabTestOrder.doctor_id == doctor_id)
-        .options(
-            joinedload(LabResult.lab_order),
-            joinedload(LabResult.uploaded_by_user),
-            selectinload(LabResult.parameters),
-        )
-    )
-
-    if from_date:
-        query = query.filter(LabResult.created_at >= from_date)
-
-    if to_date:
-        query = query.filter(LabResult.created_at <= _end_of_day(to_date))
-
-    if patient_id:
-        query = query.filter(LabTestOrder.patient_id == patient_id)
-
-    if patient_uid:
-        query = query.filter(
-            LabTestOrder.patient_uhid.ilike(
-                f"%{patient_uid.strip()}%"
-            )
-        )
-
-    if patient_name:
-        query = query.filter(
-            LabTestOrder.patient_name.ilike(
-                f"%{patient_name.strip()}%"
-            )
-        )
-
-    if test_name:
-        query = query.filter(
-            LabTestOrder.test_name.ilike(f"%{test_name.strip()}%")
-        )
-
-    if status:
-        query = query.filter(
-            LabTestOrder.status == _parse_lab_status(status)
-        )
-
-    if search:
-        search = search.strip()
-        filters = [
-            LabTestOrder.patient_name.ilike(f"%{search}%"),
-            LabTestOrder.patient_uhid.ilike(f"%{search}%"),
-            LabTestOrder.test_name.ilike(f"%{search}%"),
-        ]
-        if search.isdigit():
-            filters.extend([
-                LabTestOrder.id == int(search),
-                LabTestOrder.patient_id == int(search),
-            ])
-        query = query.filter(or_(*filters))
-
-    if source:
-        query = _apply_report_source_filter(query, source)
-
-    total = query.count()
-
-    reports = (
-        query
-        .order_by(LabResult.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
-
-    items = []
-    for report in reports:
-        uploader_name = " ".join(
-            filter(
-                None,
-                [
-                    report.uploaded_by_user.first_name,
-                    report.uploaded_by_user.last_name,
-                ],
-            )
-        )
-        order = report.lab_order
-        items.append({
-            "report_id": report.id,
-            "order_id": order.id,
-            "patient_name": order.patient_name,
-            **_order_patient_fields(order),
-            "test_name": order.test_name,
-            "category": order.category,
-            "status": order.status.value,
-            "source": _report_source(report),
-            "has_file": _has_report_file(report),
-            "uploaded_at": report.created_at,
-            "uploaded_by_name": uploader_name,
-        })
-
-    return {
-        "success": True,
-        "total": total,
-        "page": page,
-        "page_size": page_size,
-        "items": items,
-    }
 
 
 def get_doctor_lab_report_by_test_service(
@@ -459,6 +317,7 @@ def get_doctor_lab_report_by_test_service(
         **_order_patient_fields(order),
         "test_name": order.test_name,
         "category": order.category,
+        "department_id": order.department_id,
         "priority": order.priority,
         "order_status": order.status.value,
         "source": _report_source(report),

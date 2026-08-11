@@ -462,16 +462,16 @@ def update_medication_administration_service(
         )
     )
 
-    for field, value in (
-        update_data.items()
-    ):
-        setattr(
-            administration,
-            field,
-            value
-        )
+    allowed_fields = ("status", "remarks", "scheduled_time")
+    for field in allowed_fields:
+        if field in update_data:
+            setattr(administration, field, update_data[field])
 
+    now = _now()
     administration.updated_by = nurse_id
+    administration.updated_at = now
+    # Keep "Last Given" in sync with the latest clinical update.
+    administration.administered_at = now
 
     try:
         db.add(administration)

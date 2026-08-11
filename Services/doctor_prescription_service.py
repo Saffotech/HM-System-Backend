@@ -167,12 +167,17 @@ def get_patient_prescriptions_service(
     doctor_id: int,
     patient_id: int | None = None,
     patient_uid: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
 ):
     if not patient_id and not patient_uid:
         raise HTTPException(
             status_code=400,
             detail="patient_id or patient_uid is required",
         )
+
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
 
     query = (
         _prescription_query(db)
@@ -192,12 +197,21 @@ def get_patient_prescriptions_service(
             )
         )
 
+    total = query.count()
     prescriptions = (
-        query
-        .order_by(Prescription.created_at.desc())
+        query.order_by(Prescription.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return [_serialize_prescription(rx) for rx in prescriptions]
+    items = [_serialize_prescription(rx) for rx in prescriptions]
+    return {
+        "success": True,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": items,
+    }
 
   
 def update_prescription_service(
@@ -223,10 +237,3 @@ def update_prescription_service(
 
         notify_pharmacists_prescription_updated(db, rx, doctor_id=doctor_id)
     return _serialize_prescription(rx)
-
-
-def delete_prescription_service(db: Session, prescription_id: int, doctor_id: int):
-    rx = _get_prescription(db, prescription_id, doctor_id)
-    db.delete(rx)
-    db.commit()
-    return {"message": "Prescription deleted successfully"}

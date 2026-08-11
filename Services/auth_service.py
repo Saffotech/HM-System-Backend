@@ -6,6 +6,7 @@ from Models.user import User
 from Schemas.schemas import UserCreate
 from hash import hash_password
 from Services import audit_service
+from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
 
@@ -23,10 +24,18 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
     if role.name == "doctor" and not data.department_id:
         raise HTTPException(status_code=400, detail="department_id required for doctor")
 
-    # Department is REQUIRED for doctors only.
-    # Nurses (and all other non-doctor roles) never store department_id —
-    # bed allocation assigns daily nurse responsibility, not department.
-    department_id = data.department_id if role.name == "doctor" else None
+    # Department required for doctors. Lab technicians should be LAB/RAD when set;
+    # existing clients may omit it — lab APIs return 403 until admin assigns one.
+    if role.name == "doctor":
+        department_id = data.department_id
+    elif role.name == "lab_technician":
+        department_id = (
+            validate_lab_tech_department_id(db, data.department_id)
+            if data.department_id is not None
+            else None
+        )
+    else:
+        department_id = None
 
     new_user = User(
         first_name=data.first_name,

@@ -1,4 +1,3 @@
-from datetime import date
 from enum import Enum
 from typing import Optional
 
@@ -6,32 +5,14 @@ from pydantic import BaseModel
 
 
 class DoctorAppointmentStatusUpdate(str, Enum):
-    """Doctor may only complete consultation. Cancel = OPD; no_show = system."""
+    """Doctor may complete or cancel. no_show = system."""
 
     completed = "completed"
+    cancelled = "cancelled"
 
 
 class AppointmentStatusUpdate(BaseModel):
     status: DoctorAppointmentStatusUpdate
-
-
-class AppointmentConsultationUpdate(BaseModel):
-    """Clinical payload for PATCH /appointments/{id}/consultation (queue optional)."""
-
-    symptoms: Optional[str] = None
-    diagnosis: Optional[str] = None
-    notes: Optional[str] = None
-    follow_up_date: Optional[date] = None
-
-    class Config:
-        json_schema_extra = {
-            "example": {
-                "symptoms": "Fever, cough",
-                "diagnosis": "Viral URI",
-                "notes": "Rest and fluids",
-                "follow_up_date": "2026-07-15",
-            }
-        }
 
 
 class AppointmentResponse(BaseModel):
@@ -42,7 +23,7 @@ class AppointmentResponse(BaseModel):
     patient_id: int
     patient_name: str
     patient_phone: str
-    patient_age: Optional[int] = None
+    patient_age: Optional[int | str] = None
     patient_gender: Optional[str] = None
     patient_uid: str
     doctor_id: int
@@ -57,8 +38,17 @@ class AppointmentResponse(BaseModel):
     created_at: Optional[str] = None
 
 
-from Schemas.common_schema import PaginationParams
+from Schemas.common_schema import PaginationParams, PaginatedResponse
 
 
 class PaginationSchema(PaginationParams):
     pass
+
+
+class AppointmentHistoryPaginatedResponse(PaginatedResponse[AppointmentResponse]):
+    """Paginated completed appointment history for a doctor."""
+
+    message: str = "Appointment history fetched successfully"
+    # Legacy keys for existing doctor clients
+    total_appointments: int = 0
+    appointments: list[AppointmentResponse] = []

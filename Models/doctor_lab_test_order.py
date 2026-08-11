@@ -14,9 +14,17 @@ import enum
 
 
 class LabTestStatus(str, enum.Enum):
+    """Lab order lifecycle (Option B).
+
+    ordered → sample_collected → completed
+    ordered → cancelled (doctor only)
+
+    Report readiness is derived from LabResult (parameters and/or file),
+    not a separate status. Legacy "processing" is no longer a stored status.
+    """
+
     ORDERED = "ordered"
     SAMPLE_COLLECTED = "sample_collected"
-    PROCESSING = "processing"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
 
@@ -60,6 +68,13 @@ class LabTestOrder(Base):
         index=True
     )
 
+    department_id = Column(
+        Integer,
+        ForeignKey("departments.id"),
+        nullable=False,
+        index=True,
+    )
+
     test_name = Column(
         String(255),
         nullable=False
@@ -82,9 +97,13 @@ class LabTestOrder(Base):
     )
 
     status = Column(
-        Enum(LabTestStatus),
+        Enum(
+            LabTestStatus,
+            name="labteststatus",
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
         nullable=False,
-        default=LabTestStatus.ORDERED
+        default=LabTestStatus.ORDERED,
     )
 
     created_at = Column(
@@ -113,6 +132,11 @@ class LabTestOrder(Base):
     doctor = relationship(
         "User",
         foreign_keys=[doctor_id]
+    )
+
+    department = relationship(
+        "Department",
+        foreign_keys=[department_id],
     )
 
     lab_result = relationship(

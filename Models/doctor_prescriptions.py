@@ -162,7 +162,7 @@ class PrescriptionItem(Base):
     )
 
     duration = Column(
-        Integer,
+        String(50),
         nullable=False
     )
 

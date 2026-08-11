@@ -326,6 +326,7 @@ DEPARTMENTS = [
     {"name": "Dermatology", "code": "DERM"},
     {"name": "ENT", "code": "ENT"},
     {"name": "Ophthalmology", "code": "EYE"},
+    {"name": "Laboratory", "code": "LAB"},
     {"name": "Radiology", "code": "RAD"},
 ]
 

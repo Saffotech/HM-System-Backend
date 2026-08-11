@@ -29,12 +29,98 @@ def display_name(first: str, last: Optional[str] = None) -> str:
 
 
 def patient_age(date_of_birth: Optional[date]) -> Optional[int]:
+    """Completed whole years (0 for infants under 1 year)."""
     if not date_of_birth:
         return None
-    today = date.today()
+    today = datetime.now(IST).date()
+    if date_of_birth > today:
+        return None
     return today.year - date_of_birth.year - (
         (today.month, today.day) < (date_of_birth.month, date_of_birth.day)
     )
+
+
+def _patient_age_months(date_of_birth: date, today: date) -> int:
+    months = (today.year - date_of_birth.year) * 12 + (today.month - date_of_birth.month)
+    if today.day < date_of_birth.day:
+        months -= 1
+    return max(months, 0)
+
+
+def format_patient_age_label(date_of_birth: Optional[date]) -> Optional[str]:
+    """
+    Doctor-facing age label:
+    - under 1 month → Nd (days)
+    - under 1 year → Nm (months)
+    - otherwise → Ny (years)
+    """
+    if not date_of_birth:
+        return None
+    today = datetime.now(IST).date()
+    if date_of_birth > today:
+        return None
+
+    years = patient_age(date_of_birth)
+    if years is None:
+        return None
+    if years >= 1:
+        return f"{years}y"
+
+    months = _patient_age_months(date_of_birth, today)
+    if months < 1:
+        days = (today - date_of_birth).days
+        return f"{max(days, 0)}d"
+    return f"{months}m"
+
+
+_GENDER_LABELS = {
+    1: "Male",
+    2: "Female",
+    3: "Other",
+    4: "Prefer not to say",
+    "1": "Male",
+    "2": "Female",
+    "3": "Other",
+    "4": "Prefer not to say",
+}
+
+
+def _gender_label(gender) -> Optional[str]:
+    if gender is None:
+        return None
+    if gender in _GENDER_LABELS:
+        return _GENDER_LABELS[gender]
+    text = str(gender).strip()
+    if not text:
+        return None
+    if text in _GENDER_LABELS:
+        return _GENDER_LABELS[text]
+    return text
+
+
+def patient_age_fields(date_of_birth: Optional[date], gender) -> dict:
+    """
+    Build patient_age / patient_gender for doctor APIs.
+
+    Frontend Patients list always renders age as ``{age}y``, so under-1-year
+    labels (Nd / Nm) are placed in patient_gender with the real gender so the
+    Age/Gender cell shows correctly without frontend changes.
+    """
+    years = patient_age(date_of_birth)
+    label = format_patient_age_label(date_of_birth)
+    gender_text = _gender_label(gender)
+
+    if label is None:
+        return {"patient_age": None, "patient_gender": gender_text}
+
+    # Adults / 1y+: keep numeric years — UI appends "y" → "25y"
+    if years is not None and years >= 1:
+        return {"patient_age": years, "patient_gender": gender_text}
+
+    # Infants: UI would turn "6m" into "6my", so compose into gender channel
+    if gender_text:
+        return {"patient_age": None, "patient_gender": f"{label} · {gender_text}"}
+    return {"patient_age": None, "patient_gender": label}
 
 
 def get_patient(db: Session, patient_id: int) -> Optional[Patient]:
@@ -72,14 +158,18 @@ def appointment_to_dict(
         patient = get_patient(db, apt.patient_id)
 
     scheduled = apt.scheduled_at
+    age_fields = patient_age_fields(
+        patient.date_of_birth if patient else None,
+        patient.gender if patient else None,
+    )
     return {
         "id": apt.id,
         "appointment_uid": apt.appointment_uid,
         "patient_id": apt.patient_id,
         "patient_name": display_name(patient.first_name, patient.last_name) if patient else "",
         "patient_phone": patient.phone if patient else "",
-        "patient_age": patient_age(patient.date_of_birth) if patient else None,
-        "patient_gender": patient.gender if patient else None,
+        "patient_age": age_fields["patient_age"],
+        "patient_gender": age_fields["patient_gender"],
         "patient_uid": patient.patient_uid if patient else "",
         "doctor_id": apt.doctor_id,
         "department_id": apt.department_id,

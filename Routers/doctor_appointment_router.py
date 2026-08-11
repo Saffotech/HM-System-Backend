@@ -2,13 +2,14 @@ from datetime import date
 from fastapi import (
     APIRouter,
     Depends,
-    status
+    Query,
+    status,
 )
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import (
     get_current_user,
-    PermissionChecker
+    PermissionChecker,
 )
 from Models.user import User
 from Schemas.doctor_appointment_schema import (
@@ -16,51 +17,17 @@ from Schemas.doctor_appointment_schema import (
 )
 
 from Services.doctor_appointment_service import (
-
     get_today_appointments_service,
     get_appointment_by_id_service,
     update_appointment_status_service,
     get_appointment_history_service,
     get_appointments_by_date_service,
-    get_dashboard_stats_service
 )
 
 router = APIRouter(
     prefix="/appointments",
-    tags=["Doctor Appointments"]
+    tags=["Doctor Appointments"],
 )
-
-
-# ==========================================================
-# Dashboard Stats
-# ==========================================================
-
-@router.get(
-    "/dashboard-stats",
-    status_code=status.HTTP_200_OK
-)
-def get_dashboard_stats(
-
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(
-        PermissionChecker("appointments:view")
-    )
-):
-
-    stats = get_dashboard_stats_service(
-        db=db,
-        doctor_id=current_user.id
-    )
-
-    return {
-
-        "success": True,
-        "message": (
-            "Dashboard stats fetched successfully"
-        ),
-        "data": stats
-    }
 
 
 # ==========================================================
@@ -69,30 +36,23 @@ def get_dashboard_stats(
 
 @router.get(
     "/today",
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_today_appointments(
-
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(
-        PermissionChecker("appointments:view")
-    )
+    _: bool = Depends(PermissionChecker("appointments:view")),
 ):
-
     appointments = get_today_appointments_service(
         db=db,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
     )
 
     return {
-
         "success": True,
-        "message": (
-            "Today's appointments fetched successfully"
-        ),
+        "message": "Today's appointments fetched successfully",
         "appointment": len(appointments),
-        "appointments": appointments
+        "appointments": appointments,
     }
 
 
@@ -102,31 +62,21 @@ def get_today_appointments(
 
 @router.get(
     "/history",
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_appointment_history(
-
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(
-        PermissionChecker("appointments:view")
-    )
+    _: bool = Depends(PermissionChecker("appointments:view")),
 ):
-
-    appointments = get_appointment_history_service(
+    return get_appointment_history_service(
         db=db,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
+        page=page,
+        page_size=page_size,
     )
-
-    return {
-
-        "success": True,
-        "message": (
-            "Appointment history fetched successfully"
-        ),
-        "total_appointments": len(appointments),
-        "appointments": appointments
-    }
 
 
 # ==========================================================
@@ -135,33 +85,25 @@ def get_appointment_history(
 
 @router.get(
     "/by-date/{appointment_date}",
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_appointments_by_date(
-
     appointment_date: date,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(
-        PermissionChecker("appointments:view")
-    )
+    _: bool = Depends(PermissionChecker("appointments:view")),
 ):
-
     appointments = get_appointments_by_date_service(
-
         db=db,
         doctor_id=current_user.id,
-        appointment_date=appointment_date
+        appointment_date=appointment_date,
     )
 
     return {
-
         "success": True,
-        "message": (
-            "Appointments fetched successfully"
-        ),
+        "message": "Appointments fetched successfully",
         "total_appointments": len(appointments),
-        "appointments": appointments
+        "appointments": appointments,
     }
 
 
@@ -171,39 +113,26 @@ def get_appointments_by_date(
 
 @router.put(
     "/{appointment_id}/status",
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def update_appointment_status(
-
     appointment_id: int,
     appointment_data: AppointmentStatusUpdate,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker("appointments:update")
-    )
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-
     appointment = update_appointment_status_service(
-
         db=db,
         appointment_id=appointment_id,
         doctor_id=current_user.id,
-        status=appointment_data.status
+        status=appointment_data.status,
     )
 
     return {
-
         "success": True,
-        "message": (
-            "Appointment status updated successfully"
-        ),
-        "appointment": appointment
+        "message": "Appointment status updated successfully",
+        "appointment": appointment,
     }
 
 
@@ -213,32 +142,21 @@ def update_appointment_status(
 
 @router.get(
     "/{appointment_id}",
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_appointment_by_id(
-
     appointment_id: int,
-
     db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker("appointments:view")
-    )
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("appointments:view")),
 ):
-
     appointment = get_appointment_by_id_service(
-
         db=db,
         appointment_id=appointment_id,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
     )
 
     return {
-
         "success": True,
-        "appointment": appointment
+        "appointment": appointment,
     }

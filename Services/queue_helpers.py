@@ -6,7 +6,6 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from Models.doctor_patient_queue import PatientQueue, QueueStatus
-from Models.doctor_queue_next_request import NextRequestStatus
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit
 
@@ -14,8 +13,6 @@ from Models.patient import OpdVisit
 READY_FOR_DOCTOR = frozenset({QueueStatus.SCHEDULED})
 NO_SHOW_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
 COMPLETE_CONSULTATION_ELIGIBLE = frozenset({QueueStatus.SCHEDULED})
-
-REQUEST_NEXT_APPOINTMENT_STATUSES = frozenset({AppointmentStatus.scheduled})
 
 TERMINAL_APPOINTMENT_STATUSES = frozenset(
     {
@@ -27,12 +24,10 @@ TERMINAL_APPOINTMENT_STATUSES = frozenset(
 
 __all__ = [
     "AppointmentStatus",
-    "NextRequestStatus",
     "QueueStatus",
     "READY_FOR_DOCTOR",
     "NO_SHOW_ELIGIBLE",
     "COMPLETE_CONSULTATION_ELIGIBLE",
-    "REQUEST_NEXT_APPOINTMENT_STATUSES",
     "TERMINAL_APPOINTMENT_STATUSES",
     "status_value",
     "appointment_status_value",

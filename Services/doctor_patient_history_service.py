@@ -66,8 +66,17 @@ def get_patients_service(
     }
 
 
-def get_patient_details_service(db: Session, doctor_id: int, patient_uid: str) -> list[dict]:
-    rows = (
+def get_patient_details_service(
+    db: Session,
+    doctor_id: int,
+    patient_uid: str,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
+    query = (
         db.query(Appointment, Patient)
         .join(Patient, Appointment.patient_id == Patient.id)
         .filter(
@@ -76,7 +85,21 @@ def get_patient_details_service(db: Session, doctor_id: int, patient_uid: str) -
             Appointment.status == "completed",
             Patient.is_active.is_(True),
         )
-        .order_by(Appointment.scheduled_at.desc())
+    )
+    total = query.count()
+    rows = (
+        query.order_by(Appointment.scheduled_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return [h.appointment_to_dict(db, apt, patient) for apt, patient in rows]
+    visits = [h.appointment_to_dict(db, apt, patient) for apt, patient in rows]
+    return {
+        "success": True,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": visits,
+        # Legacy key for existing doctor clients
+        "patient_history": visits,
+    }

@@ -1,5 +1,4 @@
-from datetime import date, datetime
-from typing import Optional
+from datetime import datetime
 
 from fastapi import HTTPException
 from sqlalchemy import func
@@ -16,9 +15,7 @@ from Services import doctor_helpers as h
 from Services import opd_helpers
 from Services.notification_service import create_notification
 from Services.queue_helpers import (
-    COMPLETE_CONSULTATION_ELIGIBLE,
     apply_eligible_queue_filters,
-    is_queue_status,
     is_visit_paid,
     persist,
     status_value,
@@ -61,28 +58,6 @@ def _notify_paid_appointment_in_queue(
         created_by=created_by,
         created_by_name=_staff_name(db, created_by),
     )
-
-
-def reactivate_queue_for_appointment_service(
-    db: Session,
-    queue: PatientQueue,
-    appointment: Appointment,
-    *,
-    set_appointment_scheduled: bool = True,
-) -> PatientQueue:
-    """Allow the same appointment to re-enter the queue after completion or reschedule."""
-    queue.status = QueueStatus.SCHEDULED
-    queue.queue_date = date.today()
-    queue.queue_entered_at = datetime.now(IST)
-    queue.consultation_started_at = None
-    queue.consultation_completed_at = None
-    queue.is_current = False
-    queue.token_number = generate_token_number_service(db, appointment.doctor_id)
-    if set_appointment_scheduled:
-        appointment.status = AppointmentStatus.scheduled
-    db.commit()
-    db.refresh(queue)
-    return queue
 
 
 def _today():
@@ -364,119 +339,3 @@ def get_today_queue_service(db: Session, doctor_id: int) -> list[PatientQueue]:
     )
     q = apply_eligible_queue_filters(q)
     return q.order_by(PatientQueue.priority.desc(), PatientQueue.token_number.asc()).all()
-
-
-def start_consultation_service(
-    db: Session,
-    queue_id: int,
-    doctor_id: int,
-) -> dict:
-    """Mark consultation started for a scheduled queue row (no separate in_progress status)."""
-    queue = (
-        db.query(PatientQueue)
-        .filter(PatientQueue.id == queue_id, PatientQueue.doctor_id == doctor_id)
-        .with_for_update()
-        .first()
-    )
-    if not queue:
-        raise HTTPException(status_code=404, detail="Queue not found")
-
-    if not is_queue_status(queue.status, COMPLETE_CONSULTATION_ELIGIBLE):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Consultation can only be started from scheduled "
-                f"(current: {status_value(queue.status)})"
-            ),
-        )
-
-    now = datetime.now(IST)
-    db.query(PatientQueue).filter(
-        PatientQueue.doctor_id == doctor_id,
-        PatientQueue.queue_date == _today(),
-        PatientQueue.is_current.is_(True),
-        PatientQueue.id != queue.id,
-    ).update({"is_current": False}, synchronize_session=False)
-
-    queue.is_current = True
-    if queue.consultation_started_at is None:
-        queue.consultation_started_at = now
-    queue.updated_by = doctor_id
-    persist(db)
-    db.refresh(queue)
-
-    waiting_minutes = 0
-    if queue.queue_entered_at:
-        entered = queue.queue_entered_at
-        if entered.tzinfo is None:
-            entered = entered.replace(tzinfo=IST)
-        waiting_minutes = max(int((now - entered).total_seconds() // 60), 0)
-
-    return {
-        "waiting_minutes": waiting_minutes,
-        "queue": queue_to_summary(queue),
-    }
-
-
-def get_current_consultation_service(
-    db: Session,
-    doctor_id: int,
-) -> dict | None:
-    """Return today's current consultation for the doctor, if any."""
-    queue = (
-        db.query(PatientQueue)
-        .filter(
-            PatientQueue.doctor_id == doctor_id,
-            PatientQueue.queue_date == _today(),
-            PatientQueue.is_current.is_(True),
-            PatientQueue.status == QueueStatus.SCHEDULED,
-        )
-        .order_by(PatientQueue.consultation_started_at.desc().nullslast())
-        .first()
-    )
-    if not queue:
-        return None
-    return queue_to_summary(queue)
-
-
-def complete_consultation_service(
-    db: Session,
-    queue_id: int,
-    doctor_id: int,
-    clinical: CompleteConsultationSchema | None = None,
-) -> dict:
-    queue = (
-        db.query(PatientQueue)
-        .filter(PatientQueue.id == queue_id, PatientQueue.doctor_id == doctor_id)
-        .with_for_update()
-        .first()
-    )
-    if not queue:
-        raise HTTPException(status_code=404, detail="Queue not found")
-
-    if status_value(queue.status) == QueueStatus.COMPLETED.value:
-        raise HTTPException(status_code=400, detail="Consultation already completed")
-
-    if not is_queue_status(queue.status, COMPLETE_CONSULTATION_ELIGIBLE):
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Consultation can only be completed from scheduled "
-                f"(current: {status_value(queue.status)})"
-            ),
-        )
-
-    appointment = db.query(Appointment).filter(Appointment.id == queue.appointment_id).first()
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-
-    result = finalize_consultation(
-        db,
-        queue,
-        appointment,
-        clinical=clinical,
-        updated_by=doctor_id,
-    )
-    persist(db)
-    db.refresh(queue)
-    return result

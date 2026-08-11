@@ -1,4 +1,4 @@
-from datetime import datetime,date
+from datetime import datetime, date, time
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -11,7 +11,8 @@ from Models.opd_billing import Bed
 from Models.nurse_emergency_alert import (
     EmergencyAlert,
     AlertStatus,
-    AlertSeverity
+    AlertSeverity,
+    AlertType,
 )
 
 from Models.nurse_patient_vitals import PatientVitals
@@ -39,6 +40,31 @@ def _now():
     return datetime.now(
         ZoneInfo("Asia/Kolkata")
     )
+
+
+def _parse_enum(enum_cls, raw: str | None):
+    """Return enum member for value/name, or None if missing/invalid (never raise)."""
+    if raw is None:
+        return None
+    text = str(raw).strip()
+    if not text:
+        return None
+    lowered = text.lower()
+    for member in enum_cls:
+        if member.value == lowered or member.name.lower() == lowered:
+            return member
+    return None
+
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _day_start(d: date) -> datetime:
+    return datetime.combine(d, time.min, tzinfo=IST)
+
+
+def _day_end(d: date) -> datetime:
+    return datetime.combine(d, time.max, tzinfo=IST)
 
 
 def _alert_severity_priority(severity) -> NotificationPriority:
@@ -1039,22 +1065,23 @@ def get_alerts_service(
     )
 
     if status and status.lower() != "all":
-
-        query = query.filter(
-            EmergencyAlert.status == status
-        )
+        status_enum = _parse_enum(AlertStatus, status)
+        if status_enum is None:
+            # Unknown status → empty page (not a 500 / DB enum error).
+            return {"total": 0, "page": page, "limit": limit, "data": []}
+        query = query.filter(EmergencyAlert.status == status_enum)
 
     if severity:
-
-        query = query.filter(
-            EmergencyAlert.severity == severity
-        )
+        severity_enum = _parse_enum(AlertSeverity, severity)
+        if severity_enum is None:
+            return {"total": 0, "page": page, "limit": limit, "data": []}
+        query = query.filter(EmergencyAlert.severity == severity_enum)
 
     if alert_type:
-
-        query = query.filter(
-            EmergencyAlert.alert_type == alert_type
-        )
+        alert_type_enum = _parse_enum(AlertType, alert_type)
+        if alert_type_enum is None:
+            return {"total": 0, "page": page, "limit": limit, "data": []}
+        query = query.filter(EmergencyAlert.alert_type == alert_type_enum)
 
     if ward_name:
 
@@ -1092,15 +1119,13 @@ def get_alerts_service(
         )
 
     if from_date:
-
         query = query.filter(
-            EmergencyAlert.triggered_at >= from_date
+            EmergencyAlert.triggered_at >= _day_start(from_date)
         )
 
     if to_date:
-
         query = query.filter(
-            EmergencyAlert.triggered_at <= to_date
+            EmergencyAlert.triggered_at <= _day_end(to_date)
         )
 
     if search:

@@ -30,7 +30,7 @@ def _paginate_vitals(
     """
     Registry lists use latest_per_patient=True (one row per patient).
     Patient timeline / filtered history keep latest_per_patient=False (all rows).
-    Updates still append new recordings — detail payload includes full history.
+    Detail payload includes full history across create recordings for the patient.
     """
     if not latest_per_patient:
         vitals = (
@@ -405,10 +405,7 @@ def update_vital_service(
     vital_data: VitalUpdate,
     nurse_id: int,
 ):
-    """
-    Append a new vitals recording (does not overwrite the previous snapshot).
-    Old values stay available in the Recorded At history filter; latest is newest.
-    """
+    """Overwrite the existing vitals row in place (same id)."""
 
     vital = (
         db.query(PatientVitals)
@@ -442,43 +439,43 @@ def update_vital_service(
             update_data.pop("mark_critical", False)
         )
 
-        def pick(field):
-            return update_data[field] if field in update_data else getattr(vital, field)
-
-        new_vital = PatientVitals(
-            appointment_id=vital.appointment_id,
-            patient_id=vital.patient_id,
-            recorded_by=nurse_id,
-            temperature=pick("temperature"),
-            blood_pressure=pick("blood_pressure"),
-            heart_rate=pick("heart_rate"),
-            respiratory_rate=pick("respiratory_rate"),
-            oxygen_saturation=pick("oxygen_saturation"),
-            blood_sugar=pick("blood_sugar"),
-            weight=pick("weight"),
-            pain_level=pick("pain_level"),
-            observation_notes=pick("observation_notes"),
-            status=VitalStatus.RECORDED,
-            created_by=nurse_id,
-            recorded_at=datetime.now(IST),
+        allowed_fields = (
+            "temperature",
+            "blood_pressure",
+            "heart_rate",
+            "respiratory_rate",
+            "oxygen_saturation",
+            "blood_sugar",
+            "weight",
+            "pain_level",
+            "observation_notes",
         )
-        db.add(new_vital)
+        for field in allowed_fields:
+            if field in update_data:
+                setattr(vital, field, update_data[field])
+
+        now = datetime.now(IST)
+        vital.status = VitalStatus.RECORDED
+        vital.updated_by = nurse_id
+        vital.updated_at = now
+        vital.recorded_at = now
+
         db.commit()
-        db.refresh(new_vital)
-        new_vital = (
+        db.refresh(vital)
+        vital = (
             _vital_query(db)
-            .filter(PatientVitals.id == new_vital.id)
+            .filter(PatientVitals.id == vital.id)
             .first()
         )
 
         process_vital_alerts(
             db=db,
-            vital=new_vital,
+            vital=vital,
             nurse_id=nurse_id,
             mark_critical=mark_critical,
         )
 
-        return _serialize_vital(_enrich_vital(db, new_vital), db)
+        return _serialize_vital(_enrich_vital(db, vital), db)
 
     except Exception:
         db.rollback()

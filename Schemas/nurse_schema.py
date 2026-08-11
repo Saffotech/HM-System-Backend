@@ -84,6 +84,7 @@ class VitalResponse(BaseModel):
 
     status: Optional[str] = None
     recorded_at: datetime
+    updated_at: Optional[datetime] = None
     # Newest-first list of all recordings for this patient (Recorded At filter)
     history: Optional[List[dict]] = None
 
@@ -152,6 +153,7 @@ class NursingNoteResponse(BaseModel):
 
     status: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
     # Newest-first list of all notes for this patient (Created At filter)
     history: Optional[List[dict]] = None
 

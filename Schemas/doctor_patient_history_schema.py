@@ -30,7 +30,7 @@ class PatientHistoryItem(BaseModel):
 
     patient_phone: str
 
-    patient_age: Optional[int] = None
+    patient_age: Optional[int | str] = None
 
     patient_gender: Optional[str | int] = None
 
@@ -70,11 +70,12 @@ class PatientHistoryListResponse(PaginatedResponse[PatientHistoryItem]):
 
 
 
-class PatientHistoryDetailResponse(BaseModel):
+class PatientHistoryDetailResponse(PaginatedResponse[PatientHistoryItem]):
 
-    success: bool = True
+    """Paginated visit history for one patient UHID."""
 
-    patient_history: list[PatientHistoryItem]
+    # Legacy key for existing doctor clients
+    patient_history: list[PatientHistoryItem] = Field(default_factory=list)
 
 
 
@@ -83,5 +84,4 @@ class PatientHistoryDetailResponse(BaseModel):
 # Re-export shared pagination params for router Depends()
 
 PaginationSchema = PaginationParams
-
 

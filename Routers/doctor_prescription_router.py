@@ -1,23 +1,23 @@
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.orm import Session
 from database import get_db
-from dependencies import get_current_user,PermissionChecker
+from dependencies import get_current_user, PermissionChecker
 from Models.user import User
 from Schemas.doctor_prescription_schema import (
     PrescriptionCreate,
-    PrescriptionResponse
+    PrescriptionResponse,
+    PrescriptionListPaginatedResponse,
 )
 from Services.doctor_prescription_service import (
     create_prescription_service,
     get_prescription_by_id_service,
     get_patient_prescriptions_service,
     update_prescription_service,
-    delete_prescription_service
 )
 
 router = APIRouter(
     prefix="/prescriptions",
-    tags=["Doctor Prescriptions"]
+    tags=["Doctor Prescriptions"],
 )
 
 
@@ -28,21 +28,18 @@ router = APIRouter(
 @router.post(
     "",
     response_model=PrescriptionResponse,
-    status_code=status.HTTP_201_CREATED
+    status_code=status.HTTP_201_CREATED,
 )
 def create_prescription(
-
     prescription_data: PrescriptionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("prescriptions:create"))
+    _: bool = Depends(PermissionChecker("prescriptions:create")),
 ):
-
     prescription = create_prescription_service(
-
         db=db,
         prescription_data=prescription_data,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
     )
 
     return prescription
@@ -55,70 +52,45 @@ def create_prescription(
 @router.get(
     "/{prescription_id}",
     response_model=PrescriptionResponse,
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def get_prescription_by_id(
-
     prescription_id: int,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
 ):
-
     prescription = get_prescription_by_id_service(
-
         db=db,
         prescription_id=prescription_id,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
     )
 
     return prescription
 
 
 # ==========================================================
-# Get Patient Prescription History
+# Get Patient Prescriptions
 # ==========================================================
 
 @router.get(
-    "/patient/history",
-    response_model=list[PrescriptionResponse],
+    "/patient/{patient_id}",
+    response_model=PrescriptionListPaginatedResponse,
     status_code=status.HTTP_200_OK,
 )
-def get_patient_prescriptions_by_filters(
-    patient_id: int | None = Query(None, ge=1),
-    patient_uid: str | None = Query(None),
+def get_patient_prescriptions(
+    patient_id: int,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     return get_patient_prescriptions_service(
         db=db,
-        doctor_id=current_user.id,
         patient_id=patient_id,
-        patient_uid=patient_uid,
+        doctor_id=current_user.id,
+        page=page,
+        page_size=page_size,
     )
-
-
-@router.get(
-    "/patient/{patient_id}",
-    response_model=list[PrescriptionResponse],
-    status_code=status.HTTP_200_OK,
-)
-def get_patient_prescriptions(
-
-    patient_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-
-    prescriptions = (
-        get_patient_prescriptions_service(
-
-            db=db,
-            patient_id=patient_id,
-            doctor_id=current_user.id
-        )
-    )
-
-    return prescriptions
 
 
 # ==========================================================
@@ -128,56 +100,20 @@ def get_patient_prescriptions(
 @router.put(
     "/{prescription_id}",
     response_model=PrescriptionResponse,
-    status_code=status.HTTP_200_OK
+    status_code=status.HTTP_200_OK,
 )
 def update_prescription(
-
     prescription_id: int,
     prescription_data: PrescriptionCreate,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("prescriptions:update"))
+    _: bool = Depends(PermissionChecker("prescriptions:update")),
 ):
-
     prescription = update_prescription_service(
-
         db=db,
         prescription_id=prescription_id,
         prescription_data=prescription_data,
-        doctor_id=current_user.id
+        doctor_id=current_user.id,
     )
 
     return prescription
-
-
-# ==========================================================
-# Delete Prescription
-# ==========================================================
-
-@router.delete(
-    "/{prescription_id}",
-    status_code=status.HTTP_200_OK
-)
-def delete_prescription(
-
-    prescription_id: int,
-
-    db: Session = Depends(get_db),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker("prescriptions:delete")
-    )
-):
-
-    result = delete_prescription_service(
-
-        db=db,
-        prescription_id=prescription_id,
-        doctor_id=current_user.id
-    )
-
-    return result

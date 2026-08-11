@@ -25,6 +25,9 @@ class LabTestCreate(BaseModel):
         max_length=100
     )
 
+    # Optional for existing clients; when omitted, backend infers LAB vs RAD.
+    department_id: Optional[int] = None
+
     priority: str = Field(
         default="Normal",
         max_length=50
@@ -50,6 +53,8 @@ class LabTestUpdate(BaseModel):
         default=None,
         max_length=100
     )
+
+    department_id: Optional[int] = None
 
     priority: Optional[str] = Field(
         default=None,
@@ -77,6 +82,7 @@ class LabTestResponse(BaseModel):
     )
 
     doctor_id: int
+    department_id: int
 
     test_name: str
     category: str
@@ -104,9 +110,12 @@ class LabTestListResponse(BaseModel):
         validation_alias=AliasChoices("patient_uid", "patient_uhid")
     )
 
+    department_id: int
+
     test_name: str
     category: str
     priority: str
+    clinical_notes: Optional[str] = None
 
     status: str
 
@@ -119,70 +128,9 @@ class LabTestListPaginatedResponse(PaginatedResponse[LabTestListResponse]):
     pass
 
 
-class LabTestReportSummary(BaseModel):
-    id: int
-    report_file: Optional[str] = None
-    remarks: Optional[str] = None
-    created_at: datetime
-    file_name: Optional[str] = None
-    file_type: Optional[str] = None
-    file_size: Optional[int] = None
-    source: Optional[str] = None
-
-
-class LabTestDetailResponse(BaseModel):
-    id: int
-    appointment_id: int
-
-    patient_id: int
-    patient_name: str
-    patient_uid: str = Field(
-        validation_alias=AliasChoices("patient_uid", "patient_uhid")
-    )
-
-    doctor_id: int
-
-    test_name: str
-    category: str
-    priority: str
-    clinical_notes: Optional[str] = None
-
-    status: str
-
-    created_at: datetime
-    updated_at: datetime
-
-    report_uploaded: bool = False
-    has_report: bool = False
-    report: Optional[LabTestReportSummary] = None
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-
 # ==========================================
-# Doctor Lab Report History
+# Doctor Lab Report Detail
 # ==========================================
-
-class DoctorLabReportListItem(BaseModel):
-    report_id: int
-    order_id: int
-    patient_id: int
-    patient_name: str
-    patient_uid: str
-    test_name: str
-    category: str
-    status: str
-    source: str
-    has_file: bool
-    uploaded_at: datetime
-    uploaded_by_name: str
-
-    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
-
-
-class DoctorLabReportListResponse(PaginatedResponse[DoctorLabReportListItem]):
-    pass
-
 
 class DoctorLabReportParameter(BaseModel):
     id: int
@@ -201,6 +149,7 @@ class DoctorLabReportDetailResponse(BaseModel):
     patient_uid: str
     test_name: str
     category: str
+    department_id: Optional[int] = None
     priority: str
     order_status: str
     source: str

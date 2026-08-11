@@ -16,10 +16,29 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _sync_hospital_settings_columns(columns: set[str]) -> None:
+    if "license_number" in columns and "registration_number" not in columns:
+        op.alter_column(
+            "hospital_settings",
+            "license_number",
+            new_column_name="registration_number",
+        )
+        columns.discard("license_number")
+        columns.add("registration_number")
+
+    if "registration_number" not in columns:
+        op.add_column(
+            "hospital_settings",
+            sa.Column("registration_number", sa.String(length=100), nullable=True),
+        )
+
+
 def upgrade() -> None:
     bind = op.get_bind()
     inspector = sa.inspect(bind)
     if "hospital_settings" in inspector.get_table_names():
+        columns = {col["name"] for col in inspector.get_columns("hospital_settings")}
+        _sync_hospital_settings_columns(columns)
         return
 
     op.create_table(

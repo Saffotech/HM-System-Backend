@@ -1,5 +1,3 @@
-from datetime import date
-
 from fastapi import (
     APIRouter,
     Depends,
@@ -17,20 +15,14 @@ from Schemas.doctor_lab_test_schema import (
     LabTestUpdate,
     LabTestResponse,
     LabTestListPaginatedResponse,
-    LabTestDetailResponse,
-    DoctorLabReportListResponse,
     DoctorLabReportDetailResponse,
 )
-
-from Schemas.lab_schema import ReportSource
 
 from Services.doctor_lab_test_service import (
     create_lab_test_service,
     get_lab_tests_service,
-    get_lab_test_by_id_service,
     update_lab_test_service,
     cancel_lab_test_service,
-    get_doctor_lab_reports_service,
     get_doctor_lab_report_by_test_service,
     get_doctor_lab_report_file_by_test_service,
 )
@@ -94,68 +86,6 @@ def get_lab_tests(
         status=status,
         page=page,
         page_size=page_size,
-    )
-
-
-# ==========================================================
-# Doctor Lab Report History
-# ==========================================================
-
-@router.get(
-    "/reports",
-    response_model=DoctorLabReportListResponse,
-)
-def get_doctor_lab_reports(
-    search: str | None = None,
-    patient_id: int | None = None,
-    patient_uid: str | None = None,
-    patient_name: str | None = None,
-    test_name: str | None = None,
-    status: str | None = None,
-    source: ReportSource | None = None,
-    from_date: date | None = None,
-    to_date: date | None = None,
-    page: int = 1,
-    page_size: int = 20,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("lab:view")),
-):
-    return get_doctor_lab_reports_service(
-        db=db,
-        doctor_id=current_user.id,
-        search=search,
-        patient_id=patient_id,
-        patient_uid=patient_uid,
-        patient_name=patient_name,
-        test_name=test_name,
-        status=status,
-        source=source,
-        from_date=from_date,
-        to_date=to_date,
-        page=page,
-        page_size=page_size,
-    )
-
-
-# ==========================================================
-# Lab Test Detail
-# ==========================================================
-
-@router.get(
-    "/{test_id}",
-    response_model=LabTestDetailResponse,
-)
-def get_lab_test(
-    test_id: int,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("lab:view")),
-):
-    return get_lab_test_by_id_service(
-        db=db,
-        test_id=test_id,
-        doctor_id=current_user.id,
     )
 
 

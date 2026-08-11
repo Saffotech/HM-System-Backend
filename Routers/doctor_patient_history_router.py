@@ -62,17 +62,16 @@ def get_patients(
 )
 def get_patient_details(
     patient_uid: str,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:view"))
 ):
-    patient = get_patient_details_service(
+    return get_patient_details_service(
         db=db,
         doctor_id=current_user.id,
-        patient_uid=patient_uid
+        patient_uid=patient_uid,
+        page=page,
+        page_size=page_size,
     )
-
-    return {
-        "success": True,
-        "patient_history": patient
-    }

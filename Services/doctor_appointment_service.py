@@ -4,20 +4,16 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from Models.opd_billing import Appointment, AppointmentStatus
-from Schemas.doctor_appointment_schema import AppointmentConsultationUpdate
-from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 from Services import doctor_helpers as h
 from Services import opd_helpers
 from Services.doctor_patient_queue_service import (
-    _apply_clinical_to_appointment,
     complete_queue_for_appointment_if_exists,
-    queue_to_summary,
 )
 from Services.queue_helpers import persist
 
-# Doctor may only complete. Cancel is OPD; past unconsulted are system-cancelled.
+# Doctor may complete or cancel. Past unconsulted are system-cancelled.
 VALID_TRANSITIONS = {
-    "scheduled": ["completed"],
+    "scheduled": ["completed", "cancelled"],
     "completed": [],
     "cancelled": [],
     "no_show": [],
@@ -87,76 +83,6 @@ def _status_value(status) -> str:
     return getattr(status, "value", status)
 
 
-def _clinical_from_appointment_update(
-    data: AppointmentConsultationUpdate,
-) -> CompleteConsultationSchema:
-    return CompleteConsultationSchema(
-        symptoms=data.symptoms,
-        diagnosis=data.diagnosis,
-        notes=data.notes,
-        follow_up_date=data.follow_up_date,
-    )
-
-
-def complete_appointment_consultation_service(
-    db: Session,
-    appointment_id: int,
-    doctor_id: int,
-    clinical: AppointmentConsultationUpdate,
-) -> dict:
-    """
-    Queue-optional consultation save:
-    scheduled → completed with clinical fields.
-    Updates patient_queue only if a row already exists today.
-    """
-    appointment = (
-        _doctor_appointments_query(db, doctor_id)
-        .filter(Appointment.id == appointment_id)
-        .with_for_update()
-        .first()
-    )
-    if not appointment:
-        raise HTTPException(status_code=404, detail="Appointment not found")
-
-    current = _status_value(appointment.status)
-    if current == AppointmentStatus.completed.value:
-        raise HTTPException(status_code=400, detail="Consultation already completed")
-    if current == AppointmentStatus.cancelled.value:
-        raise HTTPException(status_code=400, detail="Cannot save consultation for cancelled appointment")
-
-    allowed = VALID_TRANSITIONS.get(current, [])
-    if AppointmentStatus.completed.value not in allowed:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot complete consultation from appointment status {current}",
-        )
-
-    clinical_payload = _clinical_from_appointment_update(clinical)
-    queue = complete_queue_for_appointment_if_exists(
-        db,
-        appointment_id,
-        appointment,
-        clinical=clinical_payload,
-        updated_by=doctor_id,
-    )
-
-    if not queue:
-        _apply_clinical_to_appointment(appointment, clinical_payload)
-        appointment.status = AppointmentStatus.completed
-
-    persist(db)
-    db.refresh(appointment)
-    if queue:
-        db.refresh(queue)
-
-    return {
-        "success": True,
-        "message": "Consultation saved",
-        "appointment": h.appointment_to_dict(db, appointment),
-        "queue": queue_to_summary(queue) if queue else None,
-    }
-
-
 def update_appointment_status_service(
     db: Session,
     appointment_id: int,
@@ -204,14 +130,38 @@ def update_appointment_status_service(
     return h.appointment_to_dict(db, apt)
 
 
-def get_appointment_history_service(db: Session, doctor_id: int) -> list[dict]:
-    rows = (
+def get_appointment_history_service(
+    db: Session,
+    doctor_id: int,
+    page: int = 1,
+    page_size: int = 20,
+) -> dict:
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
+    query = (
         _doctor_appointments_query(db, doctor_id)
         .filter(Appointment.status == AppointmentStatus.completed)
-        .order_by(Appointment.scheduled_at.desc())
+    )
+    total = query.count()
+    rows = (
+        query.order_by(Appointment.scheduled_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
         .all()
     )
-    return h.appointments_to_dicts(db, rows)
+    appointments = h.appointments_to_dicts(db, rows)
+    return {
+        "success": True,
+        "message": "Appointment history fetched successfully",
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+        "items": appointments,
+        # Legacy keys for existing doctor clients
+        "total_appointments": total,
+        "appointments": appointments,
+    }
 
 
 def get_appointments_by_date_service(
@@ -230,19 +180,3 @@ def get_appointments_by_date_service(
         .all()
     )
     return h.appointments_to_dicts(db, rows)
-
-
-def get_dashboard_stats_service(db: Session, doctor_id: int) -> dict:
-    try:
-        mark_past_scheduled_as_no_show(db)
-    except Exception:
-        db.rollback()
-    today_filter = h.scheduled_on_date(opd_helpers.today_ist_date())
-    base = _doctor_appointments_query(db, doctor_id).filter(today_filter)
-
-    return {
-        "today_appointments": base.count(),
-        "patients_scheduled": base.filter(Appointment.status == "scheduled").count(),
-        "completed_consultations": base.filter(Appointment.status == "completed").count(),
-        "cancelled_appointments": base.filter(Appointment.status == "cancelled").count(),
-    }
