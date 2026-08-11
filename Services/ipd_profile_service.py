@@ -34,6 +34,34 @@ def _now():
     return datetime.now(IST)
 
 
+def compute_profile_completed(user: User, profile: IpdProfile) -> bool:
+    """Minimum completion: phone, country code, and address line."""
+    return bool(user.phone and user.phone_code and user.address)
+
+
+def compute_profile_completion_percentage(user: User, profile: IpdProfile) -> int:
+    languages = profile.languages if isinstance(profile.languages, list) else []
+    checks = [
+        bool(user.phone),
+        bool(user.phone_code),
+        bool(user.address),
+        bool(user.city),
+        bool(user.state),
+        user.date_of_birth is not None,
+        user.gender is not None,
+        bool(user.emergency_contact_name),
+        bool(user.emergency_contact_phone),
+        bool(profile.qualification),
+        profile.experience_years is not None,
+        bool(profile.bio),
+        bool(languages),
+        bool(profile.profile_image),
+    ]
+    if not checks:
+        return 0
+    return int(round(100 * sum(1 for ok in checks if ok) / len(checks)))
+
+
 def _get_upload_dir() -> Path:
     upload_dir = Path(os.getenv("IPD_PROFILE_UPLOAD_DIR", "uploads/ipd_image"))
     upload_dir.mkdir(parents=True, exist_ok=True)
@@ -137,6 +165,8 @@ def _to_response(user: User, profile: IpdProfile) -> IpdProfileResponse:
         languages=list(profile.languages or []),
         profile_image_url=to_profile_image_url(profile.profile_image),
         is_profile_completed=bool(profile.is_profile_completed),
+        profile_completion_percentage=compute_profile_completion_percentage(user, profile),
+        is_active=bool(user.is_active),
         role=RoleInfo(id=role.id, name=role.name) if role else None,
         department=DepartmentInfo(id=dept.id, name=dept.name) if dept else None,
         shift=ShiftInfo(
@@ -145,15 +175,13 @@ def _to_response(user: User, profile: IpdProfile) -> IpdProfileResponse:
             end_time=profile.shift_end_time,
         ),
         address=AddressInfo(
-            line1=user.address,
+            line=user.address,
             city=getattr(user, "city", None),
             state=user.state,
-            pincode=getattr(user, "pincode", None),
         ),
         emergency_contact=EmergencyContactInfo(
             name=getattr(user, "emergency_contact_name", None),
             phone=getattr(user, "emergency_contact_phone", None),
-            relation=getattr(user, "emergency_contact_relation", None),
         ),
         updated_at=profile.updated_at,
     )
@@ -182,9 +210,23 @@ def update_ipd_profile(
         if field in updates and hasattr(user, field):
             setattr(user, field, updates[field])
 
-    profile.is_profile_completed = bool(
-        profile.qualification or profile.bio or (profile.languages or [])
-    )
+    if "address" in updates and updates["address"] is not None:
+        address = updates["address"]
+        if "line" in address:
+            user.address = address["line"]
+        if "city" in address:
+            user.city = address["city"]
+        if "state" in address:
+            user.state = address["state"]
+
+    if "emergency_contact" in updates and updates["emergency_contact"] is not None:
+        contact = updates["emergency_contact"]
+        if "name" in contact:
+            user.emergency_contact_name = contact["name"]
+        if "phone" in contact:
+            user.emergency_contact_phone = contact["phone"]
+
+    profile.is_profile_completed = compute_profile_completed(user, profile)
     profile.updated_at = _now()
     db.commit()
     user = _get_ipd_user(db, current_user.id)

@@ -1,14 +1,15 @@
 from datetime import date, datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class StaffListItem(BaseModel):
     id: int
     first_name: str
     last_name: Optional[str] = None
-    email: EmailStr
+    # Use str (not EmailStr): response serialization must not 500 on legacy/dev emails
+    email: str
     role_id: Optional[int] = None
     role_name: Optional[str] = None
     department_id: Optional[int] = None
