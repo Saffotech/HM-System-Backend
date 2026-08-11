@@ -536,8 +536,9 @@ def _appointment_list_count_maps(
     db: Session, q
 ) -> tuple[dict[str, int], dict[str, int]]:
     """One GROUP BY for status counts + one pending COUNT (visit join)."""
+    count_q = q.order_by(None)
     grouped = (
-        q.with_entities(
+        count_q.with_entities(
             Appointment.status,
             func.count(func.distinct(Appointment.id)),
         )
@@ -554,10 +555,11 @@ def _appointment_list_count_maps(
         "cancelled": by_status.get("cancelled", 0),
     }
 
-    visible = q.filter(Appointment.status.in_(_OPD_LIST_STATUSES))
+    visible = count_q.filter(Appointment.status.in_(_OPD_LIST_STATUSES))
     joined, visit_col = _join_matching_visit(visible, db)
     pending = int(
         joined.filter(_scheduled_unpaid_expr(visit_col))
+        .order_by(None)
         .with_entities(func.count(func.distinct(Appointment.id)))
         .scalar()
         or 0
@@ -819,14 +821,13 @@ def list_appointments(
         date_from=date_from,
         date_to=date_to,
     )
-    result_q = _apply_sort(
-        _apply_list_filter(filters_q, db, resolved_list_filter),
-        sort_key,
-        order_key,
-    )
+    filtered_q = _apply_list_filter(filters_q, db, resolved_list_filter)
+    result_q = _apply_sort(filtered_q, sort_key, order_key)
 
     total = (
-        result_q.with_entities(func.count(func.distinct(Appointment.id))).scalar()
+        filtered_q.order_by(None)
+        .with_entities(func.count(func.distinct(Appointment.id)))
+        .scalar()
         or 0
     )
     rows = result_q.offset((page - 1) * limit).limit(limit).all()
