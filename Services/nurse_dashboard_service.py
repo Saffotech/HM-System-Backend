@@ -456,21 +456,20 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
     """Read-only nurse self-service: roster span + active bed allocations for current shift."""
     from Services.nurse_shift_bed_allocation_service import (
         get_nurse_allocation_summary_service,
-        resolve_current_shift_name,
     )
 
     today = _today_ist()
     # Upcoming only: today through ~2 weeks (never include past days).
     roster_to = today + timedelta(days=13)
 
-    current_shift_name = resolve_current_shift_name()
+    # Prefer admin bed-allocation duty (name + times) over clock-only defaults.
     allocation_summary = get_nurse_allocation_summary_service(
         db,
         nurse_id,
         assignment_date=today,
-        shift_name=current_shift_name,
+        shift_name=None,
     )
-    shift_name = allocation_summary.get("shift_name") or current_shift_name
+    shift_name = allocation_summary.get("shift_name")
 
     current_shift = {
         "shift_name": shift_name,
@@ -513,14 +512,14 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
 
     # Roster period for the hero:
     # 1) Prefer consecutive span of today's rostered shift (any shift on today).
-    # 2) Else consecutive span of current clock shift if rostered today.
+    # 2) Else consecutive span of current duty shift if rostered today.
     # 3) Else next upcoming roster day for current shift (never fall back to past-only).
     roster_period = {"from_date": None, "to_date": None}
 
     today_rows = [r for r in all_roster_items if r["roster_date"] == today]
     period_shift = None
     if today_rows:
-        # Prefer the current clock shift if rostered today; otherwise use today's first roster shift.
+        # Prefer the resolved duty shift if rostered today; otherwise use today's first roster shift.
         matched = next(
             (
                 r
@@ -550,7 +549,7 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         if span is not None:
             roster_period = {"from_date": span[0], "to_date": span[1]}
 
-    # Bed allocations active today (kab se kab tak) for the current shift.
+    # Bed allocations active today for the resolved duty shift.
     allocation_rows = (
         db.query(
             NurseShiftBedAllocation.id.label("id"),

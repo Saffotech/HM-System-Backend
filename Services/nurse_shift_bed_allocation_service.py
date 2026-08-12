@@ -787,7 +787,7 @@ def list_allocations_by_shift_service(
 # ==========================================================
 
 def resolve_current_shift_name(now: datetime | None = None) -> str:
-    """Map current IST time to Morning / Evening / Night."""
+    """Map current IST time to Morning / Evening / Night (hardcoded defaults)."""
     current = now or _now_ist()
     t = current.timetz().replace(tzinfo=None) if current.tzinfo else current.time()
     for name, (start, end) in DEFAULT_SHIFT_TIMES.items():
@@ -801,6 +801,138 @@ def resolve_current_shift_name(now: datetime | None = None) -> str:
     return "Morning"
 
 
+def _shift_window_covers(
+    now_t: time,
+    start: time | None,
+    end: time | None,
+) -> bool:
+    if start is None or end is None:
+        return False
+    if start <= end:
+        return start <= now_t < end
+    # Overnight window (e.g. 22:00–06:00)
+    return now_t >= start or now_t < end
+
+
+def _allocation_shift_times(
+    row: NurseShiftBedAllocation,
+) -> tuple[time | None, time | None]:
+    start, end = row.shift_start, row.shift_end
+    if start is not None or end is not None:
+        return start, end
+    return DEFAULT_SHIFT_TIMES.get(row.shift_name, (None, None))
+
+
+def get_active_allocations_for_nurse(
+    db: Session,
+    nurse_id: int,
+    *,
+    assignment_date: date | None = None,
+) -> list[NurseShiftBedAllocation]:
+    """Active bed allocations covering the target date (persistent until range ends)."""
+    expire_stale_allocations(db)
+    target_date = assignment_date or _now_ist().date()
+    return (
+        db.query(NurseShiftBedAllocation)
+        .filter(
+            NurseShiftBedAllocation.nurse_id == nurse_id,
+            NurseShiftBedAllocation.is_active.is_(True),
+            NurseShiftBedAllocation.shift_date <= target_date,
+            or_(
+                NurseShiftBedAllocation.assigned_until.is_(None),
+                NurseShiftBedAllocation.assigned_until >= target_date,
+            ),
+        )
+        .order_by(NurseShiftBedAllocation.id.asc())
+        .all()
+    )
+
+
+def resolve_duty_shift_for_nurse(
+    db: Session,
+    nurse_id: int,
+    *,
+    assignment_date: date | None = None,
+    shift_name: str | None = None,
+    now: datetime | None = None,
+) -> dict:
+    """Resolve the nurse's on-duty shift from active bed allocations.
+
+    Priority:
+    1. Explicit ``shift_name`` if that nurse has active allocations for it
+    2. Active allocation whose start/end covers current IST time
+    3. Any active allocation for the date (admin-assigned duty)
+    4. Clock-based default (Morning / Evening / Night)
+    """
+    current = now or _now_ist()
+    now_t = current.timetz().replace(tzinfo=None) if current.tzinfo else current.time()
+    target_date = assignment_date or current.date()
+    active = get_active_allocations_for_nurse(
+        db,
+        nurse_id,
+        assignment_date=target_date,
+    )
+
+    chosen: list[NurseShiftBedAllocation] = []
+    resolved_name: str | None = None
+
+    if shift_name:
+        wanted = _normalize_shift_name(shift_name)
+        matched = [
+            row for row in active
+            if _normalize_shift_name(row.shift_name) == wanted
+        ]
+        if matched:
+            chosen = matched
+            resolved_name = wanted
+
+    if not chosen and active and not shift_name:
+        covering = [
+            row
+            for row in active
+            if _shift_window_covers(now_t, *_allocation_shift_times(row))
+        ]
+        if covering:
+            resolved_name = covering[0].shift_name
+            chosen = [
+                row
+                for row in active
+                if _normalize_shift_name(row.shift_name)
+                == _normalize_shift_name(resolved_name)
+            ]
+
+    if not chosen and active and not shift_name:
+        # Prefer admin-assigned duty over clock default when allocations exist.
+        resolved_name = active[0].shift_name
+        chosen = [
+            row
+            for row in active
+            if _normalize_shift_name(row.shift_name)
+            == _normalize_shift_name(resolved_name)
+        ]
+
+    if not resolved_name:
+        resolved_name = (
+            _normalize_shift_name(shift_name)
+            if shift_name
+            else resolve_current_shift_name(current)
+        )
+
+    sample = chosen[0] if chosen else None
+    if sample:
+        start, end = _allocation_shift_times(sample)
+    else:
+        start, end = DEFAULT_SHIFT_TIMES.get(resolved_name, (None, None))
+
+    return {
+        "assignment_date": target_date,
+        "shift_name": resolved_name,
+        "shift_start": start,
+        "shift_end": end,
+        "allocations": chosen,
+    }
+
+
 def get_allocated_bed_ids_for_nurse(
     db: Session,
     nurse_id: int,
@@ -809,29 +941,13 @@ def get_allocated_bed_ids_for_nurse(
     shift_name: str | None = None,
 ) -> list[int]:
     """Active allocation bed ids for a nurse (for optional dashboard filtering)."""
-    expire_stale_allocations(db)
-    target_date = assignment_date or _now_ist().date()
-    resolved_shift = (
-        _normalize_shift_name(shift_name)
-        if shift_name
-        else resolve_current_shift_name()
+    duty = resolve_duty_shift_for_nurse(
+        db,
+        nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
     )
-    rows = (
-        db.query(NurseShiftBedAllocation.bed_id)
-        .filter(
-            NurseShiftBedAllocation.nurse_id == nurse_id,
-            NurseShiftBedAllocation.shift_name == resolved_shift,
-            NurseShiftBedAllocation.is_active.is_(True),
-            NurseShiftBedAllocation.shift_date <= target_date,
-            or_(
-                NurseShiftBedAllocation.assigned_until.is_(None),
-                NurseShiftBedAllocation.assigned_until >= target_date,
-            ),
-        )
-        .distinct()
-        .all()
-    )
-    return [row[0] for row in rows]
+    return list({row.bed_id for row in duty["allocations"]})
 
 
 def get_allocated_patient_ids_for_nurse(
@@ -871,24 +987,13 @@ def get_nurse_allocation_summary_service(
     shift_name: str | None = None,
 ) -> dict:
     """Assignment summary for logged-in nurse (additive; does not alter bed APIs)."""
-    target_date = assignment_date or _now_ist().date()
-    resolved_shift = (
-        _normalize_shift_name(shift_name)
-        if shift_name
-        else resolve_current_shift_name()
+    duty = resolve_duty_shift_for_nurse(
+        db,
+        nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
     )
-
-    allocations = (
-        db.query(NurseShiftBedAllocation)
-        .filter(
-            NurseShiftBedAllocation.nurse_id == nurse_id,
-            NurseShiftBedAllocation.shift_date == target_date,
-            NurseShiftBedAllocation.shift_name == resolved_shift,
-            NurseShiftBedAllocation.is_active.is_(True),
-        )
-        .all()
-    )
-
+    allocations = duty["allocations"]
     bed_ids = list({row.bed_id for row in allocations})
     assigned = len(bed_ids)
     occupied = 0
@@ -903,20 +1008,13 @@ def get_nurse_allocation_summary_service(
             .count()
         )
 
-    sample = allocations[0] if allocations else None
     return {
         "success": True,
         "has_allocations": assigned > 0,
-        "assignment_date": target_date,
-        "shift_name": resolved_shift if assigned else (
-            sample.shift_name if sample else resolved_shift
-        ),
-        "shift_start": sample.shift_start if sample else (
-            DEFAULT_SHIFT_TIMES.get(resolved_shift, (None, None))[0]
-        ),
-        "shift_end": sample.shift_end if sample else (
-            DEFAULT_SHIFT_TIMES.get(resolved_shift, (None, None))[1]
-        ),
+        "assignment_date": duty["assignment_date"],
+        "shift_name": duty["shift_name"],
+        "shift_start": duty["shift_start"],
+        "shift_end": duty["shift_end"],
         "assigned_bed_count": assigned,
         "occupied_count": occupied,
         "vacant_count": max(assigned - occupied, 0),

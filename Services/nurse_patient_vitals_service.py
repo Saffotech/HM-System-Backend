@@ -397,7 +397,7 @@ def update_vital_service(
     vital_data: VitalUpdate,
     nurse_id: int,
 ):
-    """Overwrite the existing vitals row in place (same id)."""
+    """Append a new vitals snapshot (keeps prior rows for history filter)."""
 
     vital = (
         db.query(PatientVitals)
@@ -432,25 +432,46 @@ def update_vital_service(
             "pain_level",
             "observation_notes",
         )
+
+        snapshot_values = {
+            field: getattr(vital, field)
+            for field in allowed_fields
+        }
         for field in allowed_fields:
             if field in update_data:
-                setattr(vital, field, update_data[field])
+                snapshot_values[field] = update_data[field]
 
         now = datetime.now(IST)
-        vital.status = VitalStatus.RECORDED
-        vital.updated_by = nurse_id
-        vital.updated_at = now
-        vital.recorded_at = now
+        new_vital = PatientVitals(
+            appointment_id=vital.appointment_id,
+            patient_id=vital.patient_id,
+            recorded_by=nurse_id,
+            status=VitalStatus.RECORDED,
+            temperature=snapshot_values["temperature"],
+            blood_pressure=snapshot_values["blood_pressure"],
+            heart_rate=snapshot_values["heart_rate"],
+            respiratory_rate=snapshot_values["respiratory_rate"],
+            oxygen_saturation=snapshot_values["oxygen_saturation"],
+            blood_sugar=snapshot_values["blood_sugar"],
+            weight=snapshot_values["weight"],
+            pain_level=snapshot_values["pain_level"],
+            observation_notes=snapshot_values["observation_notes"],
+            created_by=nurse_id,
+            updated_by=nurse_id,
+            recorded_at=now,
+            updated_at=now,
+        )
 
+        db.add(new_vital)
         db.commit()
-        db.refresh(vital)
-        vital = (
+        db.refresh(new_vital)
+        new_vital = (
             _vital_query(db)
-            .filter(PatientVitals.id == vital.id)
+            .filter(PatientVitals.id == new_vital.id)
             .first()
         )
 
-        return _serialize_vital(_enrich_vital(db, vital), db)
+        return _serialize_vital(_enrich_vital(db, new_vital), db)
 
     except Exception:
         db.rollback()

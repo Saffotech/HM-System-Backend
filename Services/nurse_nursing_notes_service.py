@@ -357,7 +357,7 @@ def update_note_service(
     note_data: NursingNoteUpdate,
     nurse_id: int,
 ):
-    """Overwrite the existing nursing note row in place (same id)."""
+    """Append a new nursing-note snapshot (keeps prior rows for history filter)."""
 
     note = (
         db.query(NursingNote)
@@ -386,24 +386,40 @@ def update_note_service(
             "treatment_response",
             "additional_notes",
         )
+
+        snapshot_values = {
+            field: getattr(note, field)
+            for field in allowed_fields
+        }
         for field in allowed_fields:
             if field in update_data:
-                setattr(note, field, update_data[field])
+                snapshot_values[field] = update_data[field]
 
         now = datetime.now(IST)
-        note.status = NursingNoteStatus.ACTIVE
-        note.updated_by = nurse_id
-        note.updated_at = now
+        new_note = NursingNote(
+            appointment_id=note.appointment_id,
+            patient_id=note.patient_id,
+            nurse_id=nurse_id,
+            status=NursingNoteStatus.ACTIVE,
+            symptoms=snapshot_values["symptoms"],
+            treatment_response=snapshot_values["treatment_response"],
+            additional_notes=snapshot_values["additional_notes"],
+            created_by=nurse_id,
+            updated_by=nurse_id,
+            created_at=now,
+            updated_at=now,
+        )
 
+        db.add(new_note)
         db.commit()
-        db.refresh(note)
-        note = (
+        db.refresh(new_note)
+        new_note = (
             _note_query(db)
-            .filter(NursingNote.id == note.id)
+            .filter(NursingNote.id == new_note.id)
             .first()
         )
 
-        return _serialize_note(_enrich_note(db, note), db)
+        return _serialize_note(_enrich_note(db, new_note), db)
 
     except Exception:
         db.rollback()
