@@ -59,17 +59,77 @@ def _finalize_visit_appointment_and_queue(
         notify_opd_payment_pending(db, visit, created_by=handled_by)
 
 
-def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
+def build_bill_preview(db: Session, data: BillPreviewRequest) -> BillPreviewResponse:
+    """Preview using Admin OPD pricing (same resolver as create_visit)."""
+    pricing = opd_settings_service.get_pricing(db)
+    doctor_id = data.doctor_id
+    department_id = data.department_id
+    if doctor_id is not None and department_id is not None:
+        registration_fee, consultation_fee, gst_percent = (
+            opd_settings_service.resolve_visit_fees(
+                pricing,
+                doctor_id=doctor_id,
+                department_id=department_id,
+                registration_fee=data.registration_fee,
+            )
+        )
+    else:
+        registration_fee = (
+            0.0
+            if float(data.registration_fee or 0) == 0
+            else float(pricing.registration_fee)
+        )
+        consultation_fee = float(pricing.consultation_fee)
+        gst_percent = float(pricing.gst_percent)
+
     subtotal, gst_amount, grand_total = h.bill_totals(
-        data.registration_fee, data.consultation_fee, data.gst_percent
+        registration_fee, consultation_fee, gst_percent
     )
     return BillPreviewResponse(
         bill_items=[
-            BillLineItem(description="Registration Fee", qty=1, unit_price=data.registration_fee, amount=data.registration_fee),
-            BillLineItem(description="Doctor Consultation", qty=1, unit_price=data.consultation_fee, amount=data.consultation_fee),
+            BillLineItem(
+                description="Registration Fee",
+                qty=1,
+                unit_price=registration_fee,
+                amount=registration_fee,
+            ),
+            BillLineItem(
+                description="Doctor Consultation",
+                qty=1,
+                unit_price=consultation_fee,
+                amount=consultation_fee,
+            ),
         ],
-        summary=BillSummary(subtotal=subtotal, gst_percent=data.gst_percent, gst_amount=gst_amount, grand_total=grand_total),
+        summary=BillSummary(
+            subtotal=subtotal,
+            gst_percent=gst_percent,
+            gst_amount=gst_amount,
+            grand_total=grand_total,
+        ),
     )
+
+
+def list_department_doctors_with_fees(db: Session, department_id: int) -> dict:
+    """Doctors in a department with consultation_fee from Admin OPD pricing."""
+    dept, doctors = h.list_doctors_in_department(db, department_id)
+    pricing = opd_settings_service.get_pricing(db)
+    return {
+        "department": dept.name,
+        "doctors": [
+            {
+                "id": d.id,
+                "name": h.display_name(d.first_name, d.last_name, prefix="Dr. "),
+                "department_id": d.department_id,
+                "department_name": dept.name,
+                "consultation_fee": opd_settings_service.resolve_consultation_fee(
+                    pricing,
+                    doctor_id=d.id,
+                    department_id=department_id,
+                ),
+            }
+            for d in doctors
+        ],
+    }
 
 
 def patient_to_model(data: PatientRegisterRequest, patient_uid: str, registered_by: int) -> Patient:
@@ -111,14 +171,15 @@ def create_visit(
     bill_number, token_number = h.next_visit_numbers(db)
 
     if pay_later:
-        paid, status, balance = 0.0, "pending", grand_total
+        paid = 0.0
+    elif amount_received is not None:
+        paid = round(min(max(float(amount_received), 0.0), grand_total), 2)
     else:
-        paid = amount_received if amount_received is not None else grand_total
-        balance = round(max(grand_total - paid, 0), 2)
-        status = "paid" if balance <= 0 else "partial"
+        paid = grand_total
 
     h.ensure_immediate_payment_valid(payment_mode, pay_later, paid, transaction_reference)
 
+    # Ledger starts unpaid. record_payment is the only writer of paid_amount.
     visit = OpdVisit(
         bill_number=bill_number,
         token_number=token_number,
@@ -131,11 +192,11 @@ def create_visit(
         gst_percent=gst_percent,
         gst_amount=gst_amount,
         grand_total=grand_total,
-        payment_status=status,
-        payment_mode=payment_mode if paid > 0 else None,
-        paid_amount=paid if paid > 0 else None,
-        balance_due=balance,
-        paid_at=h.now_ist() if paid > 0 else None,
+        payment_status="pending",
+        payment_mode=None,
+        paid_amount=None,
+        balance_due=grand_total,
+        paid_at=None,
         status="doctor_assigned",
         registered_by=registered_by,
     )
@@ -463,9 +524,9 @@ def get_patient_profile(db: Session, patient_id: int) -> dict:
         .all()
     )
 
-    total_billed = sum(v.grand_total for v in visits)
-    total_paid = sum(v.paid_amount or 0 for v in visits)
-    outstanding = sum(v.balance_due for v in visits)
+    total_billed = sum(v.grand_total or 0 for v in visits)
+    total_paid = sum(min(float(v.paid_amount or 0), float(v.grand_total or 0)) for v in visits)
+    outstanding = sum(v.balance_due or 0 for v in visits)
 
     visit_rows = []
     for v in visits:
@@ -631,18 +692,24 @@ def list_bills(
         ensure_pending_appointment_bills(db, registered_by)
 
     q = _bills_query(db, status, search, today_only, from_date, to_date)
-    total, total_billed, total_collected, total_outstanding = (
-        q.with_entities(
+    totals_q = q.order_by(None)
+    total, total_billed, total_outstanding = (
+        totals_q.with_entities(
             func.count(OpdVisit.id),
             func.coalesce(func.sum(OpdVisit.grand_total), 0.0),
-            func.coalesce(func.sum(OpdVisit.paid_amount), 0.0),
             func.coalesce(func.sum(OpdVisit.balance_due), 0.0),
         ).one()
     )
     total = int(total or 0)
     total_billed = float(total_billed or 0)
-    total_collected = float(total_collected or 0)
     total_outstanding = float(total_outstanding or 0)
+    visit_ids = totals_q.with_entities(OpdVisit.id)
+    total_collected = float(
+        db.query(func.coalesce(func.sum(PaymentTransaction.amount), 0.0))
+        .filter(PaymentTransaction.visit_id.in_(visit_ids))
+        .scalar()
+        or 0
+    )
 
     rows = (
         q.order_by(OpdVisit.id.desc())
@@ -888,6 +955,7 @@ def list_payment_history(
         db.query(PaymentTransaction, OpdVisit, Patient)
         .join(OpdVisit, PaymentTransaction.visit_id == OpdVisit.id)
         .join(Patient, OpdVisit.patient_id == Patient.id)
+        .filter(OpdVisit.status != "cancelled")
         .order_by(PaymentTransaction.paid_at.desc())
     )
     if search:
@@ -983,22 +1051,28 @@ def _queue_visit_from_row(v: OpdVisit, p: Patient, d: Optional[User], dept: Opti
 
 
 def _today_bills_aggregates(db: Session) -> tuple[int, float, int]:
-    """Today's non-cancelled bills: count, collected, pending-payment count."""
+    """Today's non-cancelled bills: count, collected (ledger), pending-payment count."""
     today = h.today_start_ist()
-    bills_count, collected, pending_payments = (
+    today_filter = (
+        OpdVisit.visit_date >= today,
+        OpdVisit.status != "cancelled",
+    )
+    bills_count, pending_payments = (
         db.query(
             func.count(OpdVisit.id),
-            func.coalesce(func.sum(OpdVisit.paid_amount), 0.0),
             func.coalesce(
                 func.sum(case((OpdVisit.balance_due > 0.01, 1), else_=0)),
                 0,
             ),
         )
-        .filter(
-            OpdVisit.visit_date >= today,
-            OpdVisit.status != "cancelled",
-        )
+        .filter(*today_filter)
         .one()
+    )
+    collected = (
+        db.query(func.coalesce(func.sum(PaymentTransaction.amount), 0.0))
+        .join(OpdVisit, PaymentTransaction.visit_id == OpdVisit.id)
+        .filter(*today_filter)
+        .scalar()
     )
     return int(bills_count or 0), round(float(collected or 0), 2), int(pending_payments or 0)
 
