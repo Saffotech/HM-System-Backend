@@ -413,12 +413,6 @@ def update_vital_service(
             detail="Vital record not found"
         )
 
-    if vital.recorded_by != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update vitals you recorded",
-        )
-
     try:
 
         update_data = (

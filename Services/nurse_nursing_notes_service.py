@@ -373,12 +373,6 @@ def update_note_service(
             detail="Note not found"
         )
 
-    if note.nurse_id != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update notes you created",
-        )
-
     try:
 
         update_data = (
