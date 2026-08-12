@@ -14,14 +14,6 @@ import enum
 
 
 class LabTestStatus(str, enum.Enum):
-    """Lab order lifecycle (Option B).
-
-    ordered → sample_collected → completed
-    ordered → cancelled (doctor only)
-
-    Report readiness is derived from LabResult (parameters and/or file),
-    not a separate status. Legacy "processing" is no longer a stored status.
-    """
 
     ORDERED = "ordered"
     SAMPLE_COLLECTED = "sample_collected"
