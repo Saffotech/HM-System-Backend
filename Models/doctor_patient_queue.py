@@ -10,6 +10,7 @@ from sqlalchemy import (
     DateTime,
     Boolean,
     ForeignKey,
+    Index,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator, String as SAString
@@ -76,6 +77,13 @@ class LowercaseStrEnum(TypeDecorator):
 class PatientQueue(Base):
 
     __tablename__ = "patient_queue"
+    __table_args__ = (
+        Index(
+            "ix_patient_queue_appointment_id_queue_date",
+            "appointment_id",
+            "queue_date",
+        ),
+    )
 
     id = Column(
         Integer,

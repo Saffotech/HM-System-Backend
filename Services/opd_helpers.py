@@ -3,7 +3,7 @@ from datetime import datetime
 from typing import List, Optional, Tuple
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from Models.department import Department
@@ -225,6 +225,112 @@ def record_payment(
     visit.balance_due = round(max(visit.grand_total - new_paid, 0), 2)
     visit.payment_status = "paid" if visit.balance_due <= 0 else "partial"
     return txn
+
+
+def _payment_status_for_amounts(grand_total: float, paid_amount: float) -> tuple[float, float, str]:
+    grand = round(float(grand_total or 0), 2)
+    paid = round(min(max(float(paid_amount or 0), 0.0), grand), 2)
+    balance = round(max(grand - paid, 0), 2)
+    if balance <= 0.01:
+        return paid, 0.0, "paid"
+    if paid > 0.01:
+        return paid, balance, "partial"
+    return 0.0, grand, "pending"
+
+
+def repair_visit_payment_ledger(db: Session) -> int:
+    """Cap overstated payment rows and realign visit paid/balance to grand_total.
+
+    Uses Core SQL so it can run from scripts/alembic without loading User mappers.
+    Returns the number of visits that were changed.
+    """
+    visits = db.execute(
+        text(
+            """
+            SELECT id, grand_total, paid_amount, balance_due, payment_status
+            FROM opd_visits
+            WHERE status IS DISTINCT FROM 'cancelled'
+            """
+        )
+    ).mappings().all()
+    updated = 0
+    for visit in visits:
+        visit_id = visit["id"]
+        txns = db.execute(
+            text(
+                """
+                SELECT id, amount
+                FROM payment_transactions
+                WHERE visit_id = :visit_id
+                ORDER BY paid_at DESC, id DESC
+                """
+            ),
+            {"visit_id": visit_id},
+        ).mappings().all()
+        grand = round(float(visit["grand_total"] or 0), 2)
+        txn_sum = round(sum(float(t["amount"] or 0) for t in txns), 2)
+        changed = False
+        if txn_sum > grand + 0.01:
+            excess = round(txn_sum - grand, 2)
+            for txn in txns:
+                if excess <= 0.01:
+                    break
+                amount = round(float(txn["amount"] or 0), 2)
+                if amount <= excess + 0.01:
+                    db.execute(
+                        text("DELETE FROM payment_transactions WHERE id = :id"),
+                        {"id": txn["id"]},
+                    )
+                    excess = round(excess - amount, 2)
+                else:
+                    db.execute(
+                        text("UPDATE payment_transactions SET amount = :amount WHERE id = :id"),
+                        {"amount": round(amount - excess, 2), "id": txn["id"]},
+                    )
+                    excess = 0.0
+                changed = True
+            txn_sum = round(
+                float(
+                    db.execute(
+                        text(
+                            """
+                            SELECT COALESCE(SUM(amount), 0)
+                            FROM payment_transactions
+                            WHERE visit_id = :visit_id
+                            """
+                        ),
+                        {"visit_id": visit_id},
+                    ).scalar()
+                    or 0
+                ),
+                2,
+            )
+
+        paid, balance, status = _payment_status_for_amounts(grand, txn_sum)
+        stored_paid = round(float(visit["paid_amount"] or 0), 2)
+        stored_balance = round(float(visit["balance_due"] or 0), 2)
+        if stored_paid != paid or stored_balance != balance or (visit["payment_status"] or "") != status:
+            db.execute(
+                text(
+                    """
+                    UPDATE opd_visits
+                    SET paid_amount = :paid,
+                        balance_due = :balance,
+                        payment_status = :status
+                    WHERE id = :id
+                    """
+                ),
+                {
+                    "paid": paid if paid > 0.01 else None,
+                    "balance": balance,
+                    "status": status,
+                    "id": visit_id,
+                },
+            )
+            changed = True
+        if changed:
+            updated += 1
+    return updated
 
 
 def payment_history_rows(db: Session, visit_id: int) -> list[dict]:
