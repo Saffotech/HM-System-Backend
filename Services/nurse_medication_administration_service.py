@@ -13,9 +13,6 @@ from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationUpdate,
     MedicationAdministrationResponse,
 )
-from Services.nurse_emergency_alert_triggers import (
-    process_medication_missed_alert,
-)
 
 def _user_display_name(user: User | None) -> str | None:
     if not user:
@@ -416,12 +413,6 @@ def administer_medication_service(
             .first()
         )
 
-        process_medication_missed_alert(
-            db=db,
-            administration=administration,
-            nurse_id=nurse_id,
-        )
-
     except Exception:
         db.rollback()
         raise
@@ -483,12 +474,6 @@ def update_medication_administration_service(
                 MedicationAdministration.id == administration.id
             )
             .first()
-        )
-
-        process_medication_missed_alert(
-            db=db,
-            administration=administration,
-            nurse_id=nurse_id,
         )
 
     except Exception:

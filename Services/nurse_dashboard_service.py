@@ -16,7 +16,6 @@ from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
-from Models.nurse_emergency_alert import AlertSeverity, AlertStatus, EmergencyAlert
 from Models.nurse_medication_administration import (
     MedicationAdministration,
     MedicationStatus,
@@ -644,36 +643,6 @@ def get_nurse_dashboard_stats_service(db: Session) -> dict:
         or 0
     )
 
-    active_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-        )
-        .scalar()
-        or 0
-    )
-    critical_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-            EmergencyAlert.severity == AlertSeverity.CRITICAL,
-        )
-        .scalar()
-        or 0
-    )
-    high_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-            EmergencyAlert.severity == AlertSeverity.HIGH,
-        )
-        .scalar()
-        or 0
-    )
-
     submitted_handovers = (
         db.query(func.count(ShiftHandover.id))
         .filter(ShiftHandover.status == HandoverStatus.SUBMITTED)
@@ -722,9 +691,9 @@ def get_nurse_dashboard_stats_service(db: Session) -> dict:
             "occupied_count": occupied_beds,
         },
         "alerts": {
-            "active_count": active_alerts,
-            "critical_count": critical_alerts,
-            "high_count": high_alerts,
+            "active_count": 0,
+            "critical_count": 0,
+            "high_count": 0,
         },
         "handovers": {
             "submitted_count": submitted_handovers,

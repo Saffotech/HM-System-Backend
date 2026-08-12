@@ -412,7 +412,7 @@ def build_pdf() -> None:
     pdf.table_row(["search", "string min 1", "ILIKE title, message, created_by_name"], wq)
     pdf.table_row(["is_read", "bool optional", "Filter unread/read"], wq)
     pdf.table_row(["source_module", "enum optional", "e.g. NURSE, ADMIN"], wq)
-    pdf.table_row(["notification_type", "enum optional", "e.g. EMERGENCY_ALERT"], wq)
+    pdf.table_row(["notification_type", "enum optional", "e.g. HANDOVER_TAKEN_OVER"], wq)
     pdf.table_row(["start_date / end_date", "date optional", "Inclusive Asia/Kolkata"], wq)
 
     pdf.body(
@@ -493,16 +493,6 @@ def build_pdf() -> None:
     )
     pdf.table_row(
         [
-            "EMERGENCY_ALERT",
-            "by severity",
-            "NURSE",
-            "ALERT",
-            "Alert assigned to nurse, or auto HIGH/CRITICAL alert notifies triggering nurse",
-        ],
-        wt,
-    )
-    pdf.table_row(
-        [
             "HANDOVER_TAKEN_OVER",
             "HIGH",
             "NURSE",
@@ -533,7 +523,6 @@ def build_pdf() -> None:
     )
 
     pdf.sub_title("Deep-link suggestions")
-    pdf.bullet("reference_type = ALERT + reference_id -> emergency alert detail screen")
     pdf.bullet("reference_type = HANDOVER + reference_id -> handover detail / take-over screen")
     pdf.bullet("reference_type = SCHEDULE -> open profile shift section (read-only)")
     pdf.bullet("reference_type = USER (ADMIN_UPDATE) -> show notice; may force logout if deactivated")
@@ -542,7 +531,8 @@ def build_pdf() -> None:
     pdf.body(
         "NotificationType: NEW_APPOINTMENT | APPOINTMENT_CANCELLED | APPOINTMENT_RESCHEDULED | "
         "PATIENT_CHECKED_IN | LAB_REPORT_READY | LAB_REPORT_UPDATED | PRESCRIPTION_CREATED | "
-        "PRESCRIPTION_UPDATED | EMERGENCY_ALERT | ADMIN_UPDATE | HANDOVER_TAKEN_OVER | SHIFT_UPDATED"
+        "PRESCRIPTION_UPDATED | ADMIN_UPDATE | HANDOVER_TAKEN_OVER | SHIFT_UPDATED "
+        "(legacy EMERGENCY_ALERT may still exist in old rows)"
     )
     pdf.body("Priority: NORMAL | HIGH | CRITICAL")
     pdf.body(
@@ -652,7 +642,7 @@ interface NurseNotification {
     pdf.bullet("[ ] Style CRITICAL / HIGH / NORMAL differently")
     pdf.bullet("[ ] Click item -> PATCH .../read then deep-link by reference_type")
     pdf.bullet("[ ] Mark all read button -> PATCH .../read-all then refresh count")
-    pdf.bullet("[ ] Handle EMERGENCY_ALERT, HANDOVER_TAKEN_OVER, SHIFT_UPDATED, ADMIN_UPDATE")
+    pdf.bullet("[ ] Handle HANDOVER_TAKEN_OVER, SHIFT_UPDATED, ADMIN_UPDATE")
     pdf.bullet("[ ] After admin deactivate/delete notice, force re-auth if 401/403")
 
     pdf.sub_title("Common")

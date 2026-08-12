@@ -3,7 +3,6 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
-from Models.nurse_emergency_alert import AlertStatus, EmergencyAlert
 from Models.nurse_medication_administration import (
     MedicationAdministration,
     MedicationStatus,
@@ -49,18 +48,6 @@ def get_nurse_patient_overview_service(
         .filter(NursingNote.patient_id == patient.id)
         .order_by(NursingNote.created_at.desc())
         .limit(max(1, min(notes_limit, 50)))
-        .all()
-    )
-
-    alerts = (
-        db.query(EmergencyAlert)
-        .filter(
-            EmergencyAlert.patient_id == patient.id,
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-        )
-        .order_by(EmergencyAlert.triggered_at.desc())
-        .limit(max(1, min(alerts_limit, 50)))
         .all()
     )
 
@@ -141,26 +128,5 @@ def get_nurse_patient_overview_service(
             }
             for note in notes
         ],
-        "active_alerts": [
-            {
-                "alert_id": alert.id,
-                "alert_uid": alert.alert_uid,
-                "alert_type": (
-                    alert.alert_type.value
-                    if hasattr(alert.alert_type, "value")
-                    else alert.alert_type
-                ),
-                "severity": (
-                    alert.severity.value
-                    if hasattr(alert.severity, "value")
-                    else alert.severity
-                ),
-                "title": alert.title,
-                "ward_name": alert.ward_name,
-                "bed_number": alert.bed_number,
-                "triggered_at": alert.triggered_at,
-                "assigned_nurse_id": alert.assigned_nurse_id,
-            }
-            for alert in alerts
-        ],
+        "active_alerts": [],
     }

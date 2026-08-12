@@ -32,9 +32,6 @@ from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverPatientsBulkCreate,
     ShiftHandoverTakeOver,
 )
-from Services.nurse_emergency_alert_triggers import (
-    get_active_alerts_text_for_patient,
-)
 from Services.notification_service import notify_nurse_handover_taken_over
 
 # ==========================================================
@@ -240,15 +237,11 @@ def _build_patient_care_snapshot(
                     pending_label = f"{pending_label} ({item.frequency})"
                 pending_parts.append(pending_label)
 
-    critical_alerts = get_active_alerts_text_for_patient(db, patient_id)
-
     task_parts: list[str] = []
     if pending_parts:
         task_parts.append(
             f"{len(list(dict.fromkeys(pending_parts)))} medication(s) pending/attention"
         )
-    if critical_alerts:
-        task_parts.append("Review active critical alerts")
     if not latest_vital or (
         latest_vital.recorded_at and latest_vital.recorded_at < day_start
     ):
@@ -264,7 +257,7 @@ def _build_patient_care_snapshot(
             if instruction_parts
             else None
         ),
-        "critical_alerts": critical_alerts,
+        "critical_alerts": None,
         "pending_tasks": "; ".join(task_parts) if task_parts else None,
     }
 

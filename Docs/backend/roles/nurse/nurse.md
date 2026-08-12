@@ -19,7 +19,6 @@ vitals:create, vitals:view
 nursing_notes:create, nursing_notes:view
 medications:create, medications:view
 handover:create, handover:view, handover:update
-emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergency_alerts:escalate
 ```
 
 ---
@@ -61,7 +60,6 @@ emergency_alerts:create, emergency_alerts:view, emergency_alerts:update, emergen
 |--------|--------|-----|
 | Medication administration | Done | `/nurse/medications` |
 | Shift handover | To build | [nurse-handover.md](./nurse-handover.md) |
-| Emergency alerts | To build | [nurse-emergency-alerts.md](./nurse-emergency-alerts.md) |
 
 ---
 
@@ -144,4 +142,3 @@ scheduled_time, status, remarks, administered_at
 ## Phase 2 docs (read next)
 
 - [Shift Handover](./nurse-handover.md) — Word file View 7
-- [Emergency Alerts](./nurse-emergency-alerts.md) — Word file View 8

@@ -22,7 +22,6 @@ class VitalCreate(BaseModel):
     weight: Optional[float] = None
     pain_level: Optional[int] = None
     observation_notes: Optional[str] = None
-    mark_critical: Optional[bool] = False
 
     @model_validator(mode="after")
     def require_appointment_or_patient(self):
@@ -53,8 +52,6 @@ class VitalUpdate(BaseModel):
     pain_level: Optional[int] = None
 
     observation_notes: Optional[str] = None
-
-    mark_critical: Optional[bool] = False
 
 # ==========================================================
 # VITALS Response

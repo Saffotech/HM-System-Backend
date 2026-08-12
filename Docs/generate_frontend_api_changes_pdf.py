@@ -264,7 +264,7 @@ POST /nurse/vitals
 
 // IPD (NEW)
 POST /nurse/vitals
-{ "patient_id": 10, "temperature": 98.6, "heart_rate": 78, "mark_critical": false }
+{ "patient_id": 10, "temperature": 98.6, "heart_rate": 78 }
 """
     )
     pdf.body("Rules:")
@@ -333,7 +333,6 @@ type VitalCreatePayload = {
   weight?: number;
   pain_level?: number;
   observation_notes?: string;
-  mark_critical?: boolean;
 };
 
 type VitalResponse = {

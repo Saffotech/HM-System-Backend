@@ -490,7 +490,6 @@ export interface DoctorProfileImageResponse {
     pdf.body("Default priority by type:")
     pdf.bullet("NEW_APPOINTMENT -> NORMAL")
     pdf.bullet("LAB_REPORT_READY, APPOINTMENT_CANCELLED, APPOINTMENT_RESCHEDULED, ADMIN_UPDATE -> HIGH")
-    pdf.bullet("EMERGENCY_ALERT -> CRITICAL")
 
     pdf.body("NotificationType (values that currently appear in data):")
     wt = [48, 122]
@@ -499,11 +498,11 @@ export interface DoctorProfileImageResponse {
     pdf.table_row(["APPOINTMENT_CANCELLED", "Appointment cancelled AND visit paid"], wt)
     pdf.table_row(["APPOINTMENT_RESCHEDULED", "scheduled_at changed, not cancelled, paid"], wt)
     pdf.table_row(["LAB_REPORT_READY", "Lab report uploaded / first file report created"], wt)
-    pdf.table_row(["EMERGENCY_ALERT", "Critical auto-alert or nurse escalate"], wt)
     pdf.table_row(["ADMIN_UPDATE", "Admin dept change / deactivate / delete doctor"], wt)
 
     pdf.body("Reserved enum values (exist but not produced yet - may use in filters/UI labels):")
     pdf.bullet("PATIENT_CHECKED_IN, LAB_REPORT_UPDATED, PRESCRIPTION_CREATED, PRESCRIPTION_UPDATED")
+    pdf.bullet("EMERGENCY_ALERT (legacy; nurse emergency alerts module removed)")
 
     pdf.body("SourceModule: OPD_BILLING | LAB | NURSE | ADMIN (active). Reserved: RECEPTIONIST, PHARMACY, SYSTEM")
     pdf.body("ReferenceType (deep-link):")
@@ -519,7 +518,6 @@ export interface DoctorProfileImageResponse {
     pdf.bullet("APPOINTMENT_CANCELLED title: \"Appointment Cancelled\" - patient + time")
     pdf.bullet("APPOINTMENT_RESCHEDULED title: \"Appointment Rescheduled\" - patient + new time")
     pdf.bullet("LAB_REPORT_READY title: \"Lab Report Ready\" - \"{test} - {patient}\"")
-    pdf.bullet("EMERGENCY_ALERT - priority CRITICAL; reference PATIENT")
     pdf.bullet("ADMIN_UPDATE - e.g. \"Department reassigned\", \"Account disabled by admin\"")
     pdf.bullet("Unpaid appointments do NOT notify on cancel/reschedule")
     pdf.bullet("Replacing an existing lab file report does NOT create another notification")
