@@ -427,6 +427,46 @@ def _bill_out(db: Session, bill: IpdBill) -> IpdBillOut:
     )
 
 
+def _non_void_bills(db: Session, admission_id: int) -> List[IpdBill]:
+    return (
+        db.query(IpdBill)
+        .filter(
+            IpdBill.admission_id == admission_id,
+            IpdBill.status != "void",
+        )
+        .order_by(IpdBill.id.asc())
+        .all()
+    )
+
+
+def _open_unpaid_bill(db: Session, admission_id: int) -> Optional[IpdBill]:
+    return (
+        db.query(IpdBill)
+        .filter(
+            IpdBill.admission_id == admission_id,
+            IpdBill.status != "void",
+            IpdBill.payment_status.in_(["pending", "partial"]),
+        )
+        .order_by(IpdBill.id.asc())
+        .first()
+    )
+
+
+def _already_billed_total(db: Session, admission_id: int) -> float:
+    """Grand total already captured on non-void bills (paid + open)."""
+    return round(
+        sum(float(b.grand_total or 0) for b in _non_void_bills(db, admission_id)),
+        2,
+    )
+
+
+def _paid_towards_admission(db: Session, admission_id: int) -> float:
+    return round(
+        sum(float(b.paid_amount or 0) for b in _non_void_bills(db, admission_id)),
+        2,
+    )
+
+
 def generate_bill(
     db: Session, data: IpdGenerateBillRequest, generated_by: int
 ) -> IpdBillOut:
@@ -434,15 +474,7 @@ def generate_bill(
     if admission.status == "cancelled":
         raise HTTPException(status_code=400, detail="Cannot bill a cancelled admission")
 
-    open_bill = (
-        db.query(IpdBill)
-        .filter(
-            IpdBill.admission_id == admission.id,
-            IpdBill.status == "final",
-            IpdBill.payment_status.in_(["pending", "partial"]),
-        )
-        .first()
-    )
+    open_bill = _open_unpaid_bill(db, admission.id)
     if open_bill:
         raise HTTPException(
             status_code=400,
@@ -470,6 +502,34 @@ def generate_bill(
         else float(getattr(pricing, "gst_percent", None) or 0)
     )
     subtotal, gst_amount, grand = oh.bill_totals_from_subtotal(subtotal, gst_percent)
+
+    already_billed = _already_billed_total(db, admission.id)
+    due_to_bill = round(max(grand - already_billed, 0), 2)
+    if due_to_bill <= 0.01:
+        raise HTTPException(
+            status_code=400,
+            detail="No outstanding balance to bill — charges are already settled",
+        )
+
+    # After a paid bill, only generate the unpaid delta (avoid duplicate full bills)
+    if already_billed > 0.01 and due_to_bill < grand - 0.01:
+        if gst_percent > 0:
+            net_subtotal = round(due_to_bill / (1 + (gst_percent / 100.0)), 2)
+            gst_amount = round(due_to_bill - net_subtotal, 2)
+            subtotal = net_subtotal
+        else:
+            subtotal = due_to_bill
+            gst_amount = 0.0
+        grand = due_to_bill
+        preview_items = [
+            {
+                "description": "Additional IPD charges",
+                "qty": 1,
+                "unit_price": subtotal,
+                "amount": subtotal,
+                "item_type": "misc",
+            }
+        ]
 
     amount_received = float(data.amount_received or 0)
     pay_later = bool(data.pay_later)
@@ -594,20 +654,29 @@ def list_running_bills(db: Session, page: int = 1, limit: int = 20) -> dict:
     items = []
     for adm in rows:
         preview = build_bill_preview(db, adm.id)
-        unpaid = (
-            db.query(IpdBill)
-            .filter(
-                IpdBill.admission_id == adm.id,
-                IpdBill.payment_status.in_(["pending", "partial"]),
-            )
-            .first()
-        )
+        unpaid = _open_unpaid_bill(db, adm.id)
+        running_total = float(preview.grand_total or 0)
+        paid_raw = _paid_towards_admission(db, adm.id)
+        # Paid/Due are always relative to current running charges (never Paid > Total)
+        if unpaid:
+            due_balance = round(max(float(unpaid.balance_due or 0), 0), 2)
+            paid_balance = round(max(running_total - due_balance, 0), 2)
+            open_bill_id = unpaid.id
+        else:
+            paid_balance = round(min(max(paid_raw, 0), running_total), 2)
+            due_balance = round(max(running_total - paid_balance, 0), 2)
+            if due_balance <= 0.01:
+                due_balance = 0.0
+                paid_balance = running_total if running_total > 0 else 0.0
+            open_bill_id = None
+
         items.append(
             {
                 "admission": _admission_out(db, adm).model_dump(),
-                "running_total": preview.grand_total,
-                "balance": float(unpaid.balance_due) if unpaid else preview.grand_total,
-                "open_bill_id": unpaid.id if unpaid else None,
+                "running_total": running_total,
+                "balance": due_balance,
+                "paid_amount": paid_balance,
+                "open_bill_id": open_bill_id,
             }
         )
     return {"total": total, "page": page, "limit": limit, "items": items}
@@ -793,37 +862,32 @@ def discharge_patient(
     if admission.status != "admitted":
         raise HTTPException(status_code=400, detail="Admission is not active")
 
-    unpaid = (
-        db.query(IpdBill)
-        .filter(
-            IpdBill.admission_id == admission.id,
-            IpdBill.payment_status.in_(["pending", "partial"]),
-        )
-        .first()
-    )
+    unpaid = _open_unpaid_bill(db, admission.id)
     if unpaid and not data.force:
         raise HTTPException(
             status_code=400,
             detail=f"Settle bill {unpaid.bill_number} (balance {unpaid.balance_due}) before discharge",
         )
 
-    # If no bill exists yet, auto-generate a final bill (pay later) so history is complete
-    any_bill = db.query(IpdBill).filter(IpdBill.admission_id == admission.id).first()
+    # Bill any uncovered running charges (first bill or post-payment delta)
     bill_out = None
-    if not any_bill:
-        bill_out = generate_bill(
-            db,
-            IpdGenerateBillRequest(admission_id=admission.id, pay_later=True),
-            generated_by=discharged_by,
-        )
-        unpaid = (
-            db.query(IpdBill)
-            .filter(
-                IpdBill.admission_id == admission.id,
-                IpdBill.payment_status.in_(["pending", "partial"]),
+    preview = build_bill_preview(db, admission.id)
+    due = round(
+        max(float(preview.grand_total or 0) - _paid_towards_admission(db, admission.id), 0),
+        2,
+    )
+    if due > 0.01:
+        try:
+            bill_out = generate_bill(
+                db,
+                IpdGenerateBillRequest(admission_id=admission.id, pay_later=True),
+                generated_by=discharged_by,
             )
-            .first()
-        )
+        except HTTPException as exc:
+            detail = str(getattr(exc, "detail", "") or "")
+            if "No outstanding balance" not in detail:
+                raise
+        unpaid = _open_unpaid_bill(db, admission.id)
         if unpaid and not data.force:
             raise HTTPException(
                 status_code=400,
