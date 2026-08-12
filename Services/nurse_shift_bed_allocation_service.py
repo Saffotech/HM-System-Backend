@@ -9,6 +9,12 @@ from fastapi import HTTPException
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, aliased
 
+from Enums.notification import (
+    NotificationPriority,
+    NotificationType,
+    ReferenceType,
+    SourceModule,
+)
 from Models.department import Department
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_shift_bed_allocation_history import NurseShiftBedAllocationHistory
@@ -22,6 +28,7 @@ from Schemas.nurse_shift_bed_allocation_schema import (
     NurseShiftBedAllocationUpdate,
 )
 from Services import audit_service as audit_service_mod
+from Services.notification_service import create_notification
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -38,6 +45,39 @@ def _now_ist() -> datetime:
 
 def _display_name(first: str | None, last: str | None) -> str:
     return " ".join(p for p in [(first or "").strip(), (last or "").strip()] if p) or "—"
+
+
+def _actor_display_name(actor: User | None) -> str:
+    if not actor:
+        return "Admin"
+    return _display_name(actor.first_name, actor.last_name)
+
+
+def _format_clock(value: time | None) -> str | None:
+    if value is None:
+        return None
+    return value.strftime("%H:%M")
+
+
+def _shift_timing_label(
+    shift_name: str | None,
+    shift_start: time | None = None,
+    shift_end: time | None = None,
+) -> str:
+    name = (shift_name or "Shift").strip() or "Shift"
+    start = _format_clock(shift_start)
+    end = _format_clock(shift_end)
+    if start and end:
+        return f"{name} ({start}–{end})"
+    return name
+
+
+def _date_range_label(from_date: date | None, until_date: date | None) -> str:
+    if from_date and until_date:
+        return f"{from_date.isoformat()} to {until_date.isoformat()}"
+    if from_date:
+        return f"from {from_date.isoformat()} (ongoing)"
+    return "date TBD"
 
 
 def _normalize_shift_name(name: str) -> str:
@@ -217,6 +257,28 @@ def _record_history(
     )
 
 
+def _json_safe(value):
+    """Make values safe for JSONB audit details (dates/times/enums)."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, time):
+        return value.strftime("%H:%M:%S")
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(v) for v in value]
+    if hasattr(value, "value"):
+        try:
+            return value.value
+        except Exception:
+            pass
+    return str(value)
+
+
 def _audit_allocation(
     db: Session,
     *,
@@ -235,12 +297,47 @@ def _audit_allocation(
             resource_type="nurse_bed_allocation",
             resource_id=allocation_id,
             summary=summary,
-            details=details or {},
+            details=_json_safe(details or {}),
             ip_address=ip_address,
         )
     except Exception:
-        # Never fail business flow if audit write fails
-        pass
+        # Never fail business flow if audit write fails; reset session for later work.
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
+def _notify_nurse_shift_change(
+    db: Session,
+    *,
+    nurse_id: int,
+    title: str,
+    message: str,
+    allocation_id: int,
+    actor: User | None = None,
+    priority: NotificationPriority = NotificationPriority.HIGH,
+) -> None:
+    """Best-effort SHIFT_UPDATED notify for bed-allocation duty changes."""
+    try:
+        create_notification(
+            db,
+            user_id=nurse_id,
+            title=title,
+            message=message,
+            notification_type=NotificationType.SHIFT_UPDATED,
+            source_module=SourceModule.ADMIN,
+            reference_type=ReferenceType.SCHEDULE,
+            reference_id=allocation_id,
+            created_by=actor.id if actor else None,
+            created_by_name=_actor_display_name(actor),
+            priority=priority,
+        )
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
 
 
 def create_allocation_service(
@@ -319,14 +416,33 @@ def create_allocation_service(
     db.commit()
     db.refresh(row)
     out = _allocation_out(db, row)
+    bed_label = out.get("bed_number") or f"#{out.get('bed_id')}"
+    ward_name = out.get("ward_name")
+    ward_part = f" ({ward_name})" if ward_name else ""
+    timing = _shift_timing_label(out.get("shift_name"), out.get("shift_start"), out.get("shift_end"))
+    dates = _date_range_label(out.get("shift_date"), out.get("assigned_until"))
+    nurse_id = out["nurse_id"]
+    allocation_id = out["id"]
+
     _audit_allocation(
         db,
         actor=actor,
         action="bed_allocation.create",
-        allocation_id=row.id,
-        summary=f"Created allocation #{row.id} for bed {bed.bed_number}",
+        allocation_id=allocation_id,
+        summary=f"Created allocation #{allocation_id} for bed {bed_label}",
         details={"new": out},
         ip_address=ip_address,
+    )
+    _notify_nurse_shift_change(
+        db,
+        nurse_id=nurse_id,
+        title="Shift assigned",
+        message=(
+            f"You were assigned bed {bed_label}{ward_part} "
+            f"for {timing}, {dates}."
+        ),
+        allocation_id=allocation_id,
+        actor=actor,
     )
     return {"success": True, "data": out}
 
@@ -431,6 +547,19 @@ def bulk_create_allocations_service(
             details={"created_ids": created_ids, "skipped": skipped},
             ip_address=ip_address,
         )
+        timing = _shift_timing_label(shift_name, start, end)
+        dates = _date_range_label(data.shift_date, assigned_until)
+        bed_count = len(created_ids)
+        _notify_nurse_shift_change(
+            db,
+            nurse_id=nurse.id,
+            title="Shift assigned",
+            message=(
+                f"You were assigned {bed_count} bed(s) for {timing}, {dates}."
+            ),
+            allocation_id=created_ids[0],
+            actor=actor,
+        )
     return {
         "success": True,
         "created": len(created_items),
@@ -470,6 +599,11 @@ def update_allocation_service(
     old_nurse_id = row.nurse_id
     old_bed_id = row.bed_id
     was_active = row.is_active
+    old_shift_name = row.shift_name
+    old_shift_start = row.shift_start
+    old_shift_end = row.shift_end
+    old_shift_date = row.shift_date
+    old_assigned_until = getattr(row, "assigned_until", None)
 
     payload = data.model_dump(exclude_unset=True)
 
@@ -566,15 +700,104 @@ def update_allocation_service(
     db.commit()
     db.refresh(row)
     out = _allocation_out(db, row)
+
+    nurse_id = out["nurse_id"]
+    allocation_id = out["id"]
+    bed_label = out.get("bed_number") or f"#{out.get('bed_id')}"
+    ward_name = out.get("ward_name")
+    ward_part = f" ({ward_name})" if ward_name else ""
+    new_timing = _shift_timing_label(
+        out.get("shift_name"),
+        out.get("shift_start"),
+        out.get("shift_end"),
+    )
+    new_dates = _date_range_label(out.get("shift_date"), out.get("assigned_until"))
+    old_timing = _shift_timing_label(old_shift_name, old_shift_start, old_shift_end)
+    is_active = bool(out.get("is_active"))
+
     _audit_allocation(
         db,
         actor=actor,
         action=f"bed_allocation.{action}",
-        allocation_id=row.id,
-        summary=f"{action.capitalize()} allocation #{row.id}",
+        allocation_id=allocation_id,
+        summary=f"{action.capitalize()} allocation #{allocation_id}",
         details={"old": old_snapshot, "new": out},
         ip_address=ip_address,
     )
+
+    if action in ("deactivated", "deleted"):
+        _notify_nurse_shift_change(
+            db,
+            nurse_id=nurse_id,
+            title="Shift changed",
+            message=(
+                f"Your assignment for bed {bed_label}{ward_part} "
+                f"({old_timing}) was {action}."
+            ),
+            allocation_id=allocation_id,
+            actor=actor,
+            priority=NotificationPriority.HIGH,
+        )
+    elif action == "reassigned" and old_nurse_id != nurse_id:
+        _notify_nurse_shift_change(
+            db,
+            nurse_id=old_nurse_id,
+            title="Shift changed",
+            message=(
+                f"Bed {bed_label}{ward_part} was reassigned away from you "
+                f"({old_timing})."
+            ),
+            allocation_id=allocation_id,
+            actor=actor,
+            priority=NotificationPriority.HIGH,
+        )
+        if is_active:
+            _notify_nurse_shift_change(
+                db,
+                nurse_id=nurse_id,
+                title="Shift assigned",
+                message=(
+                    f"You were assigned bed {bed_label}{ward_part} "
+                    f"for {new_timing}, {new_dates}."
+                ),
+                allocation_id=allocation_id,
+                actor=actor,
+            )
+    elif action == "activated":
+        _notify_nurse_shift_change(
+            db,
+            nurse_id=nurse_id,
+            title="Shift assigned",
+            message=(
+                f"Your assignment for bed {bed_label}{ward_part} "
+                f"was reactivated for {new_timing}, {new_dates}."
+            ),
+            allocation_id=allocation_id,
+            actor=actor,
+        )
+    else:
+        # edited / shift or schedule change
+        shift_changed = (
+            old_shift_name != out.get("shift_name")
+            or old_shift_start != out.get("shift_start")
+            or old_shift_end != out.get("shift_end")
+            or old_shift_date != out.get("shift_date")
+            or old_assigned_until != out.get("assigned_until")
+            or old_bed_id != out.get("bed_id")
+        )
+        if shift_changed or action == "edited":
+            _notify_nurse_shift_change(
+                db,
+                nurse_id=nurse_id,
+                title="Shift changed",
+                message=(
+                    f"Your bed assignment was updated: bed {bed_label}{ward_part}, "
+                    f"{new_timing}, {new_dates}."
+                ),
+                allocation_id=allocation_id,
+                actor=actor,
+            )
+
     return {"success": True, "data": out}
 
 
