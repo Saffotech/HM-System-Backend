@@ -2,7 +2,7 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Date,Enum, Float, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Date, Enum, Float, ForeignKey, Index, Integer, String, Text
 from zoneinfo import ZoneInfo
 
 from database import Base
@@ -46,13 +46,16 @@ class PaymentTransaction(Base):
 
 class Appointment(Base):
     __tablename__ = "appointments"
+    __table_args__ = (
+        Index("ix_appointments_scheduled_at_status", "scheduled_at", "status"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     appointment_uid = Column(String, unique=True, nullable=False)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
-    scheduled_at = Column(DateTime(timezone=True), nullable=False)
+    scheduled_at = Column(DateTime(timezone=True), nullable=False, index=True)
     reason = Column(Text, nullable=True)
     symptoms = Column(Text, nullable=True)
     notes = Column(Text, nullable=True)

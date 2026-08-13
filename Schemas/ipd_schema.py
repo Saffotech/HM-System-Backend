@@ -1,7 +1,7 @@
 """Pydantic schemas for IPD admissions, beds, billing, and discharge."""
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 from Schemas.patient_schema import PatientFields, PatientOut
 
@@ -40,8 +40,17 @@ class IpdAdmissionUpdate(BaseModel):
 
 
 class IpdTransferBedRequest(BaseModel):
-    admission_id: int
+    """Transfer by admission id, or by occupied source bed (creates admission if missing)."""
+
+    admission_id: Optional[int] = None
+    from_bed_id: Optional[int] = None
     new_bed_id: int
+
+    @model_validator(mode="after")
+    def require_source(self):
+        if not self.admission_id and not self.from_bed_id:
+            raise ValueError("Provide admission_id or from_bed_id")
+        return self
 
 
 class IpdDoctorVisitCreate(BaseModel):

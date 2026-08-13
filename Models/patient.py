@@ -46,7 +46,7 @@ class OpdVisit(Base):
     gst_amount          = Column(Float, default=0.0)
     grand_total         = Column(Float, default=0.0)
 
-    payment_status   = Column(String, default="pending")
+    payment_status   = Column(String, default="pending", index=True)
     payment_mode     = Column(String, nullable=True)
     paid_amount      = Column(Float, nullable=True)
     balance_due      = Column(Float, default=0.0)
@@ -56,6 +56,7 @@ class OpdVisit(Base):
 
     registered_by    = Column(Integer, ForeignKey("users.id"), nullable=True)
     visit_date       = Column(DateTime(timezone=True),
-                          default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))
+                          default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")),
+                          index=True)
     created_at       = Column(DateTime(timezone=True),
                           default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))
