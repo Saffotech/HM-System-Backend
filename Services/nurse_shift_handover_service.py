@@ -27,15 +27,8 @@ from Models.patient import Patient
 from Models.user import User
 from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverCreate,
-    ShiftHandoverUpdate,
-    ShiftHandoverPatientUpdate,
     ShiftHandoverPatientsBulkCreate,
-    ShiftHandoverTakeOver,
 )
-from Services.nurse_emergency_alert_triggers import (
-    get_active_alerts_text_for_patient,
-)
-from Services.notification_service import notify_nurse_handover_taken_over
 
 # ==========================================================
 # HELPERS
@@ -240,15 +233,11 @@ def _build_patient_care_snapshot(
                     pending_label = f"{pending_label} ({item.frequency})"
                 pending_parts.append(pending_label)
 
-    critical_alerts = get_active_alerts_text_for_patient(db, patient_id)
-
     task_parts: list[str] = []
     if pending_parts:
         task_parts.append(
             f"{len(list(dict.fromkeys(pending_parts)))} medication(s) pending/attention"
         )
-    if critical_alerts:
-        task_parts.append("Review active critical alerts")
     if not latest_vital or (
         latest_vital.recorded_at and latest_vital.recorded_at < day_start
     ):
@@ -264,7 +253,7 @@ def _build_patient_care_snapshot(
             if instruction_parts
             else None
         ),
-        "critical_alerts": critical_alerts,
+        "critical_alerts": None,
         "pending_tasks": "; ".join(task_parts) if task_parts else None,
     }
 
@@ -492,226 +481,6 @@ def bulk_add_handover_patients_service(
         "message":"Patients added successfully",
         "count":len(records_to_insert)
     }
-
-# ==========================================================
-# UPDATE HANDOVER
-# ==========================================================
-
-def update_handover_service(
-    db: Session,
-    handover_id: int,
-    handover_data: ShiftHandoverUpdate,
-    nurse_id: int
-):
-
-    # ======================================================
-    # HANDOVER EXISTS
-    # ======================================================
-
-    handover = (db.query(ShiftHandover)
-        .filter(ShiftHandover.id == handover_id)
-        .first()
-    )
-
-    if not handover:
-        raise HTTPException(
-            status_code=404,
-            detail="Handover not found"
-        )
-
-    # ======================================================
-    # OWNER VALIDATION
-    # ======================================================
-
-    if handover.outgoing_nurse_id != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update your own handover"
-        )
-
-    # ======================================================
-    # SUBMITTED LOCK
-    # ======================================================
-
-    if handover.status == HandoverStatus.SUBMITTED:
-        raise HTTPException(
-            status_code=400,
-            detail="Submitted handover cannot be modified"
-        )
-
-    # ======================================================
-    # DEPARTMENT VALIDATION
-    # ======================================================
-
-    if handover_data.department_id:
-
-        department = (
-            db.query(Department)
-            .filter(
-                Department.id ==
-                handover_data.department_id
-            )
-            .first()
-        )
-
-        if not department:
-            raise HTTPException(
-                status_code=404,
-                detail="Department not found"
-            )
-
-    # ======================================================
-    # UPDATE DATA
-    # ======================================================
-
-    update_data = (
-        handover_data.model_dump(
-            exclude_unset=True
-        )
-    )
-
-    for field, value in update_data.items():
-        setattr(
-            handover,
-            field,
-            value
-        )
-
-    handover.updated_by = nurse_id
-
-    # ======================================================
-    # SAVE
-    # ======================================================
-
-    try:
-
-        db.add(handover)
-
-        db.commit()
-
-        db.refresh(handover)
-
-    except Exception:
-
-        db.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to update handover"
-        )
-
-    return handover
-
-# ==========================================================
-# UPDATE HANDOVER PATIENT
-# ==========================================================
-
-def update_handover_patient_service(
-    db: Session,
-    patient_summary_id: int,
-    patient_data: ShiftHandoverPatientUpdate,
-    nurse_id: int
-):
-
-    # ======================================================
-    # PATIENT HANDOVER EXISTS
-    # ======================================================
-
-    handover_patient = (
-        db.query(ShiftHandoverPatient)
-        .filter(
-            ShiftHandoverPatient.id
-            == patient_summary_id
-        )
-        .first()
-    )
-
-    if not handover_patient:
-        raise HTTPException(
-            status_code=404,
-            detail="Patient handover record not found"
-        )
-
-    # ======================================================
-    # PARENT HANDOVER EXISTS
-    # ======================================================
-
-    handover = (
-        db.query(ShiftHandover)
-        .filter(
-            ShiftHandover.id
-            == handover_patient.handover_id
-        )
-        .first()
-    )
-
-    if not handover:
-        raise HTTPException(
-            status_code=404,
-            detail="Parent handover not found"
-        )
-
-    # ======================================================
-    # OWNER VALIDATION
-    # ======================================================
-
-    if handover.outgoing_nurse_id != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update your own handover"
-        )
-
-    # ======================================================
-    # SUBMITTED LOCK
-    # ======================================================
-
-    if handover.status == HandoverStatus.SUBMITTED:
-        raise HTTPException(
-            status_code=400,
-            detail="Submitted handover cannot be modified"
-        )
-
-    # ======================================================
-    # UPDATE DATA
-    # ======================================================
-
-    update_data = (
-        patient_data.model_dump(
-            exclude_unset=True
-        )
-    )
-
-    for field, value in update_data.items():
-        setattr(
-            handover_patient,
-            field,
-            value
-        )
-
-    handover_patient.updated_by = nurse_id
-
-    # ======================================================
-    # SAVE
-    # ======================================================
-
-    try:
-
-        db.add(handover_patient)
-
-        db.commit()
-
-        db.refresh(handover_patient)
-
-    except Exception:
-
-        db.rollback()
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to update patient handover"
-        )
-
-    return handover_patient
 
 # ==========================================================
 # DELETE HANDOVER PATIENT
@@ -949,126 +718,6 @@ def submit_handover_service(
 
         "status":
             handover.status
-    }
-
-
-# ==========================================================
-# TAKE OVER HANDOVER (incoming nurse claims submitted form)
-# ==========================================================
-
-def take_over_handover_service(
-    db: Session,
-    handover_id: int,
-    nurse_id: int,
-    take_over_data: ShiftHandoverTakeOver | None = None,
-):
-
-    handover = (
-        db.query(ShiftHandover)
-        .filter(ShiftHandover.id == handover_id)
-        .first()
-    )
-
-    if not handover:
-        raise HTTPException(
-            status_code=404,
-            detail="Handover not found",
-        )
-
-    if handover.status != HandoverStatus.SUBMITTED:
-        raise HTTPException(
-            status_code=400,
-            detail="Only submitted handovers can be taken over",
-        )
-
-    if handover.outgoing_nurse_id == nurse_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Outgoing nurse cannot take over their own handover",
-        )
-
-    if handover.replacement_nurse_id is not None:
-        current = (
-            db.query(User)
-            .filter(User.id == handover.replacement_nurse_id)
-            .first()
-        )
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Handover already taken over by "
-                f"{_user_display_name(current) or handover.replacement_nurse_id}"
-            ),
-        )
-
-    nurse = (
-        db.query(User)
-        .options(joinedload(User.role_obj))
-        .filter(User.id == nurse_id, User.is_active == True)
-        .first()
-    )
-
-    if not _is_nurse_user(nurse):
-        raise HTTPException(
-            status_code=403,
-            detail="Only a nurse can take over a handover",
-        )
-
-    notes = None
-    if take_over_data:
-        notes = take_over_data.take_over_notes
-
-    handover.replacement_nurse_id = nurse_id
-    handover.taken_over_at = _now()
-    handover.take_over_notes = notes
-    handover.updated_by = nurse_id
-
-    try:
-        db.add(handover)
-        db.commit()
-        db.refresh(handover)
-    except Exception:
-        db.rollback()
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to take over handover",
-        )
-
-    outgoing = (
-        db.query(User)
-        .filter(User.id == handover.outgoing_nurse_id)
-        .first()
-    )
-
-    notify_nurse_handover_taken_over(
-        db,
-        outgoing_nurse_id=handover.outgoing_nurse_id,
-        title="Handover taken over",
-        message=(
-            f"{_user_display_name(nurse) or 'A nurse'} took over your handover "
-            f"{handover.handover_uid}."
-            + (
-                f"\nNotes: {notes}"
-                if notes
-                else ""
-            )
-        ),
-        handover_id=handover.id,
-        created_by=nurse_id,
-        created_by_name=_user_display_name(nurse),
-    )
-
-    return {
-        "message": "Handover taken over successfully",
-        "handover_id": handover.id,
-        "handover_uid": handover.handover_uid,
-        "status": handover.status,
-        "outgoing_nurse_id": handover.outgoing_nurse_id,
-        "outgoing_nurse": _user_display_name(outgoing),
-        "replacement_nurse_id": handover.replacement_nurse_id,
-        "replacement_nurse": _user_display_name(nurse),
-        "taken_over_at": handover.taken_over_at,
-        "take_over_notes": handover.take_over_notes,
     }
 
 

@@ -36,23 +36,6 @@ class ShiftHandoverPatientsBulkCreate(BaseModel):
 
 
 # ==========================================================
-# PATIENT UPDATE
-# ==========================================================
-
-class ShiftHandoverPatientUpdate(BaseModel):
-
-    patient_summary: Optional[str] = None
-
-    pending_tasks: Optional[str] = None
-
-    critical_alerts: Optional[str] = None
-
-    medication_pending: Optional[str] = None
-
-    doctor_instructions: Optional[str] = None
-
-
-# ==========================================================
 # HANDOVER CREATE
 # ==========================================================
 
@@ -73,41 +56,6 @@ class ShiftHandoverCreate(BaseModel):
     shift_end: Optional[time] = None
 
     general_notes: Optional[str] = None
-
-
-# ==========================================================
-# HANDOVER UPDATE
-# ==========================================================
-
-class ShiftHandoverUpdate(BaseModel):
-
-    ward_name: Optional[str] = Field(
-        None,
-        min_length=2,
-        max_length=150
-    )
-
-    department_id: Optional[int] = None
-
-    shift_date: Optional[date] = None
-
-    shift_start: Optional[time] = None
-
-    shift_end: Optional[time] = None
-
-    general_notes: Optional[str] = None
-
-
-# ==========================================================
-# TAKE OVER
-# ==========================================================
-
-class ShiftHandoverTakeOver(BaseModel):
-
-    take_over_notes: Optional[str] = Field(
-        None,
-        max_length=2000
-    )
 
 
 # ==========================================================

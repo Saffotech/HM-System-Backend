@@ -127,13 +127,7 @@ MODULE_CARD_PERMISSION_KEYS: dict[str, frozenset[str]] = {
             "nurse_medication:update",
         }
     ),
-    "nurse_operations": frozenset(
-        {
-            "emergency_alerts:view",
-            "emergency_alerts:create",
-            "emergency_alerts:update",
-        }
-    ),
+    "nurse_operations": frozenset(),
     "pharmacy_access": frozenset(
         {
             "prescriptions:view",

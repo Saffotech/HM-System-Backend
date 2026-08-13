@@ -2,7 +2,7 @@ from datetime import datetime
 from enum import Enum
 from typing import List, Optional
 
-from pydantic import BaseModel, Field, ConfigDict, AliasChoices
+from pydantic import BaseModel, Field, ConfigDict
 
 from Schemas.common_schema import PaginatedResponse
 
@@ -25,22 +25,15 @@ class DashboardResponse(BaseModel):
     total_today: int
     pending: int
     sample_collected: int
-    processing: int
+    # Deprecated under Option B (always 0). Kept for older dashboard clients.
+    processing: int = 0
     completed_today: int
     urgent_pending: int
 
 
 # =====================================================
-# Status Update Requests
+# Status Update Response
 # =====================================================
-
-class SampleCollectedRequest(BaseModel):
-    sample_collected_at: Optional[datetime] = None
-
-
-class ProcessingRequest(BaseModel):
-    test_performed_at: Optional[datetime] = None
-
 
 class StatusUpdateResponse(BaseModel):
     message: str
@@ -107,6 +100,8 @@ class LabOrderListItem(BaseModel):
     doctor_id: int
     doctor_name: str
 
+    department_id: int
+
     test_name: str
     category: str
     priority: str
@@ -155,6 +150,8 @@ class LabOrderDetailResponse(BaseModel):
 
     doctor_id: int
     doctor_name: str
+
+    department_id: int
 
     test_name: str
     category: str
@@ -227,6 +224,7 @@ class LabReportOrderSummary(BaseModel):
     patient_uid: str
     doctor_id: int
     doctor_name: Optional[str] = None
+    department_id: Optional[int] = None
     test_name: str
     category: str
     priority: str
@@ -255,32 +253,6 @@ class LabReportDetailResponse(BaseModel):
     source: str
 
     order: LabReportOrderSummary
-    parameters: List[LabParameterResponse] = Field(default_factory=list)
-
-    model_config = ConfigDict(from_attributes=True)
-
-
-class LabReportResponse(BaseModel):
-    id: int
-
-    lab_test_order_id: int
-
-    uploaded_by: int
-    uploaded_by_name: str
-
-    sample_collected_at: Optional[datetime] = None
-    test_performed_at: Optional[datetime] = None
-
-    report_file: Optional[str] = None
-    remarks: Optional[str] = None
-
-    created_at: datetime
-    file_name: Optional[str] = None
-    file_type: Optional[str] = None
-    file_size: Optional[int] = None
-    file_size_display: Optional[str] = None
-    source: Optional[str] = None
-
     parameters: List[LabParameterResponse] = Field(default_factory=list)
 
     model_config = ConfigDict(from_attributes=True)

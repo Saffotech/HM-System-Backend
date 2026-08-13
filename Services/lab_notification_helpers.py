@@ -1,6 +1,5 @@
-"""Lab technician in-app notification helpers (order alerts broadcast to all active lab techs)."""
+"""Lab technician in-app notification helpers (department-scoped)."""
 import logging
-from typing import Iterable
 
 from sqlalchemy.orm import Session
 
@@ -21,8 +20,12 @@ logger = logging.getLogger(__name__)
 LAB_TECHNICIAN_ROLE = "lab_technician"
 
 
-def _active_lab_technician_ids(db: Session) -> list[int]:
-    rows = (
+def _active_lab_technician_ids(
+    db: Session,
+    *,
+    department_id: int | None = None,
+) -> list[int]:
+    query = (
         db.query(User.id)
         .join(Role, User.role_id == Role.id)
         .filter(
@@ -30,8 +33,10 @@ def _active_lab_technician_ids(db: Session) -> list[int]:
             User.is_active.is_(True),
             User.deleted_at.is_(None),
         )
-        .all()
     )
+    if department_id is not None:
+        query = query.filter(User.department_id == department_id)
+    rows = query.all()
     return [row[0] for row in rows]
 
 
@@ -59,10 +64,15 @@ def _broadcast_to_lab_techs(
     created_by: int,
     created_by_name: str,
     priority: NotificationPriority,
+    department_id: int | None,
 ) -> None:
-    tech_ids = _active_lab_technician_ids(db)
+    tech_ids = _active_lab_technician_ids(db, department_id=department_id)
     if not tech_ids:
-        logger.info("No active lab technicians to notify for %s", notification_type.value)
+        logger.info(
+            "No active lab technicians in department %s to notify for %s",
+            department_id,
+            notification_type.value,
+        )
         return
 
     for tech_id in tech_ids:
@@ -103,6 +113,7 @@ def notify_lab_techs_order_created(
         created_by=doctor_id,
         created_by_name=doctor_name,
         priority=_order_priority(order),
+        department_id=order.department_id,
     )
 
 
@@ -123,4 +134,5 @@ def notify_lab_techs_order_cancelled(
         created_by=doctor_id,
         created_by_name=doctor_name,
         priority=NotificationPriority.HIGH,
+        department_id=order.department_id,
     )

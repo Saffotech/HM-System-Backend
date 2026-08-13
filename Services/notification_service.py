@@ -26,7 +26,6 @@ DEFAULT_PRIORITY_BY_TYPE: dict[NotificationType, NotificationPriority] = {
     NotificationType.LAB_ORDER_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_CANCELLED: NotificationPriority.HIGH,
     NotificationType.APPOINTMENT_RESCHEDULED: NotificationPriority.HIGH,
-    NotificationType.EMERGENCY_ALERT: NotificationPriority.CRITICAL,
     NotificationType.ADMIN_UPDATE: NotificationPriority.HIGH,
     NotificationType.HANDOVER_TAKEN_OVER: NotificationPriority.HIGH,
     NotificationType.SHIFT_UPDATED: NotificationPriority.HIGH,
@@ -180,55 +179,7 @@ def notify_doctor_admin_update(
     )
 
 
-def notify_nurse_emergency_alert(
-    db: Session,
-    *,
-    nurse_user_id: int,
-    title: str,
-    message: str,
-    alert_id: int,
-    created_by: Optional[int] = None,
-    created_by_name: Optional[str] = None,
-    priority: Optional[NotificationPriority] = None,
-) -> Notification:
-    return create_notification(
-        db,
-        user_id=nurse_user_id,
-        title=title,
-        message=message,
-        notification_type=NotificationType.EMERGENCY_ALERT,
-        source_module=SourceModule.NURSE,
-        reference_type=ReferenceType.ALERT,
-        reference_id=alert_id,
-        created_by=created_by,
-        created_by_name=created_by_name,
-        priority=priority,
-    )
 
-
-def notify_nurse_handover_taken_over(
-    db: Session,
-    *,
-    outgoing_nurse_id: int,
-    title: str,
-    message: str,
-    handover_id: int,
-    created_by: Optional[int] = None,
-    created_by_name: Optional[str] = None,
-) -> Notification:
-    return create_notification(
-        db,
-        user_id=outgoing_nurse_id,
-        title=title,
-        message=message,
-        notification_type=NotificationType.HANDOVER_TAKEN_OVER,
-        source_module=SourceModule.NURSE,
-        reference_type=ReferenceType.HANDOVER,
-        reference_id=handover_id,
-        created_by=created_by,
-        created_by_name=created_by_name,
-        priority=NotificationPriority.HIGH,
-    )
 
 
 def _priority_sort_key():

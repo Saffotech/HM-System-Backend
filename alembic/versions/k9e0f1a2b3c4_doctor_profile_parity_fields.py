@@ -78,16 +78,33 @@ def upgrade() -> None:
             "doctor_profiles",
             sa.Column("shift_name", sa.String(length=100), nullable=True),
         )
-    if "shift_start_time" not in doctor_cols:
-        op.add_column(
-            "doctor_profiles",
-            sa.Column("shift_start_time", sa.String(length=10), nullable=True),
-        )
-    if "shift_end_time" not in doctor_cols:
-        op.add_column(
-            "doctor_profiles",
-            sa.Column("shift_end_time", sa.String(length=10), nullable=True),
-        )
+        doctor_cols.add("shift_name")
+
+    for col in ("shift_start_time", "shift_end_time"):
+        if col not in doctor_cols:
+            op.add_column(
+                "doctor_profiles",
+                sa.Column(col, sa.String(length=10), nullable=True),
+            )
+            doctor_cols.add(col)
+        elif _time_column_type(inspector, "doctor_profiles", col) == "TIME":
+            op.alter_column(
+                "doctor_profiles",
+                col,
+                type_=sa.String(length=10),
+                existing_type=sa.Time(),
+                postgresql_using=(
+                    f"CASE WHEN {col} IS NULL THEN NULL "
+                    f"ELSE TO_CHAR({col}, 'HH24:MI') END"
+                ),
+            )
+
+
+def _time_column_type(inspector: sa.Inspector, table: str, column: str) -> str | None:
+    for col in inspector.get_columns(table):
+        if col["name"] == column:
+            return col["type"].__class__.__name__.upper()
+    return None
 
 
 def downgrade() -> None:

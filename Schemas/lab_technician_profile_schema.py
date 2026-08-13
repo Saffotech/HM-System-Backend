@@ -93,7 +93,7 @@ class LabTechnicianProfileUpdate(BaseModel):
 
     qualification: Optional[str] = Field(None, max_length=255)
     license_number: Optional[str] = Field(None, max_length=100)
-    experience_years: Optional[int] = Field(None, ge=0, le=60)
+    experience_years: Optional[int] = Field(None, ge=0, le=70)
     bio: Optional[str] = None
     languages: Optional[List[str]] = None
 

@@ -68,6 +68,7 @@ def dashboard(
 ):
     return get_dashboard_stats(
         db=db,
+        current_user=current_user,
     )
 
 
@@ -96,6 +97,7 @@ def list_orders(
 ):
     return get_orders(
         db=db,
+        current_user=current_user,
         status=status,
         priority=priority,
         category=category,
@@ -126,6 +128,7 @@ def order_detail(
     return get_order_detail(
         db=db,
         order_id=order_id,
+        current_user=current_user,
     )
 
 
@@ -148,15 +151,17 @@ def sample_collected(
     return mark_sample_collected(
         db=db,
         order_id=order_id,
+        current_user=current_user,
     )
 
 # ==========================================================
-# Processing
+# Processing (deprecated — Option B no-op, kept for older clients)
 # ==========================================================
 
 @router.patch(
     "/orders/{order_id}/processing",
     response_model=StatusUpdateResponse,
+    deprecated=True,
 )
 def processing(
     order_id: int,
@@ -166,9 +171,11 @@ def processing(
         PermissionChecker("lab:update")
     ),
 ):
+    """Deprecated: processing status removed. Returns sample_collected unchanged."""
     return mark_processing(
         db=db,
         order_id=order_id,
+        current_user=current_user,
     )
 
 
@@ -195,6 +202,7 @@ def create_report(
         order_id=order_id,
         payload=payload,
         current_user_id=current_user.id,
+        current_user=current_user,
     )
 
 
@@ -222,6 +230,7 @@ def reports(
 ):
     return get_reports(
         db=db,
+        current_user=current_user,
         search=search,
         patient_id=patient_id,
         patient_uid=patient_uid,
@@ -251,6 +260,7 @@ def report_detail(
     return get_report_detail(
         db=db,
         report_id=report_id,
+        current_user=current_user,
     )
 
 # ==========================================================
@@ -272,6 +282,7 @@ def complete_test(
     return mark_completed(
         db=db,
         order_id=order_id,
+        current_user=current_user,
     )
 
 # ==========================================================
@@ -296,6 +307,7 @@ def upload_lab_report_file(
         order_id=order_id,
         file=file,
         current_user_id=current_user.id,
+        current_user=current_user,
     )
 
 # ==========================================================
@@ -316,4 +328,5 @@ def view_report_file(
     return get_report_file(
         db=db,
         report_id=report_id,
+        current_user=current_user,
     )

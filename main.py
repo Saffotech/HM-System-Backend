@@ -9,7 +9,6 @@ from database import Base, engine
 from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
 from Models.hospital_settings import HospitalSettings  # noqa: F401
-from Models.doctor_availability import DoctorLeave, DoctorSchedule  # noqa: F401
 from Models.doctor_profile import DoctorProfile  # noqa: F401
 from Models.nurse_profile import NurseProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
@@ -29,9 +28,7 @@ from Models.super_admin_profile import SuperAdminProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
-from Models.doctor_queue_next_request import DoctorQueueNextRequest  # noqa: F401
 from Models.lab_result import LabResult, LabResultParameter  # noqa: F401
-from Models.nurse_emergency_alert import EmergencyAlert  # noqa: F401
 from Models.nurse_medication_administration import MedicationAdministration  # noqa: F401
 from Models.nurse_nursing_notes import NursingNote  # noqa: F401
 from Models.nurse_patient_vitals import PatientVitals  # noqa: F401
@@ -63,7 +60,6 @@ from Routers.doctor_prescription_router import router as prescription_router
 from Routers.doctor_profile_router import router as doctor_profile_router
 from Routers.lab_router import router as lab_router
 from Routers.nurse_dashboard_router import router as nurse_dashboard_router
-from Routers.nurse_emergency_alert_router import router as nurse_emergency_alert_router
 from Routers.nurse_medication_administration_router import (
     router as medication_administration_router,
 )
@@ -148,7 +144,6 @@ app.include_router(medication_administration_router)
 app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_bed_allocation_router)
 app.include_router(nurse_workforce_router)
-app.include_router(nurse_emergency_alert_router)
 app.include_router(pharmacy_router)
 app.include_router(pharmacist_profile_router)
 app.include_router(pharmacist_notification_router)

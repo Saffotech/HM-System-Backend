@@ -17,6 +17,11 @@ from Models.lab_result import LabResult, LabResultParameter, ParameterFlag
 from Models.user import User
 from Schemas.lab_schema import LabReportCreate, ReportSource
 from Services import opd_helpers as h
+from Services.lab_department_helpers import (
+    assert_order_accessible_by_lab_tech,
+    filter_orders_for_lab_tech,
+    require_lab_tech_department_id,
+)
 from Services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
@@ -117,6 +122,9 @@ def _end_of_day(value: date) -> datetime:
 
 
 def _parse_lab_status(status: str) -> LabTestStatus:
+    # Legacy FE filter key — Option B folded "processing" into sample_collected.
+    if status == "processing":
+        return LabTestStatus.SAMPLE_COLLECTED
     try:
         return LabTestStatus(status)
     except ValueError as exc:
@@ -147,6 +155,22 @@ def _has_parameters(report: LabResult) -> bool:
     return bool(report.parameters)
 
 
+def _report_ready_for_completion(report: LabResult | None) -> bool:
+    """Option B: complete only when parameters and/or a report file exist."""
+    if report is None:
+        return False
+    return _has_report_file(report) or _has_parameters(report)
+
+
+def _get_order_report(db: Session, order_id: int) -> LabResult | None:
+    return (
+        db.query(LabResult)
+        .options(selectinload(LabResult.parameters))
+        .filter(LabResult.lab_test_order_id == order_id)
+        .first()
+    )
+
+
 def _report_source(report: LabResult) -> str:
     has_file = _has_report_file(report)
     has_params = _has_parameters(report)
@@ -175,7 +199,11 @@ def _apply_report_source_filter(query, source: ReportSource):
     return query
 
 
-def get_lab_order(db: Session, order_id: int) -> LabTestOrder:
+def get_lab_order(
+    db: Session,
+    order_id: int,
+    current_user: User | None = None,
+) -> LabTestOrder:
     order = (
         db.query(LabTestOrder)
         .options(
@@ -187,11 +215,14 @@ def get_lab_order(db: Session, order_id: int) -> LabTestOrder:
     )
     if not order:
         raise HTTPException(status_code=404, detail="Lab order not found")
+    if current_user is not None:
+        assert_order_accessible_by_lab_tech(order, current_user)
     return order
 
 
 def get_orders(
     db: Session,
+    current_user: User,
     status: str | None = None,
     priority: str | None = None,
     category: str | None = None,
@@ -211,6 +242,7 @@ def get_orders(
         db.query(LabTestOrder, User)
         .join(User, User.id == LabTestOrder.doctor_id)
     )
+    query = filter_orders_for_lab_tech(query, current_user)
 
     if status:
         query = query.filter(
@@ -281,6 +313,7 @@ def get_orders(
             **_order_patient_fields(order),
             "doctor_id": doctor.id,
             "doctor_name": doctor_name,
+            "department_id": order.department_id,
             "test_name": order.test_name,
             "category": order.category,
             "priority": order.priority,
@@ -298,7 +331,7 @@ def get_orders(
     }
 
 
-def get_order_detail(db: Session, order_id: int):
+def get_order_detail(db: Session, order_id: int, current_user: User):
     order = (
         db.query(LabTestOrder)
         .options(
@@ -313,6 +346,7 @@ def get_order_detail(db: Session, order_id: int):
 
     if not order:
         raise HTTPException(status_code=404, detail="Lab order not found")
+    assert_order_accessible_by_lab_tech(order, current_user)
 
     doctor_name = " ".join(
         filter(None, [order.doctor.first_name, order.doctor.last_name])
@@ -341,6 +375,7 @@ def get_order_detail(db: Session, order_id: int):
         **_order_patient_fields(order),
         "doctor_id": order.doctor_id,
         "doctor_name": doctor_name,
+        "department_id": order.department_id,
         "test_name": order.test_name,
         "category": order.category,
         "priority": order.priority,
@@ -352,8 +387,15 @@ def get_order_detail(db: Session, order_id: int):
     }
 
 
-def mark_sample_collected(db: Session, order_id: int):
-    order = get_lab_order(db=db, order_id=order_id)
+def mark_sample_collected(db: Session, order_id: int, current_user: User):
+    order = get_lab_order(db=db, order_id=order_id, current_user=current_user)
+
+    if order.status == LabTestStatus.SAMPLE_COLLECTED:
+        return {
+            "message": "Sample already marked as collected",
+            "order_id": order.id,
+            "status": order.status.value,
+        }
 
     if order.status != LabTestStatus.ORDERED:
         raise HTTPException(
@@ -372,33 +414,77 @@ def mark_sample_collected(db: Session, order_id: int):
     }
 
 
-def mark_processing(db: Session, order_id: int):
-    order = get_lab_order(db=db, order_id=order_id)
+def mark_processing(db: Session, order_id: int, current_user: User):
+    """Deprecated no-op for Option B (processing status removed).
+
+    Kept so existing clients that still PATCH .../processing do not break.
+    Sample must already be collected; status stays sample_collected.
+    """
+    order = get_lab_order(db=db, order_id=order_id, current_user=current_user)
+
+    if order.status == LabTestStatus.CANCELLED:
+        raise HTTPException(
+            status_code=400,
+            detail="Cancelled tests cannot be processed",
+        )
+
+    if order.status == LabTestStatus.COMPLETED:
+        return {
+            "message": "Test already completed",
+            "order_id": order.id,
+            "status": order.status.value,
+        }
+
+    if order.status == LabTestStatus.ORDERED:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect the sample before continuing",
+        )
 
     if order.status != LabTestStatus.SAMPLE_COLLECTED:
         raise HTTPException(
             status_code=400,
-            detail="Only collected samples can be processed",
+            detail="Only collected samples can continue to reporting",
         )
 
-    order.status = LabTestStatus.PROCESSING
-    db.commit()
-    db.refresh(order)
-
     return {
-        "message": "Test marked as processing",
+        "message": "Ready for report — upload parameters and/or file, then complete",
         "order_id": order.id,
         "status": order.status.value,
     }
 
 
-def mark_completed(db: Session, order_id: int):
-    order = get_lab_order(db=db, order_id=order_id)
+def mark_completed(db: Session, order_id: int, current_user: User):
+    """Option B: sample_collected → completed when report has params and/or file."""
+    order = get_lab_order(db=db, order_id=order_id, current_user=current_user)
 
-    if order.status != LabTestStatus.PROCESSING:
+    if order.status == LabTestStatus.COMPLETED:
+        return {
+            "message": "Test already completed",
+            "order_id": order.id,
+            "status": order.status.value,
+        }
+
+    if order.status == LabTestStatus.CANCELLED:
         raise HTTPException(
             status_code=400,
-            detail="Only processing tests can be completed",
+            detail="Cancelled tests cannot be completed",
+        )
+
+    if order.status != LabTestStatus.SAMPLE_COLLECTED:
+        raise HTTPException(
+            status_code=400,
+            detail="Only sample-collected tests can be completed",
+        )
+
+    report = _get_order_report(db, order.id)
+    if not _report_ready_for_completion(report):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Upload report parameters and/or a report file "
+                "before completing the test"
+            ),
         )
 
     order.status = LabTestStatus.COMPLETED
@@ -417,13 +503,32 @@ def upload_report(
     order_id: int,
     payload: LabReportCreate,
     current_user_id: int,
+    current_user: User,
 ):
-    order = get_lab_order(db=db, order_id=order_id)
+    order = get_lab_order(db=db, order_id=order_id, current_user=current_user)
 
     if order.status == LabTestStatus.CANCELLED:
         raise HTTPException(
             status_code=400,
             detail="Report cannot be uploaded for cancelled orders",
+        )
+
+    if order.status == LabTestStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400,
+            detail="Report already finalized for this completed order",
+        )
+
+    if order.status == LabTestStatus.ORDERED:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect the sample before uploading a report",
+        )
+
+    if order.status != LabTestStatus.SAMPLE_COLLECTED:
+        raise HTTPException(
+            status_code=400,
+            detail="Report can only be uploaded for sample-collected orders",
         )
 
     existing_report = (
@@ -491,21 +596,35 @@ def upload_report(
     }
 
 
-create_report = upload_report
-
-
 def upload_report_file(
     db: Session,
     order_id: int,
     file: UploadFile,
     current_user_id: int,
+    current_user: User,
 ):
-    order = get_lab_order(db=db, order_id=order_id)
+    order = get_lab_order(db=db, order_id=order_id, current_user=current_user)
 
-    if order.status != LabTestStatus.COMPLETED:
+    if order.status == LabTestStatus.CANCELLED:
         raise HTTPException(
             status_code=400,
-            detail="Complete the test before uploading report",
+            detail="Report cannot be uploaded for cancelled orders",
+        )
+
+    if order.status == LabTestStatus.ORDERED:
+        raise HTTPException(
+            status_code=400,
+            detail="Collect the sample before uploading a report file",
+        )
+
+    # Option B: attach file while sample_collected (before complete) or after completed.
+    if order.status not in (
+        LabTestStatus.SAMPLE_COLLECTED,
+        LabTestStatus.COMPLETED,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail="Report file can only be uploaded for sample-collected or completed orders",
         )
 
     if not file.filename:
@@ -621,6 +740,7 @@ def upload_report_file(
 
 def get_reports(
     db: Session,
+    current_user: User,
     search: str | None = None,
     patient_id: int | None = None,
     patient_uid: str | None = None,
@@ -634,6 +754,7 @@ def get_reports(
 ):
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
+    tech_dept_id = require_lab_tech_department_id(current_user)
 
     query = (
         db.query(LabResult)
@@ -642,20 +763,12 @@ def get_reports(
             joinedload(LabResult.uploaded_by_user),
             selectinload(LabResult.parameters),
         )
-    )
-
-    needs_order_join = any([
-        patient_id,
-        patient_uid,
-        search,
-        patient_name,
-        test_name,
-    ])
-    if needs_order_join:
-        query = query.join(
+        .join(
             LabTestOrder,
             LabTestOrder.id == LabResult.lab_test_order_id,
         )
+        .filter(LabTestOrder.department_id == tech_dept_id)
+    )
 
     if from_date:
         query = query.filter(LabResult.created_at >= from_date)
@@ -685,12 +798,6 @@ def get_reports(
 
     if search:
         search = search.strip()
-        if not needs_order_join:
-            query = query.join(
-                LabTestOrder,
-                LabTestOrder.id == LabResult.lab_test_order_id,
-            )
-            needs_order_join = True
         query = query.filter(
             or_(
                 LabTestOrder.patient_name.ilike(f"%{search}%"),
@@ -762,7 +869,7 @@ def get_reports(
     }
 
 
-def get_report_detail(db: Session, report_id: int):
+def get_report_detail(db: Session, report_id: int, current_user: User):
     report = (
         db.query(LabResult)
         .options(
@@ -776,6 +883,9 @@ def get_report_detail(db: Session, report_id: int):
 
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if not report.lab_order:
+        raise HTTPException(status_code=404, detail="Report not found")
+    assert_order_accessible_by_lab_tech(report.lab_order, current_user)
 
     uploader_name = " ".join(
         filter(
@@ -831,6 +941,7 @@ def get_report_detail(db: Session, report_id: int):
             **_order_patient_fields(report.lab_order),
             "doctor_id": report.lab_order.doctor_id,
             "doctor_name": doctor_name,
+            "department_id": report.lab_order.department_id,
             "test_name": report.lab_order.test_name,
             "category": report.lab_order.category,
             "priority": report.lab_order.priority,
@@ -840,37 +951,43 @@ def get_report_detail(db: Session, report_id: int):
     }
 
 
-def get_dashboard_stats(db: Session):
+def get_dashboard_stats(db: Session, current_user: User):
     ist_now = datetime.now(IST)
     today = ist_now.date()
+    tech_dept_id = require_lab_tech_department_id(current_user)
+    dept_filter = LabTestOrder.department_id == tech_dept_id
 
     total_today = (
         db.query(func.count(LabTestOrder.id))
-        .filter(func.date(LabTestOrder.created_at) == today)
+        .filter(
+            dept_filter,
+            func.date(LabTestOrder.created_at) == today,
+        )
         .scalar()
     )
 
     pending = (
         db.query(func.count(LabTestOrder.id))
-        .filter(LabTestOrder.status == LabTestStatus.ORDERED)
+        .filter(
+            dept_filter,
+            LabTestOrder.status == LabTestStatus.ORDERED,
+        )
         .scalar()
     )
 
     sample_collected = (
         db.query(func.count(LabTestOrder.id))
-        .filter(LabTestOrder.status == LabTestStatus.SAMPLE_COLLECTED)
-        .scalar()
-    )
-
-    processing = (
-        db.query(func.count(LabTestOrder.id))
-        .filter(LabTestOrder.status == LabTestStatus.PROCESSING)
+        .filter(
+            dept_filter,
+            LabTestOrder.status == LabTestStatus.SAMPLE_COLLECTED,
+        )
         .scalar()
     )
 
     completed_today = (
         db.query(func.count(LabTestOrder.id))
         .filter(
+            dept_filter,
             LabTestOrder.status == LabTestStatus.COMPLETED,
             func.date(LabTestOrder.updated_at) == today,
         )
@@ -880,11 +997,11 @@ def get_dashboard_stats(db: Session):
     urgent_pending = (
         db.query(func.count(LabTestOrder.id))
         .filter(
+            dept_filter,
             LabTestOrder.priority.ilike("Urgent"),
             LabTestOrder.status.in_([
                 LabTestStatus.ORDERED,
                 LabTestStatus.SAMPLE_COLLECTED,
-                LabTestStatus.PROCESSING,
             ]),
         )
         .scalar()
@@ -894,21 +1011,26 @@ def get_dashboard_stats(db: Session):
         "total_today": total_today or 0,
         "pending": pending or 0,
         "sample_collected": sample_collected or 0,
-        "processing": processing or 0,
+        # Deprecated under Option B — kept as 0 for existing dashboard clients.
+        "processing": 0,
         "completed_today": completed_today or 0,
         "urgent_pending": urgent_pending or 0,
     }
 
 
-def get_report_file(db: Session, report_id: int):
+def get_report_file(db: Session, report_id: int, current_user: User):
     report = (
         db.query(LabResult)
+        .options(joinedload(LabResult.lab_order))
         .filter(LabResult.id == report_id)
         .first()
     )
 
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    if not report.lab_order:
+        raise HTTPException(status_code=404, detail="Report not found")
+    assert_order_accessible_by_lab_tech(report.lab_order, current_user)
 
     if not report.report_file:
         raise HTTPException(status_code=404, detail="No file uploaded")

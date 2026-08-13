@@ -29,7 +29,7 @@ def _paginate_notes(
     """
     Registry lists use latest_per_patient=True (one row per patient).
     Patient timeline / filtered history keep latest_per_patient=False (all rows).
-    Updates still append new notes — detail payload includes full history.
+    Detail payload includes full history across create notes for the patient.
     """
     if not latest_per_patient:
         notes = (
@@ -357,10 +357,7 @@ def update_note_service(
     note_data: NursingNoteUpdate,
     nurse_id: int,
 ):
-    """
-    Append a new nursing note (does not overwrite the previous snapshot).
-    Old values stay available in the Created At history filter; latest is newest.
-    """
+    """Append a new nursing-note snapshot (keeps prior rows for history filter)."""
 
     note = (
         db.query(NursingNote)
@@ -376,12 +373,6 @@ def update_note_service(
             detail="Note not found"
         )
 
-    if note.nurse_id != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update notes you created",
-        )
-
     try:
 
         update_data = (
@@ -390,20 +381,35 @@ def update_note_service(
             )
         )
 
-        def pick(field):
-            return update_data[field] if field in update_data else getattr(note, field)
+        allowed_fields = (
+            "symptoms",
+            "treatment_response",
+            "additional_notes",
+        )
 
+        snapshot_values = {
+            field: getattr(note, field)
+            for field in allowed_fields
+        }
+        for field in allowed_fields:
+            if field in update_data:
+                snapshot_values[field] = update_data[field]
+
+        now = datetime.now(IST)
         new_note = NursingNote(
             appointment_id=note.appointment_id,
             patient_id=note.patient_id,
             nurse_id=nurse_id,
-            symptoms=pick("symptoms"),
-            treatment_response=pick("treatment_response"),
-            additional_notes=pick("additional_notes"),
             status=NursingNoteStatus.ACTIVE,
+            symptoms=snapshot_values["symptoms"],
+            treatment_response=snapshot_values["treatment_response"],
+            additional_notes=snapshot_values["additional_notes"],
             created_by=nurse_id,
-            created_at=datetime.now(IST),
+            updated_by=nurse_id,
+            created_at=now,
+            updated_at=now,
         )
+
         db.add(new_note)
         db.commit()
         db.refresh(new_note)

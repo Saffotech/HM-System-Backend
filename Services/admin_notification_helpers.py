@@ -10,7 +10,6 @@ from Enums.notification import (
     ReferenceType,
     SourceModule,
 )
-from Models.nurse_emergency_alert import EmergencyAlert
 from Models.patient import OpdVisit, Patient
 from Models.role import Role
 from Models.user import User
@@ -50,13 +49,6 @@ def _patient_label_from_visit(db: Session, visit: OpdVisit) -> str:
     return h.display_name(patient.first_name, patient.last_name)
 
 
-def _patient_label_from_alert(db: Session, alert: EmergencyAlert) -> str:
-    patient = db.query(Patient).filter(Patient.id == alert.patient_id).first()
-    if not patient:
-        return "Patient"
-    return h.display_name(patient.first_name, patient.last_name)
-
-
 def _broadcast_to_admins(
     db: Session,
     *,
@@ -89,39 +81,6 @@ def _broadcast_to_admins(
             created_by_name=created_by_name,
             priority=priority,
         )
-
-
-def notify_admins_emergency_alert(
-    db: Session,
-    alert: EmergencyAlert,
-    *,
-    created_by: Optional[int] = None,
-) -> None:
-    patient_name = _patient_label_from_alert(db, alert)
-    severity_label = (
-        alert.severity.value if hasattr(alert.severity, "value") else str(alert.severity)
-    )
-    location_parts = [part for part in (alert.ward_name, alert.bed_number) if part]
-    message_lines = [f"{severity_label.upper()} — {patient_name}"]
-    if location_parts:
-        message_lines.append(" — ".join(location_parts))
-    if alert.description:
-        message_lines.append(alert.description)
-    if alert.alert_uid:
-        message_lines.append(f"Alert: {alert.alert_uid}")
-
-    _broadcast_to_admins(
-        db,
-        title=alert.title or "Critical emergency alert",
-        message="\n".join(message_lines),
-        notification_type=NotificationType.EMERGENCY_ALERT,
-        source_module=SourceModule.NURSE,
-        reference_type=ReferenceType.ALERT,
-        reference_id=alert.id,
-        created_by=created_by,
-        created_by_name=_staff_name(db, created_by),
-        priority=NotificationPriority.CRITICAL,
-    )
 
 
 def notify_admins_queue_enqueue_failed(

@@ -14,7 +14,6 @@ from Schemas.nurse_schema import (
     VitalUpdate,
     VitalResponse,
 )
-from Services.nurse_emergency_alert_triggers import process_vital_alerts
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -30,7 +29,7 @@ def _paginate_vitals(
     """
     Registry lists use latest_per_patient=True (one row per patient).
     Patient timeline / filtered history keep latest_per_patient=False (all rows).
-    Updates still append new recordings — detail payload includes full history.
+    Detail payload includes full history across create recordings for the patient.
     """
     if not latest_per_patient:
         vitals = (
@@ -381,13 +380,6 @@ def create_vital_service(
             .first()
         )
 
-        process_vital_alerts(
-            db=db,
-            vital=vital,
-            nurse_id=nurse_id,
-            mark_critical=bool(vital_data.mark_critical),
-        )
-
         return _serialize_vital(_enrich_vital(db, vital), db)
 
     except Exception:
@@ -405,10 +397,7 @@ def update_vital_service(
     vital_data: VitalUpdate,
     nurse_id: int,
 ):
-    """
-    Append a new vitals recording (does not overwrite the previous snapshot).
-    Old values stay available in the Recorded At history filter; latest is newest.
-    """
+    """Append a new vitals snapshot (keeps prior rows for history filter)."""
 
     vital = (
         db.query(PatientVitals)
@@ -424,12 +413,6 @@ def update_vital_service(
             detail="Vital record not found"
         )
 
-    if vital.recorded_by != nurse_id:
-        raise HTTPException(
-            status_code=403,
-            detail="You can only update vitals you recorded",
-        )
-
     try:
 
         update_data = (
@@ -438,30 +421,47 @@ def update_vital_service(
             )
         )
 
-        mark_critical = bool(
-            update_data.pop("mark_critical", False)
+        allowed_fields = (
+            "temperature",
+            "blood_pressure",
+            "heart_rate",
+            "respiratory_rate",
+            "oxygen_saturation",
+            "blood_sugar",
+            "weight",
+            "pain_level",
+            "observation_notes",
         )
 
-        def pick(field):
-            return update_data[field] if field in update_data else getattr(vital, field)
+        snapshot_values = {
+            field: getattr(vital, field)
+            for field in allowed_fields
+        }
+        for field in allowed_fields:
+            if field in update_data:
+                snapshot_values[field] = update_data[field]
 
+        now = datetime.now(IST)
         new_vital = PatientVitals(
             appointment_id=vital.appointment_id,
             patient_id=vital.patient_id,
             recorded_by=nurse_id,
-            temperature=pick("temperature"),
-            blood_pressure=pick("blood_pressure"),
-            heart_rate=pick("heart_rate"),
-            respiratory_rate=pick("respiratory_rate"),
-            oxygen_saturation=pick("oxygen_saturation"),
-            blood_sugar=pick("blood_sugar"),
-            weight=pick("weight"),
-            pain_level=pick("pain_level"),
-            observation_notes=pick("observation_notes"),
             status=VitalStatus.RECORDED,
+            temperature=snapshot_values["temperature"],
+            blood_pressure=snapshot_values["blood_pressure"],
+            heart_rate=snapshot_values["heart_rate"],
+            respiratory_rate=snapshot_values["respiratory_rate"],
+            oxygen_saturation=snapshot_values["oxygen_saturation"],
+            blood_sugar=snapshot_values["blood_sugar"],
+            weight=snapshot_values["weight"],
+            pain_level=snapshot_values["pain_level"],
+            observation_notes=snapshot_values["observation_notes"],
             created_by=nurse_id,
-            recorded_at=datetime.now(IST),
+            updated_by=nurse_id,
+            recorded_at=now,
+            updated_at=now,
         )
+
         db.add(new_vital)
         db.commit()
         db.refresh(new_vital)
@@ -469,13 +469,6 @@ def update_vital_service(
             _vital_query(db)
             .filter(PatientVitals.id == new_vital.id)
             .first()
-        )
-
-        process_vital_alerts(
-            db=db,
-            vital=new_vital,
-            nurse_id=nurse_id,
-            mark_critical=mark_critical,
         )
 
         return _serialize_vital(_enrich_vital(db, new_vital), db)

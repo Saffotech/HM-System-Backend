@@ -21,20 +21,14 @@ from Models.user import User
 
 from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverCreate,
-    ShiftHandoverUpdate,
     ShiftHandoverPatientsBulkCreate,
-    ShiftHandoverPatientUpdate,
-    ShiftHandoverTakeOver,
 )
 
 from Services.nurse_shift_handover_service import (
     create_handover_service,
-    update_handover_service,
     bulk_add_handover_patients_service,
-    update_handover_patient_service,
     delete_handover_patient_service,
     submit_handover_service,
-    take_over_handover_service,
     get_handover_list_service,
     get_handover_detail_service
 )
@@ -78,42 +72,6 @@ def create_handover(
 
 
 # ==========================================================
-# UPDATE HANDOVER
-# ==========================================================
-
-@router.put("/{handover_id}")
-def update_handover(
-
-    handover_data: ShiftHandoverUpdate,
-
-    handover_id: int = Path(
-        ...,
-        ge=1,
-        description="Handover ID"
-    ),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_handover:update"
-        )
-    ),
-
-    db: Session = Depends(get_db)
-):
-
-    return update_handover_service(
-        db=db,
-        handover_id=handover_id,
-        handover_data=handover_data,
-        nurse_id=current_user.id
-    )
-
-
-# ==========================================================
 # BULK ADD PATIENTS
 # ==========================================================
 
@@ -147,42 +105,6 @@ def add_handover_patients(
     return bulk_add_handover_patients_service(
         db=db,
         handover_id=handover_id,
-        patient_data=patient_data,
-        nurse_id=current_user.id
-    )
-
-
-# ==========================================================
-# UPDATE PATIENT SUMMARY
-# ==========================================================
-
-@router.put("/patients/{patient_summary_id}")
-def update_handover_patient(
-
-    patient_data: ShiftHandoverPatientUpdate,
-
-    patient_summary_id: int = Path(
-        ...,
-        ge=1,
-        description="Patient Summary ID"
-    ),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_handover:update"
-        )
-    ),
-
-    db: Session = Depends(get_db)
-):
-
-    return update_handover_patient_service(
-        db=db,
-        patient_summary_id=patient_summary_id,
         patient_data=patient_data,
         nurse_id=current_user.id
     )
@@ -251,42 +173,6 @@ def submit_handover(
         db=db,
         handover_id=handover_id,
         nurse_id=current_user.id
-    )
-
-
-# ==========================================================
-# TAKE OVER HANDOVER
-# ==========================================================
-
-@router.put("/{handover_id}/take-over")
-def take_over_handover(
-
-    handover_id: int = Path(
-        ...,
-        ge=1,
-        description="Handover ID"
-    ),
-
-    take_over_data: ShiftHandoverTakeOver = ShiftHandoverTakeOver(),
-
-    current_user: User = Depends(
-        get_current_user
-    ),
-
-    _: bool = Depends(
-        PermissionChecker(
-            "nurse_handover:take_over"
-        )
-    ),
-
-    db: Session = Depends(get_db)
-):
-
-    return take_over_handover_service(
-        db=db,
-        handover_id=handover_id,
-        nurse_id=current_user.id,
-        take_over_data=take_over_data,
     )
 
 

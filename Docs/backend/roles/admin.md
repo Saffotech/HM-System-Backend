@@ -143,7 +143,7 @@ Admin should never use these modules (other roles own them):
 
 - Patients, OPD, billing, appointments
 - Prescriptions, lab
-- Nurse vitals, notes, medication, handover, emergency alerts
+- Nurse vitals, notes, medication, handover
 - Pharmacy dispense
 
 No links in admin sidebar to `/opd/`, `/doctor/`, `/nurse/`, `/pharmacy/`.

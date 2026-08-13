@@ -16,13 +16,11 @@ from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
-from Models.nurse_emergency_alert import AlertSeverity, AlertStatus, EmergencyAlert
 from Models.nurse_medication_administration import (
     MedicationAdministration,
     MedicationStatus,
 )
 from Models.nurse_patient_vitals import PatientVitals
-from Models.nurse_shift_handover import HandoverStatus, ShiftHandover
 from Models.opd_billing import Bed
 from Models.patient import Patient
 from Services import doctor_helpers as h
@@ -327,39 +325,6 @@ def _apply_allocated_only_filter(
     return query.filter(Bed.id.in_(bed_ids))
 
 
-def get_nurse_bed_patients_summary_service(
-    db: Session,
-    search: str | None = None,
-    ward_name: str | None = None,
-    bed_number: str | None = None,
-    department_id: int | None = None,
-    patient_id: int | None = None,
-    patient_uid: str | None = None,
-    allocated_only: bool = False,
-    nurse_id: int | None = None,
-    assignment_date=None,
-    shift_name: str | None = None,
-):
-    query = _base_bed_patients_query(
-        db=db,
-        search=search,
-        ward_name=ward_name,
-        bed_number=bed_number,
-        department_id=department_id,
-        patient_id=patient_id,
-        patient_uid=patient_uid,
-    )
-    query = _apply_allocated_only_filter(
-        query,
-        db,
-        allocated_only=allocated_only,
-        nurse_id=nurse_id,
-        assignment_date=assignment_date,
-        shift_name=shift_name,
-    )
-    return {"success": True, "occupied_count": query.count()}
-
-
 def get_nurse_bed_patients_service(
     db: Session,
     search: str | None = None,
@@ -457,21 +422,20 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
     """Read-only nurse self-service: roster span + active bed allocations for current shift."""
     from Services.nurse_shift_bed_allocation_service import (
         get_nurse_allocation_summary_service,
-        resolve_current_shift_name,
     )
 
     today = _today_ist()
     # Upcoming only: today through ~2 weeks (never include past days).
     roster_to = today + timedelta(days=13)
 
-    current_shift_name = resolve_current_shift_name()
+    # Prefer admin bed-allocation duty (name + times) over clock-only defaults.
     allocation_summary = get_nurse_allocation_summary_service(
         db,
         nurse_id,
         assignment_date=today,
-        shift_name=current_shift_name,
+        shift_name=None,
     )
-    shift_name = allocation_summary.get("shift_name") or current_shift_name
+    shift_name = allocation_summary.get("shift_name")
 
     current_shift = {
         "shift_name": shift_name,
@@ -514,14 +478,14 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
 
     # Roster period for the hero:
     # 1) Prefer consecutive span of today's rostered shift (any shift on today).
-    # 2) Else consecutive span of current clock shift if rostered today.
+    # 2) Else consecutive span of current duty shift if rostered today.
     # 3) Else next upcoming roster day for current shift (never fall back to past-only).
     roster_period = {"from_date": None, "to_date": None}
 
     today_rows = [r for r in all_roster_items if r["roster_date"] == today]
     period_shift = None
     if today_rows:
-        # Prefer the current clock shift if rostered today; otherwise use today's first roster shift.
+        # Prefer the resolved duty shift if rostered today; otherwise use today's first roster shift.
         matched = next(
             (
                 r
@@ -551,7 +515,7 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         if span is not None:
             roster_period = {"from_date": span[0], "to_date": span[1]}
 
-    # Bed allocations active today (kab se kab tak) for the current shift.
+    # Bed allocations active today for the resolved duty shift.
     allocation_rows = (
         db.query(
             NurseShiftBedAllocation.id.label("id"),
@@ -618,120 +582,5 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         "roster_period": roster_period,
         "my_beds": my_beds,
         "roster_items": roster_items,
-    }
-
-
-def get_nurse_dashboard_stats_service(db: Session) -> dict:
-    """Aggregated nurse dashboard counts for today / current ward load."""
-
-    today = date.today()
-
-    queue_rows = (
-        db.query(PatientQueue.status, func.count(PatientQueue.id))
-        .filter(PatientQueue.queue_date == today)
-        .group_by(PatientQueue.status)
-        .all()
-    )
-    queue_by_status: dict[str, int] = {}
-    for status, count in queue_rows:
-        key = status.value if hasattr(status, "value") else str(status)
-        queue_by_status[key] = count
-
-    occupied_beds = (
-        db.query(func.count(Bed.id))
-        .filter(Bed.status == "occupied", Bed.patient_id.isnot(None))
-        .scalar()
-        or 0
-    )
-
-    active_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-        )
-        .scalar()
-        or 0
-    )
-    critical_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-            EmergencyAlert.severity == AlertSeverity.CRITICAL,
-        )
-        .scalar()
-        or 0
-    )
-    high_alerts = (
-        db.query(func.count(EmergencyAlert.id))
-        .filter(
-            EmergencyAlert.status == AlertStatus.ACTIVE,
-            EmergencyAlert.is_active.is_(True),
-            EmergencyAlert.severity == AlertSeverity.HIGH,
-        )
-        .scalar()
-        or 0
-    )
-
-    submitted_handovers = (
-        db.query(func.count(ShiftHandover.id))
-        .filter(ShiftHandover.status == HandoverStatus.SUBMITTED)
-        .scalar()
-        or 0
-    )
-    awaiting_take_over = (
-        db.query(func.count(ShiftHandover.id))
-        .filter(
-            ShiftHandover.status == HandoverStatus.SUBMITTED,
-            ShiftHandover.replacement_nurse_id.is_(None),
-        )
-        .scalar()
-        or 0
-    )
-
-    occupied_patient_ids = [
-        row[0]
-        for row in (
-            db.query(Bed.patient_id)
-            .filter(Bed.status == "occupied", Bed.patient_id.isnot(None))
-            .all()
-        )
-    ]
-    pending_med_map = _pending_medication_counts(db, occupied_patient_ids)
-    pending_medications_total = sum(pending_med_map.values())
-
-    return {
-        "success": True,
-        "queue_today": {
-            "total": sum(
-                count
-                for status, count in queue_by_status.items()
-                if status != "no_show"
-            ),
-            "scheduled": queue_by_status.get("scheduled", 0),
-            "completed": queue_by_status.get("completed", 0),
-            "cancelled": queue_by_status.get("cancelled", 0),
-            "by_status": {
-                status: count
-                for status, count in queue_by_status.items()
-                if status != "no_show"
-            },
-        },
-        "beds": {
-            "occupied_count": occupied_beds,
-        },
-        "alerts": {
-            "active_count": active_alerts,
-            "critical_count": critical_alerts,
-            "high_count": high_alerts,
-        },
-        "handovers": {
-            "submitted_count": submitted_handovers,
-            "awaiting_take_over_count": awaiting_take_over,
-        },
-        "medications": {
-            "pending_count_occupied_beds": pending_medications_total,
-        },
     }
 

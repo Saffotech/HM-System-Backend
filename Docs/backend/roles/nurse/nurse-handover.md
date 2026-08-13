@@ -111,7 +111,7 @@ Build **create + patient summary + submit first**. Then list, detail, acknowledg
 
 **Optional helper (service layer):**
 - Pull `medication_pending` from `GET /nurse/medications/patient/{patient_id}`
-- Pull `critical_alerts` from `GET /nurse/alerts?patient_id=` (after emergency alerts module is built)
+- `critical_alerts` is free-text on the handover patient row (manual entry)
 
 ---
 

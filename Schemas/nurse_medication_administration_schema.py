@@ -10,9 +10,8 @@ from pydantic import BaseModel
 
 class MedicationAdministrationCreate(BaseModel):
     prescription_item_id: int
-    status: str
-    remarks: Optional[str] = None
     status: MedicationStatus
+    remarks: Optional[str] = None
     scheduled_time: Optional[datetime] = None
 
 
@@ -23,6 +22,7 @@ class MedicationAdministrationCreate(BaseModel):
 class MedicationAdministrationUpdate(BaseModel):
     status: MedicationStatus
     remarks: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
 
 # ==========================================================
 # RESPONSE

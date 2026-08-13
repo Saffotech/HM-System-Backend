@@ -1,5 +1,5 @@
 from datetime import date, datetime, time
-from typing import Any, Dict, List, Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -69,11 +69,6 @@ class NurseDashboardBedPatientListResponse(PaginatedResponse[NurseDashboardBedPa
     pass
 
 
-class NurseDashboardBedPatientSummaryResponse(BaseModel):
-    success: bool = True
-    occupied_count: int
-
-
 # ==========================================================
 # Nurse allocation summary (Phase 4 — additive endpoint)
 # ==========================================================
@@ -94,6 +89,7 @@ class NurseBedAllocationSummaryResponse(BaseModel):
 # ==========================================================
 # Nurse self-service: My Duty (roster + allocated beds span)
 # ==========================================================
+
 class NurseMyDutyCurrentShift(BaseModel):
     shift_name: Optional[str] = None
     shift_start: Optional[time] = None
@@ -134,108 +130,3 @@ class NurseMyDutyResponse(BaseModel):
     roster_period: NurseMyDutyRosterPeriod = NurseMyDutyRosterPeriod()
     my_beds: List[NurseMyDutyBedItem] = Field(default_factory=list)
     roster_items: List[NurseMyDutyRosterItem] = Field(default_factory=list)
-
-
-# ==========================================================
-# Dashboard stats
-# ==========================================================
-
-class NurseDashboardQueueStats(BaseModel):
-    total: int = 0
-    scheduled: int = 0
-    completed: int = 0
-    cancelled: int = 0
-    by_status: Dict[str, int] = Field(default_factory=dict)
-
-
-class NurseDashboardBedsStats(BaseModel):
-    occupied_count: int = 0
-
-
-class NurseDashboardAlertsStats(BaseModel):
-    active_count: int = 0
-    critical_count: int = 0
-    high_count: int = 0
-
-
-class NurseDashboardHandoversStats(BaseModel):
-    submitted_count: int = 0
-    awaiting_take_over_count: int = 0
-
-
-class NurseDashboardMedicationsStats(BaseModel):
-    pending_count_occupied_beds: int = 0
-
-
-class NurseDashboardStatsResponse(BaseModel):
-    success: bool = True
-    queue_today: NurseDashboardQueueStats
-    beds: NurseDashboardBedsStats
-    alerts: NurseDashboardAlertsStats
-    handovers: NurseDashboardHandoversStats
-    medications: NurseDashboardMedicationsStats
-
-
-# ==========================================================
-# Patient overview
-# ==========================================================
-
-class NursePatientOverviewPatient(BaseModel):
-    id: int
-    patient_uid: str
-    first_name: str
-    last_name: Optional[str] = None
-    full_name: str
-    phone: Optional[str] = None
-    gender: Optional[Any] = None
-    blood_group: Optional[str] = None
-    allergies: Optional[str] = None
-
-
-class NursePatientOverviewBed(BaseModel):
-    bed_id: int
-    bed_number: str
-    ward_name: Optional[str] = None
-    department_id: Optional[int] = None
-    admitted_at: Optional[datetime] = None
-
-
-class NursePatientOverviewNote(BaseModel):
-    id: int
-    symptoms: Optional[str] = None
-    treatment_response: Optional[str] = None
-    additional_notes: Optional[str] = None
-    status: Optional[str] = None
-    created_at: Optional[datetime] = None
-
-
-class NursePatientOverviewAlert(BaseModel):
-    alert_id: int
-    alert_uid: str
-    alert_type: str
-    severity: str
-    title: Optional[str] = None
-    ward_name: Optional[str] = None
-    bed_number: Optional[str] = None
-    triggered_at: Optional[datetime] = None
-    assigned_nurse_id: Optional[int] = None
-
-
-class NursePatientOverviewMedication(BaseModel):
-    prescription_item_id: int
-    medicine_name: str
-    dosage: Optional[str] = None
-    frequency: Optional[str] = None
-    instructions: Optional[str] = None
-    is_given: bool = False
-
-
-class NursePatientOverviewResponse(BaseModel):
-    success: bool = True
-    patient: NursePatientOverviewPatient
-    bed: Optional[NursePatientOverviewBed] = None
-    last_vitals: Optional[NurseDashboardBedPatientLastVitals] = None
-    pending_medication_count: int = 0
-    medications: List[NursePatientOverviewMedication] = Field(default_factory=list)
-    recent_notes: List[NursePatientOverviewNote] = Field(default_factory=list)
-    active_alerts: List[NursePatientOverviewAlert] = Field(default_factory=list)

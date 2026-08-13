@@ -113,9 +113,6 @@ PERMISSIONS_LIST = [
     "workforce:update",
     "workforce:delete",
     "roster:manage",
-    "emergency_alerts:view",
-    "emergency_alerts:create",
-    "emergency_alerts:update",
     "receptionist:view_queues",
     "receptionist:view_doctor_schedule",
     "ipd:dashboard",
@@ -216,9 +213,6 @@ ROLES_DATA = {
             "nurse_handover:create",
             "nurse_handover:update",
             "nurse_handover:submit",
-            "emergency_alerts:view",
-            "emergency_alerts:create",
-            "emergency_alerts:update",
         ],
     },
     "opd_billing": {
@@ -326,6 +320,7 @@ DEPARTMENTS = [
     {"name": "Dermatology", "code": "DERM"},
     {"name": "ENT", "code": "ENT"},
     {"name": "Ophthalmology", "code": "EYE"},
+    {"name": "Laboratory", "code": "LAB"},
     {"name": "Radiology", "code": "RAD"},
 ]
 

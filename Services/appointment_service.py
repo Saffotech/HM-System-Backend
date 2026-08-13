@@ -11,7 +11,6 @@ from Models.department import Department
 from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription
-from Models.doctor_queue_next_request import DoctorQueueNextRequest
 from Models.nurse_nursing_notes import NursingNote
 from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Appointment, AppointmentStatus
@@ -887,9 +886,6 @@ def delete_appointment(db: Session, appointment_id: int) -> dict:
             detail="Only completed or cancelled appointments can be deleted",
         )
 
-    db.query(DoctorQueueNextRequest).filter(
-        DoctorQueueNextRequest.appointment_id == appointment_id
-    ).delete(synchronize_session=False)
     db.query(PatientQueue).filter(PatientQueue.appointment_id == appointment_id).delete(
         synchronize_session=False
     )
