@@ -596,9 +596,6 @@ def upload_report(
     }
 
 
-create_report = upload_report
-
-
 def upload_report_file(
     db: Session,
     order_id: int,

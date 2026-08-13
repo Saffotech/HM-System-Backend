@@ -21,7 +21,6 @@ from Models.nurse_medication_administration import (
     MedicationStatus,
 )
 from Models.nurse_patient_vitals import PatientVitals
-from Models.nurse_shift_handover import HandoverStatus, ShiftHandover
 from Models.opd_billing import Bed
 from Models.patient import Patient
 from Services import doctor_helpers as h
@@ -326,39 +325,6 @@ def _apply_allocated_only_filter(
     return query.filter(Bed.id.in_(bed_ids))
 
 
-def get_nurse_bed_patients_summary_service(
-    db: Session,
-    search: str | None = None,
-    ward_name: str | None = None,
-    bed_number: str | None = None,
-    department_id: int | None = None,
-    patient_id: int | None = None,
-    patient_uid: str | None = None,
-    allocated_only: bool = False,
-    nurse_id: int | None = None,
-    assignment_date=None,
-    shift_name: str | None = None,
-):
-    query = _base_bed_patients_query(
-        db=db,
-        search=search,
-        ward_name=ward_name,
-        bed_number=bed_number,
-        department_id=department_id,
-        patient_id=patient_id,
-        patient_uid=patient_uid,
-    )
-    query = _apply_allocated_only_filter(
-        query,
-        db,
-        allocated_only=allocated_only,
-        nurse_id=nurse_id,
-        assignment_date=assignment_date,
-        shift_name=shift_name,
-    )
-    return {"success": True, "occupied_count": query.count()}
-
-
 def get_nurse_bed_patients_service(
     db: Session,
     search: str | None = None,
@@ -616,90 +582,5 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         "roster_period": roster_period,
         "my_beds": my_beds,
         "roster_items": roster_items,
-    }
-
-
-def get_nurse_dashboard_stats_service(db: Session) -> dict:
-    """Aggregated nurse dashboard counts for today / current ward load."""
-
-    today = date.today()
-
-    queue_rows = (
-        db.query(PatientQueue.status, func.count(PatientQueue.id))
-        .filter(PatientQueue.queue_date == today)
-        .group_by(PatientQueue.status)
-        .all()
-    )
-    queue_by_status: dict[str, int] = {}
-    for status, count in queue_rows:
-        key = status.value if hasattr(status, "value") else str(status)
-        queue_by_status[key] = count
-
-    occupied_beds = (
-        db.query(func.count(Bed.id))
-        .filter(Bed.status == "occupied", Bed.patient_id.isnot(None))
-        .scalar()
-        or 0
-    )
-
-    submitted_handovers = (
-        db.query(func.count(ShiftHandover.id))
-        .filter(ShiftHandover.status == HandoverStatus.SUBMITTED)
-        .scalar()
-        or 0
-    )
-    awaiting_take_over = (
-        db.query(func.count(ShiftHandover.id))
-        .filter(
-            ShiftHandover.status == HandoverStatus.SUBMITTED,
-            ShiftHandover.replacement_nurse_id.is_(None),
-        )
-        .scalar()
-        or 0
-    )
-
-    occupied_patient_ids = [
-        row[0]
-        for row in (
-            db.query(Bed.patient_id)
-            .filter(Bed.status == "occupied", Bed.patient_id.isnot(None))
-            .all()
-        )
-    ]
-    pending_med_map = _pending_medication_counts(db, occupied_patient_ids)
-    pending_medications_total = sum(pending_med_map.values())
-
-    return {
-        "success": True,
-        "queue_today": {
-            "total": sum(
-                count
-                for status, count in queue_by_status.items()
-                if status != "no_show"
-            ),
-            "scheduled": queue_by_status.get("scheduled", 0),
-            "completed": queue_by_status.get("completed", 0),
-            "cancelled": queue_by_status.get("cancelled", 0),
-            "by_status": {
-                status: count
-                for status, count in queue_by_status.items()
-                if status != "no_show"
-            },
-        },
-        "beds": {
-            "occupied_count": occupied_beds,
-        },
-        "alerts": {
-            "active_count": 0,
-            "critical_count": 0,
-            "high_count": 0,
-        },
-        "handovers": {
-            "submitted_count": submitted_handovers,
-            "awaiting_take_over_count": awaiting_take_over,
-        },
-        "medications": {
-            "pending_count_occupied_beds": pending_medications_total,
-        },
     }
 
