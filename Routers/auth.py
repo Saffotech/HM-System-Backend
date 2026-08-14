@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from jose import JWTError
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
 from Models.user import User
@@ -55,10 +56,11 @@ def register(
 
 @router.post("/login")
 def login(data: UserLogin, db: Session = Depends(get_db)):
+    email = (data.email or "").strip().lower()
     user = (
         db.query(User)
         .options(joinedload(User.role_obj).joinedload(Role.permissions))
-        .filter(User.email == data.email)
+        .filter(func.lower(User.email) == email)
         .first()
     )
 
