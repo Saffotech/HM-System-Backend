@@ -97,6 +97,10 @@ class LabOrderListItem(BaseModel):
     patient_name: str
     patient_uid: str
     registration_source: str
+    encounter_type: str = "OPD"
+    admission_id: Optional[int] = None
+    ward_name: Optional[str] = None
+    bed_number: Optional[str] = None
 
     doctor_id: int
     doctor_name: str
@@ -149,6 +153,10 @@ class LabOrderDetailResponse(BaseModel):
     patient_name: str
     patient_uid: str
     registration_source: str
+    encounter_type: str = "OPD"
+    admission_id: Optional[int] = None
+    ward_name: Optional[str] = None
+    bed_number: Optional[str] = None
 
     doctor_id: int
     doctor_name: str
@@ -193,6 +201,10 @@ class LabReportListItem(BaseModel):
     patient_name: str
     patient_uid: str
     registration_source: str
+    encounter_type: str = "OPD"
+    admission_id: Optional[int] = None
+    ward_name: Optional[str] = None
+    bed_number: Optional[str] = None
 
     doctor_id: Optional[int] = None
     doctor_name: Optional[str] = None
@@ -226,6 +238,10 @@ class LabReportOrderSummary(BaseModel):
     patient_name: str
     patient_uid: str
     registration_source: str
+    encounter_type: str = "OPD"
+    admission_id: Optional[int] = None
+    ward_name: Optional[str] = None
+    bed_number: Optional[str] = None
     doctor_id: int
     doctor_name: Optional[str] = None
     department_id: Optional[int] = None

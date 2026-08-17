@@ -1,8 +1,10 @@
 from typing import Optional, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from Schemas.common_schema import PaginatedResponse, PaginationParams
+from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
+
 
 
 class DoctorIpdAdmissionItem(BaseModel):
@@ -40,6 +42,26 @@ class DoctorIpdAdmissionItem(BaseModel):
 
 class DoctorIpdAdmissionListResponse(PaginatedResponse[DoctorIpdAdmissionItem]):
     pass
+
+
+class DoctorIpdConsultationSaveRequest(BaseModel):
+    clinical: CompleteConsultationSchema = Field(default_factory=CompleteConsultationSchema)
+
+
+class DoctorIpdVisitOut(BaseModel):
+    id: int
+    admission_id: int
+    doctor_id: int
+    visited_at: Optional[str] = None
+    charge: float = 0
+    notes: Optional[str] = None
+
+
+class DoctorIpdConsultationSaveResponse(BaseModel):
+    success: bool = True
+    message: str = "IPD consultation saved"
+    admission: DoctorIpdAdmissionItem
+    visit: DoctorIpdVisitOut
 
 
 PaginationSchema = PaginationParams

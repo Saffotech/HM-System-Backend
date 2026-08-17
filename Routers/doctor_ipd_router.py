@@ -9,9 +9,15 @@ from dependencies import PermissionChecker, get_current_user
 from Models.user import User
 from Schemas.doctor_ipd_schema import (
     DoctorIpdAdmissionListResponse,
+    DoctorIpdConsultationSaveRequest,
+    DoctorIpdConsultationSaveResponse,
     PaginationSchema,
 )
-from Services.doctor_ipd_service import list_doctor_ipd_admissions_service
+from Services.doctor_ipd_service import (
+    list_doctor_ipd_admissions_service,
+    save_doctor_ipd_consultation_service,
+)
+
 
 router = APIRouter(
     prefix="/doctor/ipd-admissions",
@@ -47,4 +53,24 @@ def list_doctor_ipd_admissions(
         search=search,
         page=pagination.page,
         page_size=pagination.page_size,
+    )
+
+
+@router.post(
+    "/{admission_id}/consultations",
+    response_model=DoctorIpdConsultationSaveResponse,
+    status_code=status.HTTP_200_OK,
+)
+def save_doctor_ipd_consultation(
+    admission_id: int,
+    payload: DoctorIpdConsultationSaveRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("appointments:update")),
+):
+    return save_doctor_ipd_consultation_service(
+        db=db,
+        admission_id=admission_id,
+        doctor_id=current_user.id,
+        payload=payload,
     )

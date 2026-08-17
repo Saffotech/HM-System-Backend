@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
+from Models.ipd import IpdAdmission
 from Models.lab_result import LabResult, LabResultParameter, ParameterFlag
 from Models.patient import Patient, registration_source_value
 from Models.user import User
@@ -78,17 +79,40 @@ def format_file_size(size_in_bytes: int) -> str:
 
     return f"{size_in_bytes / (1024 * 1024):.1f} MB"
 
+
+def _order_visit_location_fields(admission: IpdAdmission | None) -> dict:
+    """Current visit location. OPD if the patient has no active IPD admission."""
+    if admission is None:
+        return {
+            "encounter_type": "OPD",
+            "admission_id": None,
+            "ward_name": None,
+            "bed_number": None,
+        }
+    return {
+        "encounter_type": "IPD",
+        "admission_id": admission.id,
+        "ward_name": admission.ward_name,
+        "bed_number": admission.bed_number,
+    }
+
+
 def _order_patient_fields(
     order: LabTestOrder,
     *,
     registration_source: str | None = None,
+    admission: IpdAdmission | None = None,
+    include_visit_location: bool = False,
 ) -> dict:
     """Lab orders snapshot patient UID on the order row."""
-    return {
+    fields = {
         "patient_id": order.patient_id,
         "patient_uid": order.patient_uhid,
         "registration_source": registration_source_value(registration_source),
     }
+    if include_visit_location:
+        fields.update(_order_visit_location_fields(admission))
+    return fields
 
 
 def _registration_sources_by_patient_id(
@@ -104,6 +128,29 @@ def _registration_sources_by_patient_id(
         .all()
     )
     return {pid: registration_source_value(source) for pid, source in rows}
+
+
+def _active_admissions_by_patient_id(
+    db: Session,
+    patient_ids: list[int] | set[int],
+) -> dict[int, IpdAdmission]:
+    ids = {int(pid) for pid in patient_ids if pid}
+    if not ids:
+        return {}
+    rows = (
+        db.query(IpdAdmission)
+        .filter(
+            IpdAdmission.patient_id.in_(ids),
+            IpdAdmission.status == "admitted",
+        )
+        .order_by(IpdAdmission.admitted_at.desc())
+        .all()
+    )
+    by_patient: dict[int, IpdAdmission] = {}
+    for row in rows:
+        if row.patient_id not in by_patient:
+            by_patient[row.patient_id] = row
+    return by_patient
 
 
 def _get_upload_dir() -> Path:
@@ -323,10 +370,9 @@ def get_orders(
     )
 
     items = []
-    source_by_patient = _registration_sources_by_patient_id(
-        db,
-        [order.patient_id for order, _doctor in rows],
-    )
+    patient_ids = [order.patient_id for order, _doctor in rows]
+    source_by_patient = _registration_sources_by_patient_id(db, patient_ids)
+    admissions_by_patient = _active_admissions_by_patient_id(db, patient_ids)
     for order, doctor in rows:
         doctor_name = " ".join(
             filter(None, [doctor.first_name, doctor.last_name])
@@ -338,6 +384,8 @@ def get_orders(
             **_order_patient_fields(
                 order,
                 registration_source=source_by_patient.get(order.patient_id),
+                admission=admissions_by_patient.get(order.patient_id),
+                include_visit_location=True,
             ),
             "doctor_id": doctor.id,
             "doctor_name": doctor_name,
@@ -405,6 +453,10 @@ def get_order_detail(db: Session, order_id: int, current_user: User):
             registration_source=_registration_sources_by_patient_id(
                 db, [order.patient_id]
             ).get(order.patient_id),
+            admission=_active_admissions_by_patient_id(
+                db, [order.patient_id]
+            ).get(order.patient_id),
+            include_visit_location=True,
         ),
         "doctor_id": order.doctor_id,
         "doctor_name": doctor_name,
@@ -862,14 +914,13 @@ def get_reports(
         for u in db.query(User).filter(User.id.in_(doctor_ids)).all()
     } if doctor_ids else {}
 
-    source_by_patient = _registration_sources_by_patient_id(
-        db,
-        [
-            report.lab_order.patient_id
-            for report in reports
-            if report.lab_order
-        ],
-    )
+    report_patient_ids = [
+        report.lab_order.patient_id
+        for report in reports
+        if report.lab_order
+    ]
+    source_by_patient = _registration_sources_by_patient_id(db, report_patient_ids)
+    admissions_by_patient = _active_admissions_by_patient_id(db, report_patient_ids)
 
     items = []
     for report in reports:
@@ -893,6 +944,8 @@ def get_reports(
             **_order_patient_fields(
                 report.lab_order,
                 registration_source=source_by_patient.get(report.lab_order.patient_id),
+                admission=admissions_by_patient.get(report.lab_order.patient_id),
+                include_visit_location=True,
             ),
             "doctor_id": report.lab_order.doctor_id if report.lab_order else None,
             "doctor_name": doctor_name,
@@ -988,6 +1041,10 @@ def get_report_detail(db: Session, report_id: int, current_user: User):
                 registration_source=_registration_sources_by_patient_id(
                     db, [report.lab_order.patient_id]
                 ).get(report.lab_order.patient_id),
+                admission=_active_admissions_by_patient_id(
+                    db, [report.lab_order.patient_id]
+                ).get(report.lab_order.patient_id),
+                include_visit_location=True,
             ),
             "doctor_id": report.lab_order.doctor_id,
             "doctor_name": doctor_name,
