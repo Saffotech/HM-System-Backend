@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult, LabResultParameter, ParameterFlag
+from Models.patient import Patient, registration_source_value
 from Models.user import User
 from Schemas.lab_schema import LabReportCreate, ReportSource
 from Services import opd_helpers as h
@@ -77,12 +78,32 @@ def format_file_size(size_in_bytes: int) -> str:
 
     return f"{size_in_bytes / (1024 * 1024):.1f} MB"
 
-def _order_patient_fields(order: LabTestOrder) -> dict:
+def _order_patient_fields(
+    order: LabTestOrder,
+    *,
+    registration_source: str | None = None,
+) -> dict:
     """Lab orders snapshot patient UID on the order row."""
     return {
         "patient_id": order.patient_id,
         "patient_uid": order.patient_uhid,
+        "registration_source": registration_source_value(registration_source),
     }
+
+
+def _registration_sources_by_patient_id(
+    db: Session,
+    patient_ids: list[int] | set[int],
+) -> dict[int, str]:
+    ids = {int(pid) for pid in patient_ids if pid}
+    if not ids:
+        return {}
+    rows = (
+        db.query(Patient.id, Patient.registration_source)
+        .filter(Patient.id.in_(ids))
+        .all()
+    )
+    return {pid: registration_source_value(source) for pid, source in rows}
 
 
 def _get_upload_dir() -> Path:
@@ -302,6 +323,10 @@ def get_orders(
     )
 
     items = []
+    source_by_patient = _registration_sources_by_patient_id(
+        db,
+        [order.patient_id for order, _doctor in rows],
+    )
     for order, doctor in rows:
         doctor_name = " ".join(
             filter(None, [doctor.first_name, doctor.last_name])
@@ -310,7 +335,10 @@ def get_orders(
             "id": order.id,
             "appointment_id": order.appointment_id,
             "patient_name": order.patient_name,
-            **_order_patient_fields(order),
+            **_order_patient_fields(
+                order,
+                registration_source=source_by_patient.get(order.patient_id),
+            ),
             "doctor_id": doctor.id,
             "doctor_name": doctor_name,
             "department_id": order.department_id,
@@ -372,7 +400,12 @@ def get_order_detail(db: Session, order_id: int, current_user: User):
         "id": order.id,
         "appointment_id": order.appointment_id,
         "patient_name": order.patient_name,
-        **_order_patient_fields(order),
+        **_order_patient_fields(
+            order,
+            registration_source=_registration_sources_by_patient_id(
+                db, [order.patient_id]
+            ).get(order.patient_id),
+        ),
         "doctor_id": order.doctor_id,
         "doctor_name": doctor_name,
         "department_id": order.department_id,
@@ -829,6 +862,15 @@ def get_reports(
         for u in db.query(User).filter(User.id.in_(doctor_ids)).all()
     } if doctor_ids else {}
 
+    source_by_patient = _registration_sources_by_patient_id(
+        db,
+        [
+            report.lab_order.patient_id
+            for report in reports
+            if report.lab_order
+        ],
+    )
+
     items = []
     for report in reports:
         uploader_name = " ".join(
@@ -848,7 +890,10 @@ def get_reports(
             "report_id": report.id,
             "order_id": report.lab_test_order_id,
             "patient_name": report.lab_order.patient_name,
-            **_order_patient_fields(report.lab_order),
+            **_order_patient_fields(
+                report.lab_order,
+                registration_source=source_by_patient.get(report.lab_order.patient_id),
+            ),
             "doctor_id": report.lab_order.doctor_id if report.lab_order else None,
             "doctor_name": doctor_name,
             "test_name": report.lab_order.test_name,
@@ -938,7 +983,12 @@ def get_report_detail(db: Session, report_id: int, current_user: User):
         "order": {
             "id": report.lab_order.id,
             "patient_name": report.lab_order.patient_name,
-            **_order_patient_fields(report.lab_order),
+            **_order_patient_fields(
+                report.lab_order,
+                registration_source=_registration_sources_by_patient_id(
+                    db, [report.lab_order.patient_id]
+                ).get(report.lab_order.patient_id),
+            ),
             "doctor_id": report.lab_order.doctor_id,
             "doctor_name": doctor_name,
             "department_id": report.lab_order.department_id,

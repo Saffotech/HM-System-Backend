@@ -1,10 +1,36 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Float, ForeignKey
+import enum
+
+from sqlalchemy import CheckConstraint, Column, Integer, String, Boolean, DateTime, Date, Float, ForeignKey
 from database import Base
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+
+class RegistrationSource(str, enum.Enum):
+    OPD = "OPD"
+    IPD = "IPD"
+
+
+def registration_source_value(raw) -> str:
+    """Closed set for APIs: OPD | IPD. Unknown/missing → OPD."""
+    if raw is None:
+        return RegistrationSource.OPD.value
+    if isinstance(raw, RegistrationSource):
+        return raw.value
+    key = str(raw).strip().upper()
+    if key == RegistrationSource.IPD.value:
+        return RegistrationSource.IPD.value
+    return RegistrationSource.OPD.value
+
+
 class Patient(Base):
     __tablename__ = 'patients'
+    __table_args__ = (
+        CheckConstraint(
+            "registration_source IN ('OPD', 'IPD')",
+            name="ck_patients_registration_source",
+        ),
+    )
     id = Column(Integer, primary_key=True, index=True)
     patient_uid = Column(String, unique=True, nullable=False)
     first_name = Column(String, nullable=False)
@@ -23,6 +49,7 @@ class Patient(Base):
     insurance_policy_no = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     registered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    registration_source = Column(String(3), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True),
                         default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))
 

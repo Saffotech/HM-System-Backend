@@ -51,6 +51,7 @@ from Routers.admin_notification_router import router as admin_notification_route
 from Routers.admin_users_router import router as admin_users_router
 from Routers.departments_router import router as departments_router
 from Routers.doctor_appointment_router import router as appointments_router
+from Routers.doctor_ipd_router import router as doctor_ipd_router
 from Routers.doctor_consultation_router import router as consultation_router
 from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_notification_router import router as doctor_notification_router
@@ -128,6 +129,7 @@ app.include_router(opd_billing_notification_router)
 app.include_router(ipd_router)
 app.include_router(ipd_profile_router)
 app.include_router(appointments_router)
+app.include_router(doctor_ipd_router)
 app.include_router(consultation_router)
 app.include_router(patient_queue_router)
 app.include_router(patient_router)

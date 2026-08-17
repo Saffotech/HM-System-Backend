@@ -4,6 +4,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from Models.opd_billing import Appointment, AppointmentStatus
+from Models.ipd import IpdAdmission
 from Services import doctor_helpers as h
 from Services import opd_helpers
 from Services.doctor_patient_queue_service import (
@@ -65,7 +66,30 @@ def get_today_appointments_service(db: Session, doctor_id: int) -> list[dict]:
         .order_by(Appointment.scheduled_at.asc())
         .all()
     )
-    return h.appointments_to_dicts(db, rows)
+    opd_items = h.appointments_to_dicts(db, rows)
+    opd_patient_ids = {item.get("patient_id") for item in opd_items if item.get("patient_id")}
+
+    try:
+        admissions = (
+            db.query(IpdAdmission)
+            .filter(
+                IpdAdmission.doctor_id == doctor_id,
+                IpdAdmission.status == "admitted",
+            )
+            .order_by(IpdAdmission.admitted_at.desc())
+            .all()
+        )
+        ipd_items = [
+            item
+            for item in h.admissions_to_dicts(
+                db, admissions, use_dashboard_status=True
+            )
+            if item.get("patient_id") not in opd_patient_ids
+        ]
+    except Exception:
+        db.rollback()
+        ipd_items = []
+    return opd_items + ipd_items
 
 
 def get_appointment_by_id_service(db: Session, appointment_id: int, doctor_id: int) -> dict:

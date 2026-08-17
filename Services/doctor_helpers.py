@@ -8,7 +8,8 @@ from sqlalchemy.orm import Session
 from zoneinfo import ZoneInfo
 
 from Models.opd_billing import Appointment
-from Models.patient import Patient
+from Models.ipd import IpdAdmission
+from Models.patient import Patient, registration_source_value
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -22,6 +23,24 @@ def day_bounds(on_date: date) -> tuple[datetime, datetime]:
 def scheduled_on_date(on_date: date):
     start, end = day_bounds(on_date)
     return and_(Appointment.scheduled_at >= start, Appointment.scheduled_at <= end)
+
+
+def admitted_on_date(on_date: date):
+    start, end = day_bounds(on_date)
+    return and_(IpdAdmission.admitted_at >= start, IpdAdmission.admitted_at <= end)
+
+
+def admitted_between(from_date: Optional[date] = None, to_date: Optional[date] = None):
+    clauses = []
+    if from_date:
+        start, _ = day_bounds(from_date)
+        clauses.append(IpdAdmission.admitted_at >= start)
+    if to_date:
+        _, end = day_bounds(to_date)
+        clauses.append(IpdAdmission.admitted_at <= end)
+    if not clauses:
+        return None
+    return and_(*clauses)
 
 
 def display_name(first: str, last: Optional[str] = None) -> str:
@@ -171,13 +190,20 @@ def appointment_to_dict(
         "patient_age": age_fields["patient_age"],
         "patient_gender": age_fields["patient_gender"],
         "patient_uid": patient.patient_uid if patient else "",
+        "registration_source": registration_source_value(
+            getattr(patient, "registration_source", None)
+        ),
         "doctor_id": apt.doctor_id,
         "department_id": apt.department_id,
         "scheduled_at": scheduled.isoformat() if scheduled else None,
         "appointment_date": scheduled.date().isoformat() if scheduled else None,
         "appointment_time": scheduled.strftime("%H:%M:%S") if scheduled else None,
         "appointment_type": apt.appointment_type,
-        "status": apt.status,
+        "encounter_type": "OPD",
+        "admission_id": None,
+        "bed_number": None,
+        "ward_name": None,
+        "status": getattr(apt.status, "value", apt.status),
         "reason": strip_internal_appointment_markers(apt.reason),
         "symptoms": getattr(apt, "symptoms", None),
         "notes": strip_internal_appointment_markers(apt.notes),
@@ -187,6 +213,8 @@ def appointment_to_dict(
             if getattr(apt, "follow_up_date", None)
             else None
         ),
+        "admitted_at": None,
+        "discharged_at": None,
         "created_at": apt.created_at.isoformat() if apt.created_at else None,
     }
 
@@ -199,4 +227,92 @@ def appointments_to_dicts(db: Session, rows: List[Appointment]) -> List[dict]:
         if pid not in patient_cache:
             patient_cache[pid] = get_patient(db, pid)
         out.append(appointment_to_dict(db, apt, patient_cache.get(pid)))
+    return out
+
+
+def admission_to_dict(
+    db: Session,
+    admission: IpdAdmission,
+    patient: Optional[Patient] = None,
+    *,
+    use_dashboard_status: bool = False,
+) -> dict:
+    """IPD row in the same shape as appointment_to_dict.
+
+    Uses a non-numeric appointment_uid (admission_no) so existing doctor clients
+    cannot treat this as an OPD appointment PK.
+
+    use_dashboard_status: admitted rows report status \"scheduled\" so they stay
+    visible on GET /appointments/today Scheduled filter. Dedicated IPD APIs
+    return the real admission status (admitted | discharged).
+    """
+    if patient is None:
+        patient = get_patient(db, admission.patient_id)
+
+    admitted = admission.admitted_at
+    discharged = admission.discharged_at
+    age_fields = patient_age_fields(
+        patient.date_of_birth if patient else None,
+        patient.gender if patient else None,
+    )
+    uid = admission.admission_no
+    raw_status = str(admission.status or "admitted").strip().lower()
+    if use_dashboard_status and raw_status == "admitted":
+        status = "scheduled"
+    else:
+        status = raw_status
+    return {
+        "id": uid,
+        "appointment_uid": uid,
+        "patient_id": admission.patient_id,
+        "patient_name": display_name(patient.first_name, patient.last_name) if patient else "",
+        "patient_phone": patient.phone if patient else "",
+        "patient_age": age_fields["patient_age"],
+        "patient_gender": age_fields["patient_gender"],
+        "patient_uid": patient.patient_uid if patient else "",
+        "registration_source": registration_source_value(
+            getattr(patient, "registration_source", None)
+        ),
+        "doctor_id": admission.doctor_id,
+        "department_id": admission.department_id,
+        "scheduled_at": admitted.isoformat() if admitted else None,
+        "appointment_date": admitted.date().isoformat() if admitted else None,
+        "appointment_time": admitted.strftime("%H:%M:%S") if admitted else None,
+        "appointment_type": "ipd",
+        "encounter_type": "IPD",
+        "admission_id": admission.id,
+        "bed_number": admission.bed_number,
+        "ward_name": admission.ward_name,
+        "status": status,
+        "reason": admission.diagnosis,
+        "symptoms": None,
+        "notes": admission.notes,
+        "diagnosis": admission.diagnosis,
+        "follow_up": None,
+        "admitted_at": admitted.isoformat() if admitted else None,
+        "discharged_at": discharged.isoformat() if discharged else None,
+        "created_at": admission.created_at.isoformat() if admission.created_at else None,
+    }
+
+
+def admissions_to_dicts(
+    db: Session,
+    rows: List[IpdAdmission],
+    *,
+    use_dashboard_status: bool = False,
+) -> List[dict]:
+    patient_cache: dict[int, Patient] = {}
+    out = []
+    for admission in rows:
+        pid = admission.patient_id
+        if pid not in patient_cache:
+            patient_cache[pid] = get_patient(db, pid)
+        out.append(
+            admission_to_dict(
+                db,
+                admission,
+                patient_cache.get(pid),
+                use_dashboard_status=use_dashboard_status,
+            )
+        )
     return out

@@ -124,7 +124,9 @@ def update_admission(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:create")),
 ):
-    return ipd_service.update_admission(db, admission_id, data)
+    return ipd_service.update_admission(
+        db, admission_id, data, updated_by=current_user.id
+    )
 
 
 @router.post("/admissions/{admission_id}/visits", status_code=201)

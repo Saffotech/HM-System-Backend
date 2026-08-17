@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session, joinedload
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.lab_result import LabResult
 from Models.opd_billing import Appointment
+from Models.patient import Patient, registration_source_value
 from Schemas.doctor_lab_test_schema import (
     LabTestCreate,
     LabTestUpdate,
@@ -55,12 +56,55 @@ def _parse_doctor_lab_status(status: str) -> LabTestStatus:
     return parsed
 
 
-def _serialize_lab_test(order: LabTestOrder) -> LabTestListResponse:
-    return LabTestListResponse.model_validate(order)
+def _lab_order_status_value(order: LabTestOrder) -> str:
+    return order.status.value if hasattr(order.status, "value") else str(order.status)
 
 
-def _serialize_lab_test_response(order: LabTestOrder) -> LabTestResponse:
-    return LabTestResponse.model_validate(order)
+def _serialize_lab_test(
+    order: LabTestOrder,
+    patient: Patient | None = None,
+) -> LabTestListResponse:
+    return LabTestListResponse(
+        id=order.id,
+        patient_id=order.patient_id,
+        patient_name=order.patient_name,
+        patient_uid=order.patient_uhid,
+        registration_source=registration_source_value(
+            getattr(patient, "registration_source", None)
+        ),
+        department_id=order.department_id,
+        test_name=order.test_name,
+        category=order.category,
+        priority=order.priority,
+        clinical_notes=order.clinical_notes,
+        status=_lab_order_status_value(order),
+        created_at=order.created_at,
+    )
+
+
+def _serialize_lab_test_response(
+    order: LabTestOrder,
+    patient: Patient | None = None,
+) -> LabTestResponse:
+    return LabTestResponse(
+        id=order.id,
+        appointment_id=order.appointment_id,
+        patient_id=order.patient_id,
+        patient_name=order.patient_name,
+        patient_uid=order.patient_uhid,
+        registration_source=registration_source_value(
+            getattr(patient, "registration_source", None)
+        ),
+        doctor_id=order.doctor_id,
+        department_id=order.department_id,
+        test_name=order.test_name,
+        category=order.category,
+        priority=order.priority,
+        clinical_notes=order.clinical_notes,
+        status=_lab_order_status_value(order),
+        created_at=order.created_at,
+        updated_at=order.updated_at,
+    )
 
 
 def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int):
@@ -121,7 +165,7 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
     db.commit()
     db.refresh(lab_test)
     notify_lab_techs_order_created(db, lab_test, doctor_id=doctor_id)
-    return _serialize_lab_test_response(lab_test)
+    return _serialize_lab_test_response(lab_test, patient)
 
 
 def get_lab_tests_service(
@@ -172,15 +216,22 @@ def get_lab_tests_service(
 
     total = query.count()
 
+    orders = (
+        query
+        .order_by(LabTestOrder.created_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    patient_ids = {order.patient_id for order in orders if order.patient_id}
+    patients = {
+        row.id: row
+        for row in db.query(Patient).filter(Patient.id.in_(patient_ids)).all()
+    } if patient_ids else {}
+
     items = [
-        _serialize_lab_test(order)
-        for order in (
-            query
-            .order_by(LabTestOrder.created_at.desc())
-            .offset((page - 1) * page_size)
-            .limit(page_size)
-            .all()
-        )
+        _serialize_lab_test(order, patients.get(order.patient_id))
+        for order in orders
     ]
 
     return {
@@ -227,7 +278,8 @@ def update_lab_test_service(
 
     db.commit()
     db.refresh(test)
-    return _serialize_lab_test_response(test)
+    patient = h.get_patient(db, test.patient_id)
+    return _serialize_lab_test_response(test, patient)
 
 
 def cancel_lab_test_service(db: Session, test_id: int, doctor_id: int):
@@ -310,11 +362,17 @@ def get_doctor_lab_report_by_test_service(
         for parameter in report.parameters
     ]
 
+    patient = h.get_patient(db, order.patient_id)
     return {
         "report_id": report.id,
         "order_id": order.id,
         "patient_name": order.patient_name,
-        **_order_patient_fields(order),
+        **_order_patient_fields(
+            order,
+            registration_source=registration_source_value(
+                getattr(patient, "registration_source", None) if patient else None
+            ),
+        ),
         "test_name": order.test_name,
         "category": order.category,
         "department_id": order.department_id,

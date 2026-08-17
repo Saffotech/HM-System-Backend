@@ -35,6 +35,10 @@ def get_patients(
     month: Optional[int] = Query(default=None, ge=1, le=12),
     year: Optional[int] = Query(default=None),
     search: Optional[str] = Query(default=None),
+    encounter_type: Optional[str] = Query(
+        default="all",
+        description="opd | ipd | all",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:view"))
@@ -47,7 +51,8 @@ def get_patients(
         filter_date=filter_date,
         month=month,
         year=year,
-        search=search
+        search=search,
+        encounter_type=encounter_type,
     )
 
 
@@ -64,6 +69,10 @@ def get_patient_details(
     patient_uid: str,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
+    encounter_type: Optional[str] = Query(
+        default="all",
+        description="opd | ipd | all",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:view"))
@@ -74,4 +83,5 @@ def get_patient_details(
         patient_uid=patient_uid,
         page=page,
         page_size=page_size,
+        encounter_type=encounter_type,
     )

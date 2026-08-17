@@ -25,6 +25,7 @@ class NotificationType(str, enum.Enum):
     ADMIN_UPDATE = "ADMIN_UPDATE"
     HANDOVER_TAKEN_OVER = "HANDOVER_TAKEN_OVER"
     SHIFT_UPDATED = "SHIFT_UPDATED"
+    IPD_ADMITTED = "IPD_ADMITTED"
 
 
 class SourceModule(str, enum.Enum):
@@ -35,6 +36,7 @@ class SourceModule(str, enum.Enum):
     PHARMACY = "PHARMACY"
     ADMIN = "ADMIN"
     SYSTEM = "SYSTEM"
+    IPD = "IPD"
 
 
 class ReferenceType(str, enum.Enum):
@@ -48,3 +50,4 @@ class ReferenceType(str, enum.Enum):
     LEAVE = "LEAVE"
     HANDOVER = "HANDOVER"
     ALERT = "ALERT"
+    ADMISSION = "ADMISSION"

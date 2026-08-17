@@ -34,6 +34,7 @@ DEFAULT_PRIORITY_BY_TYPE: dict[NotificationType, NotificationPriority] = {
     NotificationType.APPOINTMENT_NO_SHOW: NotificationPriority.NORMAL,
     NotificationType.PRESCRIPTION_CREATED: NotificationPriority.NORMAL,
     NotificationType.PRESCRIPTION_UPDATED: NotificationPriority.HIGH,
+    NotificationType.IPD_ADMITTED: NotificationPriority.HIGH,
 }
 
 

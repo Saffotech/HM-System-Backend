@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 
 from Models.department import Department
 from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
-from Models.patient import OpdVisit, Patient
+from Models.patient import OpdVisit, Patient, RegistrationSource
 from Models.user import User
 from Schemas.opd_schema import (
     BillLineItem,
@@ -74,7 +74,12 @@ def build_bill_preview(data: BillPreviewRequest) -> BillPreviewResponse:
 
 def patient_to_model(data: PatientRegisterRequest, patient_uid: str, registered_by: int) -> Patient:
     """Back-compat wrapper — shared Patient Master builder lives in patient_service."""
-    return patient_service.patient_to_model(data, patient_uid, registered_by)
+    return patient_service.patient_to_model(
+        data,
+        patient_uid,
+        registered_by,
+        registration_source=RegistrationSource.OPD,
+    )
 
 
 def create_visit(
@@ -166,6 +171,7 @@ def register_new_patient(
         db,
         data,
         registered_by,
+        registration_source=RegistrationSource.OPD,
         require_aadhaar=True,
         commit=False,
     )

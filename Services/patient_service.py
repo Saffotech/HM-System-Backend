@@ -9,7 +9,7 @@ from typing import Optional, Protocol
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from Models.patient import Patient
+from Models.patient import Patient, RegistrationSource, registration_source_value
 from Schemas.patient_schema import PatientOut, gender_code_to_label
 from Services import opd_helpers as h
 
@@ -31,7 +31,12 @@ class PatientDemographics(Protocol):
     insurance_policy_no: Optional[str]
 
 
-def patient_to_model(data: PatientDemographics, patient_uid: str, registered_by: int) -> Patient:
+def patient_to_model(
+    data: PatientDemographics,
+    patient_uid: str,
+    registered_by: int,
+    registration_source: str | RegistrationSource = RegistrationSource.OPD,
+) -> Patient:
     return Patient(
         patient_uid=patient_uid,
         first_name=data.first_name,
@@ -49,6 +54,7 @@ def patient_to_model(data: PatientDemographics, patient_uid: str, registered_by:
         allergies=data.allergies,
         insurance_policy_no=data.insurance_policy_no,
         registered_by=registered_by,
+        registration_source=registration_source_value(registration_source),
     )
 
 
@@ -73,6 +79,7 @@ def create_patient_record(
     data: PatientDemographics,
     registered_by: int,
     *,
+    registration_source: str | RegistrationSource = RegistrationSource.OPD,
     require_aadhaar: bool = True,
     commit: bool = True,
 ) -> Patient:
@@ -97,7 +104,12 @@ def create_patient_record(
             except Exception:
                 pass
 
-    patient = patient_to_model(data, h.next_patient_uid(db), registered_by)
+    patient = patient_to_model(
+        data,
+        h.next_patient_uid(db),
+        registered_by,
+        registration_source=registration_source,
+    )
     db.add(patient)
     db.flush()
 
@@ -118,6 +130,7 @@ def register_patient_only(
         db,
         data,
         registered_by,
+        registration_source=RegistrationSource.IPD,
         require_aadhaar=True,
         commit=True,
     )

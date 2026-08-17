@@ -80,6 +80,7 @@ class LabTestResponse(BaseModel):
     patient_uid: str = Field(
         validation_alias=AliasChoices("patient_uid", "patient_uhid")
     )
+    registration_source: str
 
     doctor_id: int
     department_id: int
@@ -109,6 +110,7 @@ class LabTestListResponse(BaseModel):
     patient_uid: str = Field(
         validation_alias=AliasChoices("patient_uid", "patient_uhid")
     )
+    registration_source: str
 
     department_id: int
 
@@ -147,6 +149,7 @@ class DoctorLabReportDetailResponse(BaseModel):
     patient_id: int
     patient_name: str
     patient_uid: str
+    registration_source: str
     test_name: str
     category: str
     department_id: Optional[int] = None

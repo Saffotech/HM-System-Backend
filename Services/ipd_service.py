@@ -33,6 +33,7 @@ from Services import bed_service
 from Services import ipd_helpers as h
 from Services import opd_helpers as oh
 from Services import opd_settings_service
+from Services.ipd_notification_helpers import notify_doctor_ipd_admitted
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -135,6 +136,7 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
     db.add(admission)
     db.commit()
     db.refresh(admission)
+    notify_doctor_ipd_admitted(db, admission, created_by=admitted_by)
     return _admission_out(db, admission)
 
 
@@ -142,11 +144,13 @@ def update_admission(
     db: Session,
     admission_id: int,
     data: IpdAdmissionUpdate,
+    updated_by: Optional[int] = None,
 ) -> IpdAdmissionOut:
     admission = h.get_admission(db, admission_id)
     if admission.status != "admitted":
         raise HTTPException(status_code=400, detail="Only active admissions can be updated")
 
+    previous_doctor_id = admission.doctor_id
     updates = data.model_dump(exclude_unset=True)
     next_department_id = updates.get("department_id", admission.department_id)
 
@@ -164,6 +168,8 @@ def update_admission(
 
     db.commit()
     db.refresh(admission)
+    if admission.doctor_id and admission.doctor_id != previous_doctor_id:
+        notify_doctor_ipd_admitted(db, admission, created_by=updated_by)
     return _admission_out(db, admission)
 
 

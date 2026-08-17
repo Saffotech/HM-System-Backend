@@ -489,7 +489,7 @@ export interface DoctorProfileImageResponse {
     pdf.body("NotificationPriority: NORMAL | HIGH | CRITICAL")
     pdf.body("Default priority by type:")
     pdf.bullet("NEW_APPOINTMENT -> NORMAL")
-    pdf.bullet("LAB_REPORT_READY, APPOINTMENT_CANCELLED, APPOINTMENT_RESCHEDULED, ADMIN_UPDATE -> HIGH")
+    pdf.bullet("LAB_REPORT_READY, APPOINTMENT_CANCELLED, APPOINTMENT_RESCHEDULED, ADMIN_UPDATE, IPD_ADMITTED -> HIGH")
 
     pdf.body("NotificationType (values that currently appear in data):")
     wt = [48, 122]
@@ -499,17 +499,19 @@ export interface DoctorProfileImageResponse {
     pdf.table_row(["APPOINTMENT_RESCHEDULED", "scheduled_at changed, not cancelled, paid"], wt)
     pdf.table_row(["LAB_REPORT_READY", "Lab report uploaded / first file report created"], wt)
     pdf.table_row(["ADMIN_UPDATE", "Admin dept change / deactivate / delete doctor"], wt)
+    pdf.table_row(["IPD_ADMITTED", "IPD desk admits (or assigns) a patient to this doctor"], wt)
 
     pdf.body("Reserved enum values (exist but not produced yet - may use in filters/UI labels):")
     pdf.bullet("PATIENT_CHECKED_IN, LAB_REPORT_UPDATED, PRESCRIPTION_CREATED, PRESCRIPTION_UPDATED")
     pdf.bullet("EMERGENCY_ALERT (legacy; nurse emergency alerts module removed)")
 
-    pdf.body("SourceModule: OPD_BILLING | LAB | NURSE | ADMIN (active). Reserved: RECEPTIONIST, PHARMACY, SYSTEM")
+    pdf.body("SourceModule: OPD_BILLING | LAB | NURSE | ADMIN | IPD (active). Reserved: RECEPTIONIST, PHARMACY, SYSTEM")
     pdf.body("ReferenceType (deep-link):")
     pdf.bullet("APPOINTMENT + reference_id -> appointment / queue / calendar screen")
     pdf.bullet("LAB_ORDER + reference_id -> lab order detail")
     pdf.bullet("PATIENT + reference_id -> patient chart / emergency context")
     pdf.bullet("USER + reference_id -> profile / account notice (admin updates)")
+    pdf.bullet("ADMISSION + reference_id -> doctor IPD tab / admission id (numeric PK)")
     pdf.bullet("Reserved: PRESCRIPTION, BILL, SCHEDULE, LEAVE")
 
     # ---------------------------------------------------------
@@ -519,6 +521,12 @@ export interface DoctorProfileImageResponse {
     pdf.bullet("APPOINTMENT_RESCHEDULED title: \"Appointment Rescheduled\" - patient + new time")
     pdf.bullet("LAB_REPORT_READY title: \"Lab Report Ready\" - \"{test} - {patient}\"")
     pdf.bullet("ADMIN_UPDATE - e.g. \"Department reassigned\", \"Account disabled by admin\"")
+    pdf.bullet(
+        "IPD_ADMITTED title: \"IPD Patient Admitted\" - patient name+UHID, admission_no, ward, bed. "
+        "source_module=IPD, reference_type=ADMISSION, reference_id=admission.id, priority=HIGH. "
+        "Created on IPD admit if doctor_id is set, or when an active admission is assigned/reassigned to this doctor. "
+        "No notification if Doctor is left empty on admit. Does not fire on discharge."
+    )
     pdf.bullet("Unpaid appointments do NOT notify on cancel/reschedule")
     pdf.bullet("Replacing an existing lab file report does NOT create another notification")
 
@@ -547,15 +555,16 @@ export type NotificationType =
   | "PRESCRIPTION_CREATED"
   | "PRESCRIPTION_UPDATED"
   | "EMERGENCY_ALERT"
-  | "ADMIN_UPDATE";
+  | "ADMIN_UPDATE"
+  | "IPD_ADMITTED";
 
 export type SourceModule =
   | "OPD_BILLING" | "LAB" | "RECEPTIONIST" | "NURSE"
-  | "PHARMACY" | "ADMIN" | "SYSTEM";
+  | "PHARMACY" | "ADMIN" | "SYSTEM" | "IPD";
 
 export type ReferenceType =
   | "APPOINTMENT" | "LAB_ORDER" | "PRESCRIPTION" | "BILL"
-  | "PATIENT" | "USER" | "SCHEDULE" | "LEAVE";
+  | "PATIENT" | "USER" | "SCHEDULE" | "LEAVE" | "ADMISSION";
 
 export interface Notification {
   id: number;
@@ -624,6 +633,8 @@ export interface UnreadCountResponse {
     pdf.bullet("[ ] Filters: is_read, notification_type, date range, search")
     pdf.bullet("[ ] Mark one read on open; Mark all read button")
     pdf.bullet("[ ] Deep-link by reference_type + reference_id")
+    pdf.bullet("[ ] IPD_ADMITTED: show in inbox (existing Bell fallback is enough); optional icon/filter chip")
+    pdf.bullet("[ ] IPD_ADMITTED click: open IPD tab (reference_type=ADMISSION, reference_id=admission id)")
     pdf.bullet("[ ] Render message with line breaks; priority colours")
     pdf.bullet("[ ] Optimistic unread decrement after mark-read")
 
@@ -671,6 +682,8 @@ OpenAPI: /docs when backend is running"""
     pdf.bullet("Enums/notification.py")
     pdf.bullet("Models/notification.py")
     pdf.bullet("Services/notification_service.py")
+    pdf.bullet("Services/ipd_notification_helpers.py")
+    pdf.bullet("Services/ipd_service.py (admit + doctor assign)")
     pdf.bullet("seed.py (permissions)")
 
     pdf.ln(6)

@@ -65,7 +65,7 @@ def get_lab_department_or_404(db: Session, department_id: int) -> Department:
     if (dept.code or "").upper() not in LAB_DEPARTMENT_CODES:
         raise HTTPException(
             status_code=400,
-            detail="department_id must be Laboratory (LAB) or Radiology (RAD)",
+            detail="department_id must be Laboratory (LAB) or Radiology (RAD)", 
         )
     return dept
 
