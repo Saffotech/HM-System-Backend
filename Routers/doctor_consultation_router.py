@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -9,6 +9,8 @@ from Schemas.doctor_consultation_schema import (
     SaveConsultationRequest,
     SaveConsultationResponse,
 )
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 from Services.doctor_consultation_service import (
     get_consultation_context_service,
     save_consultation_service,
@@ -45,12 +47,22 @@ def get_consultation_context(
 )
 def save_consultation(
     payload: SaveConsultationRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    return save_consultation_service(
+    result = save_consultation_service(
         db=db,
         payload=payload,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_consultation_save(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        payload=payload,
+        result=result,
+    )
+    return result

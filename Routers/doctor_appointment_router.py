@@ -3,6 +3,7 @@ from fastapi import (
     APIRouter,
     Depends,
     Query,
+    Request,
     status,
 )
 from sqlalchemy.orm import Session
@@ -16,6 +17,8 @@ from Schemas.doctor_appointment_schema import (
     AppointmentStatusUpdate,
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 from Services.doctor_appointment_service import (
     get_today_appointments_service,
     get_appointment_by_id_service,
@@ -118,15 +121,26 @@ def get_appointments_by_date(
 def update_appointment_status(
     appointment_id: int,
     appointment_data: AppointmentStatusUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    appointment = update_appointment_status_service(
+    appointment, previous_status = update_appointment_status_service(
         db=db,
         appointment_id=appointment_id,
         doctor_id=current_user.id,
         status=appointment_data.status,
+    )
+    new_status = getattr(appointment_data.status, "value", appointment_data.status)
+    doctor_audit.log_appointment_status_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        appointment_id=appointment_id,
+        new_status=str(new_status),
+        previous_status=previous_status,
     )
 
     return {

@@ -1,6 +1,7 @@
 from fastapi import (
     APIRouter,
     Depends,
+    Request,
     status,
 )
 
@@ -18,6 +19,8 @@ from Schemas.doctor_lab_test_schema import (
     DoctorLabReportDetailResponse,
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 from Services.doctor_lab_test_service import (
     create_lab_test_service,
     get_lab_tests_service,
@@ -47,15 +50,26 @@ router = APIRouter(
 )
 def create_lab_test(
     payload: LabTestCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:create")),
 ):
-    return create_lab_test_service(
+    result = create_lab_test_service(
         db=db,
         payload=payload,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_lab_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        payload=payload,
+        order_id=result.id,
+        test_name=result.test_name,
+    )
+    return result
 
 
 # ==========================================================
@@ -100,16 +114,27 @@ def get_lab_tests(
 def update_lab_test(
     test_id: int,
     payload: LabTestUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:create")),
 ):
-    return update_lab_test_service(
+    result = update_lab_test_service(
         db=db,
         test_id=test_id,
         payload=payload,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_lab_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=test_id,
+        payload=payload,
+        test_name=result.test_name,
+    )
+    return result
 
 
 # ==========================================================
@@ -121,15 +146,25 @@ def update_lab_test(
 )
 def cancel_lab_test(
     test_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:create")),
 ):
-    return cancel_lab_test_service(
+    result = cancel_lab_test_service(
         db=db,
         test_id=test_id,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_lab_cancel(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=result.get("order_id", test_id),
+        test_name=result.get("test_name"),
+    )
+    return result
 
 
 # ==========================================================

@@ -22,6 +22,7 @@ def log_event(
     summary: str,
     details: Optional[dict[str, Any]] = None,
     ip_address: Optional[str] = None,
+    user_agent: Optional[str] = None,
 ) -> None:
     entry = AuditLog(
         actor_id=actor.id if actor else None,
@@ -33,6 +34,7 @@ def log_event(
         summary=summary,
         details=details,
         ip_address=ip_address,
+        user_agent=user_agent,
     )
     db.add(entry)
     db.commit()
@@ -50,6 +52,7 @@ def _to_entry(row: AuditLog) -> AuditLogEntry:
         summary=row.summary,
         details=row.details,
         ip_address=row.ip_address,
+        user_agent=row.user_agent,
         created_at=row.created_at,
     )
 

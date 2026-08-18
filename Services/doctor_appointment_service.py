@@ -112,7 +112,7 @@ def update_appointment_status_service(
     appointment_id: int,
     doctor_id: int,
     status: str,
-) -> dict:
+) -> tuple[dict, str]:
     status = getattr(status, "value", status)
     if status == AppointmentStatus.no_show.value:
         raise HTTPException(
@@ -151,7 +151,7 @@ def update_appointment_status_service(
 
     persist(db)
     db.refresh(apt)
-    return h.appointment_to_dict(db, apt)
+    return h.appointment_to_dict(db, apt), current
 
 
 def get_appointment_history_service(

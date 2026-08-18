@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, File, UploadFile, status
+from fastapi import APIRouter, Depends, File, Request, UploadFile, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -9,6 +9,8 @@ from Schemas.doctor_profile_schema import (
     DoctorProfileResponse,
     DoctorProfileUpdate,
 )
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 from Services import doctor_profile_service as service
 
 router = APIRouter(prefix="/doctor", tags=["Doctor Profile"])
@@ -34,11 +36,20 @@ def get_doctor_profile(
 )
 def update_doctor_profile(
     data: DoctorProfileUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("doctor_profile:update")),
 ):
-    return service.update_doctor_profile(db, current_user, data)
+    result = service.update_doctor_profile(db, current_user, data)
+    doctor_audit.log_doctor_profile_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        fields=list(data.model_dump(exclude_unset=True).keys()),
+    )
+    return result
 
 
 @router.post(
@@ -47,12 +58,20 @@ def update_doctor_profile(
     status_code=status.HTTP_200_OK,
 )
 def upload_doctor_profile_image(
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("doctor_profile:upload_image")),
 ):
-    return service.upload_profile_image(db, current_user, file)
+    result = service.upload_profile_image(db, current_user, file)
+    doctor_audit.log_doctor_profile_image_upload(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+    )
+    return result
 
 
 @router.delete(
@@ -61,8 +80,16 @@ def upload_doctor_profile_image(
     status_code=status.HTTP_200_OK,
 )
 def delete_doctor_profile_image(
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("doctor_profile:delete_image")),
 ):
-    return service.delete_profile_image(db, current_user)
+    result = service.delete_profile_image(db, current_user)
+    doctor_audit.log_doctor_profile_image_delete(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+    )
+    return result

@@ -339,11 +339,16 @@ def cancel_lab_test_service(db: Session, test_id: int, doctor_id: int):
     if test.status != LabTestStatus.ORDERED:
         raise HTTPException(status_code=400, detail="Only ordered tests can be cancelled")
 
+    test_name = test.test_name
     test.status = LabTestStatus.CANCELLED
     db.commit()
     db.refresh(test)
     notify_lab_techs_order_cancelled(db, test, doctor_id=doctor_id)
-    return {"message": "Lab test cancelled successfully"}
+    return {
+        "message": "Lab test cancelled successfully",
+        "order_id": test.id,
+        "test_name": test_name,
+    }
 
 
 def _get_doctor_order(

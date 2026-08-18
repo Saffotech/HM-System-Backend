@@ -22,6 +22,7 @@ class AuditLog(Base):
     summary = Column(Text, nullable=False)
     details = Column(JSONB, nullable=True)
     ip_address = Column(String(45), nullable=True)
+    user_agent = Column(String(512), nullable=True)
     created_at = Column(
         DateTime(timezone=True),
         nullable=False,

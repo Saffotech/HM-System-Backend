@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -13,6 +13,8 @@ from Schemas.doctor_ipd_schema import (
     DoctorIpdConsultationSaveResponse,
     PaginationSchema,
 )
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 from Services.doctor_ipd_service import (
     list_doctor_ipd_admissions_service,
     save_doctor_ipd_consultation_service,
@@ -64,13 +66,24 @@ def list_doctor_ipd_admissions(
 def save_doctor_ipd_consultation(
     admission_id: int,
     payload: DoctorIpdConsultationSaveRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:update")),
 ):
-    return save_doctor_ipd_consultation_service(
+    result = save_doctor_ipd_consultation_service(
         db=db,
         admission_id=admission_id,
         doctor_id=current_user.id,
         payload=payload,
     )
+    doctor_audit.log_ipd_consultation_save(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        payload=payload,
+        result=result,
+    )
+    return result

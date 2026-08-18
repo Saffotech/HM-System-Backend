@@ -15,6 +15,7 @@ class AuditLogEntry(BaseModel):
     summary: str
     details: Optional[Dict[str, Any]] = None
     ip_address: Optional[str] = None
+    user_agent: Optional[str] = None
     created_at: datetime
 
 
