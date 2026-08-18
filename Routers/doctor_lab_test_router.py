@@ -177,15 +177,25 @@ def cancel_lab_test(
 )
 def get_doctor_lab_report(
     test_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:view")),
 ):
-    return get_doctor_lab_report_by_test_service(
+    result = get_doctor_lab_report_by_test_service(
         db=db,
         test_id=test_id,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_lab_report_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=test_id,
+        access_mode="metadata",
+    )
+    return result
 
 
 # ==========================================================
@@ -197,12 +207,22 @@ def get_doctor_lab_report(
 )
 def get_doctor_lab_report_file(
     test_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab:view")),
 ):
-    return get_doctor_lab_report_file_by_test_service(
+    result = get_doctor_lab_report_file_by_test_service(
         db=db,
         test_id=test_id,
         doctor_id=current_user.id,
     )
+    doctor_audit.log_lab_report_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=test_id,
+        access_mode="file",
+    )
+    return result

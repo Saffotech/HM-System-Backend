@@ -66,6 +66,7 @@ def create_prescription(
 )
 def get_prescription_by_id(
     prescription_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
@@ -73,6 +74,13 @@ def get_prescription_by_id(
         db=db,
         prescription_id=prescription_id,
         doctor_id=current_user.id,
+    )
+    doctor_audit.log_prescription_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        prescription_id=prescription_id,
     )
 
     return prescription

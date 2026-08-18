@@ -50,6 +50,27 @@ def log_consultation_save(
     )
 
 
+def log_consultation_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    appointment_id: int,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="consultation.view",
+        resource_type="appointment",
+        resource_id=appointment_id,
+        summary=f"Viewed consultation context for appointment {appointment_id}",
+        details={"appointment_id": appointment_id},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
 def log_ipd_consultation_save(
     db: Session,
     *,
@@ -143,6 +164,27 @@ def log_prescription_update(
     )
 
 
+def log_prescription_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    prescription_id: int,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="prescription.view",
+        resource_type="prescription",
+        resource_id=prescription_id,
+        summary=f"Viewed prescription {prescription_id}",
+        details={"prescription_id": prescription_id},
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
 def log_lab_create(
     db: Session,
     *,
@@ -223,6 +265,31 @@ def log_lab_cancel(
     )
 
 
+def log_lab_report_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    order_id: int,
+    access_mode: str,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="lab.report.view",
+        resource_type="lab_order",
+        resource_id=order_id,
+        summary=f"Viewed lab report for order {order_id}",
+        details={
+            "order_id": order_id,
+            "access_mode": access_mode,
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
 def log_appointment_status_update(
     db: Session,
     *,
@@ -244,6 +311,30 @@ def log_appointment_status_update(
         details={
             "previous_status": previous_status,
             "new_status": new_status,
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def log_patient_history_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    patient_uid: str,
+    encounter_type: str | None = None,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="patient_history.view",
+        resource_type="patient",
+        summary=f"Viewed patient history for {patient_uid}",
+        details={
+            "patient_uid": patient_uid,
+            "encounter_type": encounter_type,
         },
         ip_address=ip_address,
         user_agent=user_agent,

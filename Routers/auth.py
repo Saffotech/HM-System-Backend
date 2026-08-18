@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from jose import JWTError
 from sqlalchemy.orm import Session, joinedload
 from database import get_db
@@ -10,6 +10,7 @@ from jwt_token import create_access_token, create_refresh_token, decode_refresh_
 from dependencies import PermissionChecker, get_current_user
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from Services.audit_helpers import client_ip, user_agent
 from Services import audit_service, auth_service
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
@@ -54,7 +55,7 @@ def register(
 
 
 @router.post("/login")
-def login(data: UserLogin, db: Session = Depends(get_db)):
+def login(data: UserLogin, request: Request, db: Session = Depends(get_db)):
     user = (
         db.query(User)
         .options(joinedload(User.role_obj).joinedload(Role.permissions))
@@ -63,10 +64,41 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     )
 
     if not user or not verify_password(data.password, user.password):
+        audit_service.log_event(
+            db,
+            actor=None,
+            action="auth.login_failed",
+            resource_type="user",
+            summary=f"Failed login attempt for {data.email}",
+            details={"email": data.email},
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if user.deleted_at is not None:
+        audit_service.log_event(
+            db,
+            actor=None,
+            action="auth.login_failed",
+            resource_type="user",
+            summary=f"Failed login attempt for deleted user {data.email}",
+            details={"email": data.email},
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+        )
         raise HTTPException(status_code=401, detail="Invalid email or password")
     if not user.is_active:
+        audit_service.log_event(
+            db,
+            actor=user,
+            action="auth.login_failed",
+            resource_type="user",
+            resource_id=user.id,
+            summary=f"Failed login attempt for deactivated user {user.email}",
+            details={"email": user.email, "role": user.role_obj.name if user.role_obj else ""},
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+        )
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     user.last_login = datetime.now(ZoneInfo("Asia/Kolkata"))
@@ -74,18 +106,39 @@ def login(data: UserLogin, db: Session = Depends(get_db)):
     db.commit()
 
     role_name = user.role_obj.name if user.role_obj else ""
-    if role_name in {"admin", "super_admin"}:
-        audit_service.log_event(
-            db,
-            actor=user,
-            action="auth.login",
-            resource_type="user",
-            resource_id=user.id,
-            summary=f"{role_name} logged in ({user.email})",
-            details={"email": user.email, "role": role_name},
-        )
+    audit_service.log_event(
+        db,
+        actor=user,
+        action="auth.login",
+        resource_type="user",
+        resource_id=user.id,
+        summary=f"{role_name or 'user'} logged in ({user.email})",
+        details={"email": user.email, "role": role_name},
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+    )
 
     return _issue_token_pair(user)
+
+
+@router.post("/logout")
+def logout(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    audit_service.log_event(
+        db,
+        actor=current_user,
+        action="auth.logout",
+        resource_type="user",
+        resource_id=current_user.id,
+        summary=f"User logged out ({current_user.email})",
+        details={"email": current_user.email},
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+    )
+    return {"message": "Logged out successfully"}
 
 
 @router.post("/refresh")

@@ -1,6 +1,6 @@
 from datetime import date
 from typing import Optional
-from fastapi import APIRouter, Depends, status, Query
+from fastapi import APIRouter, Depends, Query, Request, status
 from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import get_current_user, PermissionChecker
@@ -14,6 +14,8 @@ from Services.doctor_patient_history_service import (
     get_patients_service,
     get_patient_details_service
 )
+from Services.audit_helpers import client_ip, user_agent
+from Services import doctor_audit_service as doctor_audit
 
 router = APIRouter(
     prefix="/patients",
@@ -73,11 +75,12 @@ def get_patient_details(
         default="all",
         description="opd | ipd | all",
     ),
+    request: Request = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:view"))
 ):
-    return get_patient_details_service(
+    result = get_patient_details_service(
         db=db,
         doctor_id=current_user.id,
         patient_uid=patient_uid,
@@ -85,3 +88,12 @@ def get_patient_details(
         page_size=page_size,
         encounter_type=encounter_type,
     )
+    doctor_audit.log_patient_history_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        patient_uid=patient_uid,
+        encounter_type=encounter_type,
+    )
+    return result
