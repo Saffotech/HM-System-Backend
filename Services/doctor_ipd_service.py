@@ -3,12 +3,20 @@ from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
+from Models.doctor_lab_test_order import LabTestOrder
+from Models.doctor_prescriptions import Prescription
 from Models.ipd import IpdAdmission, IpdDoctorVisit
 from Models.patient import Patient
 from Schemas.doctor_ipd_schema import DoctorIpdConsultationSaveRequest
+from Schemas.doctor_lab_test_schema import LabTestCreate
 from Services import doctor_helpers as h
+from Services.doctor_lab_test_service import create_lab_test_service
+from Services.doctor_prescription_service import (
+    create_prescription_for_admission,
+    serialize_prescription,
+)
 
 
 _STATUS_ALIASES = {
@@ -109,13 +117,17 @@ def _build_ipd_visit_notes(*, symptoms: str, diagnosis: str, notes: str, follow_
     return "\n".join(parts)
 
 
+def _already_ordered_lab(detail: object) -> bool:
+    return "already been ordered" in str(detail).lower()
+
+
 def save_doctor_ipd_consultation_service(
     db: Session,
     admission_id: int,
     doctor_id: int,
     payload: DoctorIpdConsultationSaveRequest,
 ) -> dict:
-    """Save IPD clinical notes + a visit. Does not complete an OPD appointment."""
+    """Save IPD clinical notes, a visit, and optional real Rx + lab orders."""
     clinical = payload.clinical
     diagnosis = (clinical.diagnosis or "").strip()
     if not diagnosis:
@@ -161,7 +173,66 @@ def save_doctor_ipd_consultation_service(
     )
     db.add(visit)
 
+    prescription_out = None
+    created_rx = None
+    lab_outs = []
+    created_lab_ids: list[int] = []
+    seen_lab_names: set[str] = set()
+
     try:
+        if payload.prescription is not None:
+            rx_diagnosis = (payload.prescription.diagnosis or "").strip() or diagnosis
+            if not rx_diagnosis:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prescription.diagnosis is required when saving a prescription",
+                )
+            if not payload.prescription.items:
+                raise HTTPException(
+                    status_code=400,
+                    detail="prescription.items must not be empty",
+                )
+            created_rx = create_prescription_for_admission(
+                db,
+                admission,
+                doctor_id=doctor_id,
+                diagnosis=rx_diagnosis,
+                items=payload.prescription.items,
+                notes=payload.prescription.notes,
+                commit=False,
+            )
+            prescription_out = serialize_prescription(created_rx).model_dump(mode="json")
+
+        for lab in payload.lab_orders:
+            test_name = (lab.test_name or "").strip()
+            if not test_name:
+                continue
+            name_key = test_name.casefold()
+            if name_key in seen_lab_names:
+                continue
+            seen_lab_names.add(name_key)
+            lab_payload = LabTestCreate(
+                admission_id=int(admission.id),
+                test_name=test_name,
+                category=lab.category,
+                department_id=lab.department_id,
+                priority=lab.priority,
+                clinical_notes=lab.clinical_notes,
+            )
+            try:
+                lab_out = create_lab_test_service(
+                    db,
+                    lab_payload,
+                    doctor_id,
+                    commit=False,
+                )
+            except HTTPException as exc:
+                if exc.status_code == 400 and _already_ordered_lab(exc.detail):
+                    continue
+                raise
+            lab_outs.append(lab_out.model_dump(mode="json"))
+            created_lab_ids.append(lab_out.id)
+
         db.commit()
     except HTTPException:
         db.rollback()
@@ -172,6 +243,32 @@ def save_doctor_ipd_consultation_service(
 
     db.refresh(admission)
     db.refresh(visit)
+
+    if created_rx is not None:
+        from Services.pharmacy_notification_helpers import (
+            notify_pharmacists_prescription_created,
+        )
+
+        notified_rx = (
+            db.query(Prescription)
+            .options(joinedload(Prescription.items))
+            .filter(Prescription.id == created_rx.id)
+            .first()
+        )
+        if notified_rx is not None:
+            notify_pharmacists_prescription_created(
+                db, notified_rx, doctor_id=doctor_id
+            )
+
+    if created_lab_ids:
+        from Services.lab_notification_helpers import notify_lab_techs_order_created
+
+        for order in (
+            db.query(LabTestOrder)
+            .filter(LabTestOrder.id.in_(created_lab_ids))
+            .all()
+        ):
+            notify_lab_techs_order_created(db, order, doctor_id=doctor_id)
 
     visited_at = visit.visited_at
     return {
@@ -186,4 +283,6 @@ def save_doctor_ipd_consultation_service(
             "charge": float(visit.charge or 0),
             "notes": visit.notes,
         },
+        "prescription": prescription_out,
+        "lab_orders": lab_outs,
     }

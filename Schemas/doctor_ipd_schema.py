@@ -1,8 +1,9 @@
-from typing import Optional, Union
+from typing import Any, Optional, Union
 
 from pydantic import BaseModel, Field
 
 from Schemas.common_schema import PaginatedResponse, PaginationParams
+from Schemas.doctor_consultation_schema import ConsultationPrescriptionPayload
 from Schemas.doctor_patient_queue_schema import CompleteConsultationSchema
 
 
@@ -44,8 +45,20 @@ class DoctorIpdAdmissionListResponse(PaginatedResponse[DoctorIpdAdmissionItem]):
     pass
 
 
+class DoctorIpdLabOrderPayload(BaseModel):
+    """Lab line on IPD consult save. Parent is the path admission_id."""
+
+    test_name: str = Field(..., min_length=1, max_length=255)
+    category: str = Field(..., min_length=1, max_length=100)
+    department_id: Optional[int] = None
+    priority: str = Field(default="Normal", max_length=50)
+    clinical_notes: Optional[str] = Field(default=None, max_length=500)
+
+
 class DoctorIpdConsultationSaveRequest(BaseModel):
     clinical: CompleteConsultationSchema = Field(default_factory=CompleteConsultationSchema)
+    prescription: Optional[ConsultationPrescriptionPayload] = None
+    lab_orders: list[DoctorIpdLabOrderPayload] = Field(default_factory=list)
 
 
 class DoctorIpdVisitOut(BaseModel):
@@ -62,6 +75,8 @@ class DoctorIpdConsultationSaveResponse(BaseModel):
     message: str = "IPD consultation saved"
     admission: DoctorIpdAdmissionItem
     visit: DoctorIpdVisitOut
+    prescription: Optional[dict[str, Any]] = None
+    lab_orders: list[dict[str, Any]] = Field(default_factory=list)
 
 
 PaginationSchema = PaginationParams

@@ -111,7 +111,13 @@ def _serialize_lab_test_response(
     )
 
 
-def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int):
+def create_lab_test_service(
+    db: Session,
+    payload: LabTestCreate,
+    doctor_id: int,
+    *,
+    commit: bool = True,
+):
     appointment = None
     admission = None
     patient_id = None
@@ -198,9 +204,13 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
         status=LabTestStatus.ORDERED,
     )
     db.add(lab_test)
-    db.commit()
-    db.refresh(lab_test)
-    notify_lab_techs_order_created(db, lab_test, doctor_id=doctor_id)
+    if commit:
+        db.commit()
+        db.refresh(lab_test)
+        notify_lab_techs_order_created(db, lab_test, doctor_id=doctor_id)
+    else:
+        db.flush()
+        db.refresh(lab_test)
     return _serialize_lab_test_response(lab_test, patient)
 
 
