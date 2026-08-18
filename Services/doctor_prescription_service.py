@@ -1,8 +1,8 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
-from typing import Optional
 
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.ipd import IpdAdmission
 from Models.opd_billing import Appointment
 from Models.patient import Patient
 from Schemas.doctor_prescription_schema import (
@@ -105,6 +105,7 @@ def create_prescription_for_appointment(
 
     rx = Prescription(
         appointment_id=appt_id,
+        admission_id=None,
         patient_id=_pk(appointment.patient_id),
         patient_name=h.display_name(patient.first_name, patient.last_name),
         doctor_id=doctor_id,
@@ -134,7 +135,90 @@ def create_prescription_for_appointment(
     return rx
 
 
+def create_prescription_for_admission(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    doctor_id: int,
+    diagnosis: str,
+    items: list[PrescriptionItemCreate],
+    notes: str | None = None,
+    commit: bool = True,
+) -> Prescription:
+    """Create a prescription for an active IPD stay. Multiple Rx per admission are allowed."""
+    if admission.doctor_id != doctor_id:
+        raise HTTPException(
+            status_code=403,
+            detail="You can only create prescriptions for your own admissions",
+        )
+    if str(admission.status or "").strip().lower() != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Prescription can only be created for an active admission",
+        )
+
+    patient = h.get_patient(db, _pk(admission.patient_id))
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    rx = Prescription(
+        appointment_id=None,
+        admission_id=_pk(admission.id),
+        patient_id=_pk(admission.patient_id),
+        patient_name=h.display_name(patient.first_name, patient.last_name),
+        doctor_id=doctor_id,
+        diagnosis=diagnosis,
+        status="pending",
+        created_by=doctor_id,
+    )
+    rx.notes = notes
+    db.add(rx)
+    db.flush()
+    _add_items(db, _pk(rx.id), items)
+    if commit:
+        db.commit()
+    else:
+        db.flush()
+    rx = (
+        _prescription_query(db)
+        .filter(Prescription.id == _pk(rx.id))
+        .first()
+    )
+    if commit and rx is not None:
+        from Services.pharmacy_notification_helpers import (
+            notify_pharmacists_prescription_created,
+        )
+
+        notify_pharmacists_prescription_created(db, rx, doctor_id=doctor_id)
+    return rx
+
+
 def create_prescription_service(db: Session, prescription_data: PrescriptionCreate, doctor_id: int):
+    if prescription_data.admission_id is not None:
+        admission = (
+            db.query(IpdAdmission)
+            .filter(
+                IpdAdmission.id == prescription_data.admission_id,
+                IpdAdmission.doctor_id == doctor_id,
+            )
+            .first()
+        )
+        if not admission:
+            raise HTTPException(
+                status_code=404,
+                detail="IPD admission not found or does not belong to this doctor",
+            )
+        rx = create_prescription_for_admission(
+            db,
+            admission,
+            doctor_id=doctor_id,
+            diagnosis=prescription_data.diagnosis,
+            items=prescription_data.items,
+            notes=prescription_data.notes,
+            commit=True,
+        )
+        return _serialize_prescription(rx)
+
     appointment = (
         db.query(Appointment)
         .filter(Appointment.id == prescription_data.appointment_id)

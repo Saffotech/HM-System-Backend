@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, Field
+from pydantic import BaseModel, field_validator, Field, model_validator
 from datetime import datetime
 from typing import Optional, List
 import re
@@ -46,10 +46,19 @@ class PrescriptionItemCreate(BaseModel):
 
 class PrescriptionCreate(BaseModel):
 
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
     diagnosis: str
     notes: Optional[str] = None
     items: List[PrescriptionItemCreate]
+
+    @model_validator(mode="after")
+    def require_one_parent(self):
+        has_appointment = self.appointment_id is not None
+        has_admission = self.admission_id is not None
+        if has_appointment == has_admission:
+            raise ValueError("Provide exactly one of appointment_id or admission_id")
+        return self
 
 
 class PrescriptionItemResponse(BaseModel):
@@ -73,7 +82,8 @@ class PrescriptionItemResponse(BaseModel):
 class PrescriptionResponse(BaseModel):
 
     id: int
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None
     doctor_id: int

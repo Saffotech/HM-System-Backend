@@ -2,14 +2,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
+    CheckConstraint,
     Column,
-    Integer,
-    String,
+    Date,
     DateTime,
     ForeignKey,
+    Index,
+    Integer,
+    String,
     Text,
-    Date,
-    Time
+    Time,
+    text,
 )
 from sqlalchemy.orm import relationship
 
@@ -29,6 +32,19 @@ def _now():
 class Prescription(Base):
 
     __tablename__ = "prescriptions"
+    __table_args__ = (
+        CheckConstraint(
+            "(appointment_id IS NOT NULL AND admission_id IS NULL) OR "
+            "(appointment_id IS NULL AND admission_id IS NOT NULL)",
+            name="ck_prescriptions_one_parent",
+        ),
+        Index(
+            "uq_prescriptions_appointment_id",
+            "appointment_id",
+            unique=True,
+            postgresql_where=text("appointment_id IS NOT NULL"),
+        ),
+    )
 
     id = Column(
         Integer,
@@ -39,9 +55,15 @@ class Prescription(Base):
     appointment_id = Column(
         Integer,
         ForeignKey("appointments.id"),
-        nullable=False,
-        unique=True,
-        index=True
+        nullable=True,
+        index=True,
+    )
+
+    admission_id = Column(
+        Integer,
+        ForeignKey("ipd_admissions.id"),
+        nullable=True,
+        index=True,
     )
 
     patient_id = Column(
@@ -106,7 +128,13 @@ class Prescription(Base):
     # Relationships
 
     appointment = relationship(
-        "Appointment"
+        "Appointment",
+        foreign_keys=[appointment_id],
+    )
+
+    admission = relationship(
+        "IpdAdmission",
+        foreign_keys=[admission_id],
     )
 
     patient = relationship(

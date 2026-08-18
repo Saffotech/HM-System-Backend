@@ -4,6 +4,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
+from Models.ipd import IpdAdmission
 from Models.lab_result import LabResult
 from Models.opd_billing import Appointment
 from Models.patient import Patient, registration_source_value
@@ -72,6 +73,8 @@ def _serialize_lab_test(
         registration_source=registration_source_value(
             getattr(patient, "registration_source", None)
         ),
+        appointment_id=order.appointment_id,
+        admission_id=getattr(order, "admission_id", None),
         department_id=order.department_id,
         test_name=order.test_name,
         category=order.category,
@@ -89,6 +92,7 @@ def _serialize_lab_test_response(
     return LabTestResponse(
         id=order.id,
         appointment_id=order.appointment_id,
+        admission_id=getattr(order, "admission_id", None),
         patient_id=order.patient_id,
         patient_name=order.patient_name,
         patient_uid=order.patient_uhid,
@@ -108,28 +112,59 @@ def _serialize_lab_test_response(
 
 
 def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int):
-    appointment = (
-        db.query(Appointment)
-        .filter(
-            Appointment.id == payload.appointment_id,
-            Appointment.doctor_id == doctor_id,
-        )
-        .first()
-    )
-    if not appointment:
-        raise HTTPException(
-            status_code=404,
-            detail="Appointment not found or does not belong to this doctor",
-        )
+    appointment = None
+    admission = None
+    patient_id = None
+    duplicate_filter = []
+    duplicate_detail = "This test has already been ordered for this appointment"
 
-    patient = h.get_patient(db, appointment.patient_id)
+    if payload.admission_id is not None:
+        admission = (
+            db.query(IpdAdmission)
+            .filter(
+                IpdAdmission.id == payload.admission_id,
+                IpdAdmission.doctor_id == doctor_id,
+            )
+            .first()
+        )
+        if not admission:
+            raise HTTPException(
+                status_code=404,
+                detail="IPD admission not found or does not belong to this doctor",
+            )
+        if str(admission.status or "").strip().lower() != "admitted":
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot order lab tests for a closed admission",
+            )
+        patient_id = admission.patient_id
+        duplicate_filter = [LabTestOrder.admission_id == admission.id]
+        duplicate_detail = "This test has already been ordered for this admission"
+    else:
+        appointment = (
+            db.query(Appointment)
+            .filter(
+                Appointment.id == payload.appointment_id,
+                Appointment.doctor_id == doctor_id,
+            )
+            .first()
+        )
+        if not appointment:
+            raise HTTPException(
+                status_code=404,
+                detail="Appointment not found or does not belong to this doctor",
+            )
+        patient_id = appointment.patient_id
+        duplicate_filter = [LabTestOrder.appointment_id == appointment.id]
+
+    patient = h.get_patient(db, patient_id)
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
     existing_test = (
         db.query(LabTestOrder)
         .filter(
-            LabTestOrder.appointment_id == payload.appointment_id,
+            *duplicate_filter,
             LabTestOrder.test_name == payload.test_name,
             LabTestOrder.status != LabTestStatus.CANCELLED,
         )
@@ -138,7 +173,7 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
     if existing_test:
         raise HTTPException(
             status_code=400,
-            detail="This test has already been ordered for this appointment",
+            detail=duplicate_detail,
         )
 
     department_id = resolve_lab_department_id(
@@ -149,7 +184,8 @@ def create_lab_test_service(db: Session, payload: LabTestCreate, doctor_id: int)
     )
 
     lab_test = LabTestOrder(
-        appointment_id=appointment.id,
+        appointment_id=appointment.id if appointment else None,
+        admission_id=admission.id if admission else None,
         patient_id=patient.id,
         patient_name=h.display_name(patient.first_name, patient.last_name),
         patient_uhid=patient.patient_uid,

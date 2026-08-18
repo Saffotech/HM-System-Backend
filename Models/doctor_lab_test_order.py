@@ -1,10 +1,11 @@
 from sqlalchemy import (
+    CheckConstraint,
     Column,
     Integer,
     String,
     DateTime,
     ForeignKey,
-    Enum
+    Enum,
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -24,14 +25,28 @@ class LabTestStatus(str, enum.Enum):
 class LabTestOrder(Base):
 
     __tablename__ = "lab_test_orders"
+    __table_args__ = (
+        CheckConstraint(
+            "(appointment_id IS NOT NULL AND admission_id IS NULL) OR "
+            "(appointment_id IS NULL AND admission_id IS NOT NULL)",
+            name="ck_lab_test_orders_one_parent",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
     appointment_id = Column(
         Integer,
         ForeignKey("appointments.id"),
-        nullable=False,
-        index=True
+        nullable=True,
+        index=True,
+    )
+
+    admission_id = Column(
+        Integer,
+        ForeignKey("ipd_admissions.id"),
+        nullable=True,
+        index=True,
     )
 
     patient_id = Column(
@@ -119,6 +134,11 @@ class LabTestOrder(Base):
     appointment = relationship(
         "Appointment",
         foreign_keys=[appointment_id]
+    )
+
+    admission = relationship(
+        "IpdAdmission",
+        foreign_keys=[admission_id]
     )
 
     doctor = relationship(

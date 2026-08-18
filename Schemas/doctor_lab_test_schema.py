@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field, ConfigDict, AliasChoices
+from pydantic import BaseModel, Field, ConfigDict, AliasChoices, model_validator
 from datetime import datetime
 from typing import List, Optional
 
@@ -11,7 +11,8 @@ from Schemas.lab_schema import ReportSource
 # ==========================================
 
 class LabTestCreate(BaseModel):
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
 
     test_name: str = Field(
         ...,
@@ -37,6 +38,14 @@ class LabTestCreate(BaseModel):
         default=None,
         max_length=500
     )
+
+    @model_validator(mode="after")
+    def require_one_parent(self):
+        has_appointment = self.appointment_id is not None
+        has_admission = self.admission_id is not None
+        if has_appointment == has_admission:
+            raise ValueError("Provide exactly one of appointment_id or admission_id")
+        return self
 
 
 # ==========================================
@@ -73,7 +82,8 @@ class LabTestUpdate(BaseModel):
 
 class LabTestResponse(BaseModel):
     id: int
-    appointment_id: int
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
 
     patient_id: int
     patient_name: str
@@ -111,6 +121,8 @@ class LabTestListResponse(BaseModel):
         validation_alias=AliasChoices("patient_uid", "patient_uhid")
     )
     registration_source: str
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
 
     department_id: int
 

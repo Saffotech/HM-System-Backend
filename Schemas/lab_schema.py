@@ -91,7 +91,7 @@ class LabReportCreate(BaseModel):
 
 class LabOrderListItem(BaseModel):
     id: int
-    appointment_id: int
+    appointment_id: Optional[int] = None
 
     patient_id: int
     patient_name: str
@@ -147,7 +147,7 @@ class ReportSummary(BaseModel):
 
 class LabOrderDetailResponse(BaseModel):
     id: int
-    appointment_id: int
+    appointment_id: Optional[int] = None
 
     patient_id: int
     patient_name: str
