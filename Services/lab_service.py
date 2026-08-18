@@ -480,6 +480,7 @@ def mark_sample_collected(db: Session, order_id: int, current_user: User):
             "message": "Sample already marked as collected",
             "order_id": order.id,
             "status": order.status.value,
+            "state_changed": False,
         }
 
     if order.status != LabTestStatus.ORDERED:
@@ -496,6 +497,9 @@ def mark_sample_collected(db: Session, order_id: int, current_user: User):
         "message": "Sample marked as collected",
         "order_id": order.id,
         "status": order.status.value,
+        "patient_uid": order.patient_uhid,
+        "test_name": order.test_name,
+        "state_changed": True,
     }
 
 
@@ -548,6 +552,7 @@ def mark_completed(db: Session, order_id: int, current_user: User):
             "message": "Test already completed",
             "order_id": order.id,
             "status": order.status.value,
+            "state_changed": False,
         }
 
     if order.status == LabTestStatus.CANCELLED:
@@ -580,6 +585,9 @@ def mark_completed(db: Session, order_id: int, current_user: User):
         "message": "Test completed successfully",
         "order_id": order.id,
         "status": order.status.value,
+        "patient_uid": order.patient_uhid,
+        "test_name": order.test_name,
+        "state_changed": True,
     }
 
 
@@ -678,6 +686,8 @@ def upload_report(
         "report_id": report.id,
         "order_id": order.id,
         "status": order.status.value,
+        "patient_uid": order.patient_uhid,
+        "test_name": order.test_name,
     }
 
 
@@ -820,6 +830,10 @@ def upload_report_file(
         "file_type": report.file_type,
         "file_size": report.file_size,
         "file_size_display": format_file_size(report.file_size),
+        # Internal-only key for audit logging (stripped by response_model).
+        "replaced_previous_file": had_previous_file,
+        "patient_uid": order.patient_uhid,
+        "test_name": order.test_name,
     }
 
 

@@ -3,6 +3,7 @@ from datetime import date
 from fastapi import (
     APIRouter,
     Depends,
+    Request,
     status,
     UploadFile,
     File,
@@ -33,6 +34,8 @@ from Schemas.lab_schema import (
     ReportSource,
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import lab_audit_service as lab_audit
 from Services.lab_service import (
     get_dashboard_stats,
     get_orders,
@@ -142,17 +145,31 @@ def order_detail(
 )
 def sample_collected(
     order_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
         PermissionChecker("lab:update")
     ),
 ):
-    return mark_sample_collected(
+    result = mark_sample_collected(
         db=db,
         order_id=order_id,
         current_user=current_user,
     )
+    if result.get("state_changed"):
+        lab_audit.log_sample_collected(
+            db,
+            actor=current_user,
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+            order_id=result["order_id"],
+            patient_uid=result.get("patient_uid"),
+            test_name=result.get("test_name"),
+            previous_status="ordered",
+            new_status=result["status"],
+        )
+    return result
 
 # ==========================================================
 # Processing (deprecated — Option B no-op, kept for older clients)
@@ -191,19 +208,33 @@ def processing(
 def create_report(
     order_id: int,
     payload: LabReportCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
         PermissionChecker("lab:upload_report")
     ),
 ):
-    return upload_report(
+    result = upload_report(
         db=db,
         order_id=order_id,
         payload=payload,
         current_user_id=current_user.id,
         current_user=current_user,
     )
+    lab_audit.log_report_upload(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=result["order_id"],
+        report_id=result["report_id"],
+        patient_uid=result.get("patient_uid"),
+        test_name=result.get("test_name"),
+        parameter_count=len(payload.parameters or []),
+        has_file_ref=bool(payload.report_file),
+    )
+    return result
 
 
 # ==========================================================
@@ -251,17 +282,30 @@ def reports(
 @router.get("/reports/{report_id}", response_model=LabReportDetailResponse)
 def report_detail(
     report_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
         PermissionChecker("lab:view")
     ),
 ):
-    return get_report_detail(
+    result = get_report_detail(
         db=db,
         report_id=report_id,
         current_user=current_user,
     )
+    order = result.get("order") or {}
+    lab_audit.log_report_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=result["lab_test_order_id"],
+        report_id=result["id"],
+        patient_uid=order.get("patient_uid"),
+        test_name=order.get("test_name"),
+    )
+    return result
 
 # ==========================================================
 # Complete Test
@@ -273,17 +317,31 @@ def report_detail(
 )
 def complete_test(
     order_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
         PermissionChecker("lab:update")
     ),
 ):
-    return mark_completed(
+    result = mark_completed(
         db=db,
         order_id=order_id,
         current_user=current_user,
     )
+    if result.get("state_changed"):
+        lab_audit.log_complete(
+            db,
+            actor=current_user,
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+            order_id=result["order_id"],
+            patient_uid=result.get("patient_uid"),
+            test_name=result.get("test_name"),
+            previous_status="sample_collected",
+            new_status=result["status"],
+        )
+    return result
 
 # ==========================================================
 # Upload Report File
@@ -295,6 +353,7 @@ def complete_test(
 )
 def upload_lab_report_file(
     order_id: int,
+    request: Request,
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -302,13 +361,28 @@ def upload_lab_report_file(
         PermissionChecker("lab:upload_report")
     ),
 ):
-    return upload_report_file(
+    result = upload_report_file(
         db=db,
         order_id=order_id,
         file=file,
         current_user_id=current_user.id,
         current_user=current_user,
     )
+    lab_audit.log_report_file_upload(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=result["order_id"],
+        report_id=result["report_id"],
+        patient_uid=result.get("patient_uid"),
+        test_name=result.get("test_name"),
+        file_name=result.get("file_name"),
+        file_type=result.get("file_type"),
+        file_size=result.get("file_size"),
+        replaced_previous_file=bool(result.get("replaced_previous_file")),
+    )
+    return result
 
 # ==========================================================
 # View Report File
@@ -319,12 +393,29 @@ def upload_lab_report_file(
 )
 def view_report_file(
     report_id: int,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
         PermissionChecker("lab:view")
     ),
 ):
+    detail = get_report_detail(
+        db=db,
+        report_id=report_id,
+        current_user=current_user,
+    )
+    order = detail.get("order") or {}
+    lab_audit.log_report_file_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        order_id=detail["lab_test_order_id"],
+        report_id=detail["id"],
+        patient_uid=order.get("patient_uid"),
+        test_name=order.get("test_name"),
+    )
     return get_report_file(
         db=db,
         report_id=report_id,
