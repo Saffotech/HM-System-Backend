@@ -47,19 +47,7 @@ def reference_doctors(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:patients:list")),
 ):
-    dept, doctors = opd_service.list_doctors_in_department(db, department_id)
-    return {
-        "department": dept.name,
-        "doctors": [
-            {
-                "id": d.id,
-                "name": opd_service.display_name(d.first_name, d.last_name, prefix="Dr. "),
-                "department_id": d.department_id,
-                "department_name": dept.name,
-            }
-            for d in doctors
-        ],
-    }
+    return opd_service.list_department_doctors_with_fees(db, department_id)
 
 
 @router.get("/dashboard")

@@ -1,33 +1,11 @@
 from pydantic import BaseModel, field_validator, Field
 from datetime import datetime
 from typing import Optional, List
-import re
 
 from Schemas.common_schema import PaginatedResponse
+from Services.prescription_duration import normalize_duration
 
-
-_DURATION_UNIT_RE = re.compile(
-    r"(?i)\b(days?|weeks?|months?|years?)\b"
-)
-
-
-def _normalize_duration(value) -> str:
-    """
-    Keep full duration text when unit is present.
-    If only a number is sent/stored (current doctor FE), default unit to days.
-    """
-    if value is None:
-        return ""
-    text = str(value).strip()
-    if not text:
-        return ""
-    if text.isdigit():
-        return f"{text} days"
-    # "3" with spaces / "3days" without space
-    digits = "".join(c for c in text if c.isdigit())
-    if digits and not _DURATION_UNIT_RE.search(text):
-        return f"{digits} days"
-    return text
+_normalize_duration = normalize_duration
 
 
 class PrescriptionItemCreate(BaseModel):

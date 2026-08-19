@@ -18,6 +18,7 @@ from Schemas.pharmacy_schema import (
     PharmacyPrescriptionListItem,
 )
 from Services import opd_helpers as h
+from Services.prescription_duration import duration_to_supply_quantity, normalize_duration
 
 PRESCRIPTION_STATUS_PENDING = "pending"
 PRESCRIPTION_STATUS_PARTIALLY = "partially_dispensed"
@@ -47,8 +48,8 @@ def _patient_display_name(rx: Prescription, patient: Optional[Patient]) -> str:
 
 
 def _quantity_prescribed(item: PrescriptionItem) -> int:
-    """Use duration as prescribed quantity until a dedicated quantity column exists."""
-    return max(int(item.duration or 0), 1)
+    """Use duration as prescribed supply quantity until a dedicated quantity column exists."""
+    return duration_to_supply_quantity(item.duration)
 
 
 def _dispensed_totals(db: Session, prescription_item_ids: list[int]) -> dict[int, int]:
@@ -74,7 +75,7 @@ def _item_out(item: PrescriptionItem, dispensed_so_far: int) -> PharmacyPrescrip
         medicine_name=item.medicine_name,
         dosage=item.dosage,
         frequency=item.frequency,
-        duration=item.duration,
+        duration=normalize_duration(item.duration),
         instructions=item.instructions,
         quantity_prescribed=prescribed,
         quantity_dispensed=dispensed_so_far,
@@ -106,16 +107,24 @@ def _compute_prescription_status(
     return PRESCRIPTION_STATUS_PENDING
 
 
+def _prescription_item_counts(db: Session, prescription_ids: list[int]) -> dict[int, int]:
+    if not prescription_ids:
+        return {}
+    rows = (
+        db.query(PrescriptionItem.prescription_id, func.count(PrescriptionItem.id))
+        .filter(PrescriptionItem.prescription_id.in_(prescription_ids))
+        .group_by(PrescriptionItem.prescription_id)
+        .all()
+    )
+    return {int(rx_id): int(count) for rx_id, count in rows}
+
+
 def list_prescriptions(
     db: Session,
     status: str = PRESCRIPTION_STATUS_PENDING,
     search: Optional[str] = None,
 ) -> dict:
-    q = (
-        db.query(Prescription)
-        .options(joinedload(Prescription.items))
-        .order_by(Prescription.created_at.desc())
-    )
+    q = db.query(Prescription).order_by(Prescription.created_at.desc())
     if status:
         q = q.filter(Prescription.status == status)
     if search:
@@ -129,6 +138,8 @@ def list_prescriptions(
         )
 
     rows = q.all()
+    rx_ids = [rx.id for rx in rows]
+    item_counts = _prescription_item_counts(db, rx_ids)
     patient_ids = {rx.patient_id for rx in rows}
     patients = {
         p.id: p
@@ -151,7 +162,7 @@ def list_prescriptions(
             patient_name=rx.patient_name or "",
             doctor_name=_doctor_name(doctors.get(rx.doctor_id)),
             diagnosis=rx.diagnosis,
-            medicine_count=len(rx.items),
+            medicine_count=item_counts.get(rx.id, 0),
             status=rx.status or PRESCRIPTION_STATUS_PENDING,
             created_at=rx.created_at,
         )
@@ -170,8 +181,8 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
     if not rx:
         raise HTTPException(status_code=404, detail="Prescription not found")
 
-    patient = db.query(Patient).filter(Patient.id == rx.patient_id).first()
-    doctor = db.query(User).filter(User.id == rx.doctor_id).first()
+    patient = db.get(Patient, rx.patient_id) if rx.patient_id else None
+    doctor = db.get(User, rx.doctor_id) if rx.doctor_id else None
     item_ids = [int(i.id) for i in rx.items]
     dispensed_map = _dispensed_totals(db, item_ids)
 

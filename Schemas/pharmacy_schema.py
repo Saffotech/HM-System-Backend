@@ -1,7 +1,9 @@
 from datetime import datetime
 from typing import List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from Services.prescription_duration import normalize_duration
 
 
 class PharmacyPrescriptionListItem(BaseModel):
@@ -26,11 +28,16 @@ class PharmacyPrescriptionItemOut(BaseModel):
     medicine_name: str
     dosage: str
     frequency: str
-    duration: int
+    duration: str
     instructions: Optional[str] = None
     quantity_prescribed: int = 0
     quantity_dispensed: int = 0
     quantity_remaining: int = 0
+
+    @field_validator("duration", mode="before")
+    @classmethod
+    def coerce_duration(cls, v):
+        return normalize_duration(v) if v is not None else ""
 
     class Config:
         from_attributes = True

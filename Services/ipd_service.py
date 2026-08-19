@@ -306,11 +306,23 @@ def add_doctor_visit(
     if not doctor:
         raise HTTPException(status_code=404, detail="Doctor not found")
 
+    pricing = opd_settings_service.get_pricing(db)
+    if data.charge is not None:
+        charge = float(data.charge)
+    else:
+        charge = float(
+            opd_settings_service.resolve_consultation_fee(
+                pricing,
+                doctor_id=data.doctor_id,
+                department_id=admission.department_id or doctor.department_id,
+            )
+        )
+
     visit = IpdDoctorVisit(
         admission_id=admission.id,
         doctor_id=data.doctor_id,
         visited_at=_parse_dt(data.visited_at),
-        charge=float(data.charge),
+        charge=charge,
         notes=data.notes,
         recorded_by=recorded_by,
     )
@@ -955,9 +967,39 @@ def get_dashboard(db: Session) -> dict:
     }
 
 
+def _enrich_bed_for_ipd(db: Session, bed_out) -> dict:
+    """Attach display-only bed rate when Admin set a special_bed_rates override."""
+    payload = bed_out.model_dump() if hasattr(bed_out, "model_dump") else dict(bed_out)
+    pricing = opd_settings_service.get_pricing(db)
+    special_rate = opd_settings_service.get_special_bed_rate(
+        pricing,
+        bed_number=payload.get("bed_number"),
+    )
+    payload["charge_per_day"] = special_rate
+    payload["has_custom_rate"] = special_rate is not None
+    return payload
+
+
 def list_beds(db: Session, ward: Optional[str] = None, status: Optional[str] = None, search: Optional[str] = None):
-    return bed_service.list_beds(db, ward=ward, status=status, search=search)
+    payload = bed_service.list_beds(db, ward=ward, status=status, search=search)
+    payload["beds"] = [_enrich_bed_for_ipd(db, bed) for bed in payload.get("beds", [])]
+    return payload
 
 
 def ward_stats(db: Session):
-    return {"wards": bed_service.get_ward_bed_stats(db)}
+    pricing = opd_settings_service.get_pricing(db)
+    wards = []
+    for row in bed_service.get_ward_bed_stats(db):
+        ward_name = row.get("ward")
+        wards.append(
+            {
+                **row,
+                "charge_per_day": float(
+                    opd_settings_service.resolve_bed_rate(
+                        pricing,
+                        ward_name=ward_name,
+                    )
+                ),
+            }
+        )
+    return {"wards": wards}
