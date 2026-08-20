@@ -227,6 +227,7 @@ ROLES_DATA = {
             "nurse_other_visits:view",
             "nurse_other_visits:create",
             "nurse_other_visits:update",
+            "ipd:patients:list",
         ],
     },
     "opd_billing": {
