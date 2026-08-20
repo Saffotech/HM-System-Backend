@@ -66,6 +66,7 @@ MODULE_CARD_PERMISSION_KEYS: dict[str, frozenset[str]] = {
             "prescriptions:delete",
             "lab:view",
             "lab:create",
+            "doctor_patient_visits:view",
         }
     ),
     "doctor_profile": frozenset(
@@ -125,6 +126,9 @@ MODULE_CARD_PERMISSION_KEYS: dict[str, frozenset[str]] = {
             "nurse_medication:view",
             "nurse_medication:create",
             "nurse_medication:update",
+            "nurse_doctor_visits:view",
+            "nurse_doctor_visits:create",
+            "nurse_doctor_visits:update",
         }
     ),
     "nurse_operations": frozenset(),

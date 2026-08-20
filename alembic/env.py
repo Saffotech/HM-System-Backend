@@ -30,6 +30,7 @@ from Models.nurse_medication_administration import MedicationAdministration
 from Models.nurse_nursing_notes import NursingNote
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_shift_handover import ShiftHandover, ShiftHandoverPatient
+from Models.nurse_doctor_visit import NurseDoctorVisit  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem
 from Models.hospital_settings import HospitalSettings
 from Models.opd_settings import OpdSettings  # noqa: F401

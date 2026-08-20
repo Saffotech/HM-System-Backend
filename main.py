@@ -41,6 +41,7 @@ from Models.nurse_workforce import (  # noqa: F401
     NurseWorkforceRoster,
     NurseWorkforceShift,
 )
+from Models.nurse_doctor_visit import NurseDoctorVisit  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 
 from Routers import auth
@@ -73,6 +74,8 @@ from Routers.nurse_shift_bed_allocation_router import (
     router as nurse_bed_allocation_router,
 )
 from Routers.nurse_workforce_router import router as nurse_workforce_router
+from Routers.nurse_doctor_visit_router import router as nurse_doctor_visit_router
+from Routers.doctor_patient_visit_router import router as doctor_patient_visit_router
 from Routers.opd import router as opd_router
 from Routers.ipd import router as ipd_router
 from Routers.ipd_profile_router import router as ipd_profile_router
@@ -146,6 +149,8 @@ app.include_router(medication_administration_router)
 app.include_router(nurse_shift_handover_router)
 app.include_router(nurse_bed_allocation_router)
 app.include_router(nurse_workforce_router)
+app.include_router(nurse_doctor_visit_router)
+app.include_router(doctor_patient_visit_router)
 app.include_router(pharmacy_router)
 app.include_router(pharmacist_profile_router)
 app.include_router(pharmacist_notification_router)

@@ -103,6 +103,10 @@ PERMISSIONS_LIST = [
     "nurse_handover:create",
     "nurse_handover:update",
     "nurse_handover:submit",
+    "nurse_doctor_visits:view",
+    "nurse_doctor_visits:create",
+    "nurse_doctor_visits:update",
+    "doctor_patient_visits:view",
     "bed_allocation:view",
     "bed_allocation:create",
     "bed_allocation:update",
@@ -186,6 +190,7 @@ ROLES_DATA = {
             "doctor_profile:delete_image",
             "notifications:view",
             "notifications:update",
+            "doctor_patient_visits:view",
         ],
     },
     "nurse": {
@@ -213,6 +218,9 @@ ROLES_DATA = {
             "nurse_handover:create",
             "nurse_handover:update",
             "nurse_handover:submit",
+            "nurse_doctor_visits:view",
+            "nurse_doctor_visits:create",
+            "nurse_doctor_visits:update",
         ],
     },
     "opd_billing": {

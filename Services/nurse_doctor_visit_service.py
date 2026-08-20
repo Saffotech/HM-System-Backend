@@ -1,0 +1,535 @@
+from datetime import date, datetime
+from zoneinfo import ZoneInfo
+
+from fastapi import HTTPException
+from sqlalchemy import or_
+from sqlalchemy.orm import Session, joinedload
+
+from Models.department import Department
+from Models.ipd import IpdAdmission
+from Models.nurse_doctor_visit import NurseDoctorVisit
+from Models.opd_billing import Appointment
+from Models.patient import Patient
+from Models.role import Role
+from Models.user import User
+from Schemas.nurse_doctor_visit_schema import (
+    DoctorPatientVisitsResponse,
+    NurseDoctorListResponse,
+    NurseDoctorOption,
+    NurseDoctorVisitCreate,
+    NurseDoctorVisitListResponse,
+    NurseDoctorVisitResponse,
+    NurseDoctorVisitUpdate,
+    NurseDoctorVisitVoidRequest,
+)
+from Services import opd_helpers as h
+from Services.doctor_helpers import day_bounds
+from Services.ipd_helpers import doctor_display
+from Services.nurse_nursing_notes_service import _resolve_patient_and_appointment
+
+IST = ZoneInfo("Asia/Kolkata")
+
+
+def _now() -> datetime:
+    return datetime.now(IST)
+
+
+def _user_display_name(user: User | None) -> str:
+    if not user:
+        return ""
+    return f"{user.first_name} {user.last_name or ''}".strip()
+
+
+def _patient_display_name(patient: Patient | None) -> str | None:
+    if not patient:
+        return None
+    return f"{patient.first_name} {patient.last_name or ''}".strip()
+
+
+def _parse_visited_at(value: datetime | None) -> datetime:
+    if value is None:
+        return _now()
+    if value.tzinfo is None:
+        return value.replace(tzinfo=IST)
+    return value.astimezone(IST)
+
+
+def _active_doctor(db: Session, doctor_id: int) -> User:
+    doctor = (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .filter(
+            User.id == doctor_id,
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            Role.name == h.DOCTOR_ROLE,
+        )
+        .first()
+    )
+    if not doctor:
+        raise HTTPException(status_code=404, detail="Doctor not found")
+    return doctor
+
+
+def _visit_query(db: Session):
+    return (
+        db.query(NurseDoctorVisit)
+        .options(
+            joinedload(NurseDoctorVisit.patient),
+            joinedload(NurseDoctorVisit.doctor),
+        )
+        .filter(NurseDoctorVisit.is_voided.is_(False))
+    )
+
+
+def _visit_date_filter(query, visit_date: date | None):
+    if visit_date is None:
+        return query
+    start, end = day_bounds(visit_date)
+    return query.filter(
+        NurseDoctorVisit.visited_at >= start,
+        NurseDoctorVisit.visited_at <= end,
+    )
+
+
+def _apply_allocated_only_filter(
+    db: Session,
+    query,
+    *,
+    allocated_only: bool,
+    nurse_id: int | None,
+    assignment_date=None,
+    shift_name: str | None = None,
+):
+    if not allocated_only:
+        return query
+    if nurse_id is None:
+        return query.filter(NurseDoctorVisit.patient_id == -1)
+
+    from Services.nurse_shift_bed_allocation_service import (
+        get_allocated_patient_ids_for_nurse,
+    )
+
+    patient_ids = get_allocated_patient_ids_for_nurse(
+        db,
+        nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
+    )
+    if not patient_ids:
+        return query.filter(NurseDoctorVisit.patient_id == -1)
+    return query.filter(NurseDoctorVisit.patient_id.in_(patient_ids))
+
+
+def _assign_visit_numbers(
+    visits: list[NurseDoctorVisit],
+) -> dict[int, int]:
+    """visit_number keyed by visit id — same patient/date batches only."""
+    ordered = sorted(visits, key=lambda row: (row.visited_at, row.id))
+    return {row.id: index for index, row in enumerate(ordered, start=1)}
+
+
+def _serialize_visit(
+    visit: NurseDoctorVisit,
+    *,
+    visit_number: int | None = None,
+) -> NurseDoctorVisitResponse:
+    patient = visit.patient
+    return NurseDoctorVisitResponse(
+        id=visit.id,
+        patient_id=visit.patient_id,
+        patient_uid=getattr(patient, "patient_uid", None),
+        patient_name=_patient_display_name(patient),
+        doctor_id=visit.doctor_id,
+        doctor_name=visit.doctor_name,
+        visited_at=visit.visited_at,
+        notes=visit.notes,
+        visit_number=visit_number,
+        recorded_by=visit.recorded_by,
+        recorded_by_name=visit.recorded_by_name,
+        created_at=visit.created_at,
+        updated_by=visit.updated_by,
+        updated_by_name=visit.updated_by_name,
+        updated_at=visit.updated_at,
+        is_voided=visit.is_voided,
+    )
+
+
+def _serialize_visits_with_numbers(
+    visits: list[NurseDoctorVisit],
+) -> list[NurseDoctorVisitResponse]:
+    numbers = _assign_visit_numbers(visits)
+    return [
+        _serialize_visit(visit, visit_number=numbers.get(visit.id))
+        for visit in visits
+    ]
+
+
+def _group_visit_numbers_by_patient_date(
+    db: Session,
+    visits: list[NurseDoctorVisit],
+) -> dict[int, int]:
+    """Compute visit_number per visit id across patient+date groups."""
+    if not visits:
+        return {}
+
+    groups: dict[tuple[int, date], list[NurseDoctorVisit]] = {}
+    for visit in visits:
+        local_day = visit.visited_at.astimezone(IST).date()
+        key = (visit.patient_id, local_day)
+        groups.setdefault(key, []).append(visit)
+
+    numbers: dict[int, int] = {}
+    for group_visits in groups.values():
+        numbers.update(_assign_visit_numbers(group_visits))
+    return numbers
+
+
+def create_doctor_visit_service(
+    db: Session,
+    payload: NurseDoctorVisitCreate,
+    nurse: User,
+) -> NurseDoctorVisitResponse:
+    patient, _appointment = _resolve_patient_and_appointment(
+        db,
+        appointment_id=payload.appointment_id,
+        patient_id=payload.patient_id,
+    )
+    doctor = _active_doctor(db, payload.doctor_id)
+
+    visit = NurseDoctorVisit(
+        patient_id=patient.id,
+        doctor_id=doctor.id,
+        doctor_name=doctor_display(db, doctor.id) or _user_display_name(doctor),
+        visited_at=_parse_visited_at(payload.visited_at),
+        notes=(payload.notes or "").strip() or None,
+        recorded_by=nurse.id,
+        recorded_by_name=_user_display_name(nurse),
+    )
+    db.add(visit)
+    db.commit()
+    db.refresh(visit)
+
+    visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
+    day = visit.visited_at.astimezone(IST).date()
+    same_day = (
+        _visit_date_filter(
+            _visit_query(db).filter(NurseDoctorVisit.patient_id == visit.patient_id),
+            day,
+        )
+        .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
+        .all()
+    )
+    numbers = _assign_visit_numbers(same_day)
+    return _serialize_visit(visit, visit_number=numbers.get(visit.id))
+
+
+def list_doctor_visits_service(
+    db: Session,
+    *,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
+    doctor_id: int | None = None,
+    visit_date: date | None = None,
+    search: str | None = None,
+    allocated_only: bool = False,
+    allocation_nurse_id: int | None = None,
+    assignment_date=None,
+    shift_name: str | None = None,
+    page: int = 1,
+    page_size: int = 20,
+) -> NurseDoctorVisitListResponse:
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
+    query = _visit_query(db)
+    joined_patient = False
+
+    if patient_id:
+        query = query.filter(NurseDoctorVisit.patient_id == patient_id)
+
+    if patient_uid:
+        query = query.join(Patient, Patient.id == NurseDoctorVisit.patient_id)
+        joined_patient = True
+        query = query.filter(
+            Patient.patient_uid.ilike(f"%{patient_uid.strip()}%")
+        )
+
+    if doctor_id:
+        query = query.filter(NurseDoctorVisit.doctor_id == doctor_id)
+
+    query = _visit_date_filter(query, visit_date)
+
+    query = _apply_allocated_only_filter(
+        db,
+        query,
+        allocated_only=allocated_only,
+        nurse_id=allocation_nurse_id,
+        assignment_date=assignment_date,
+        shift_name=shift_name,
+    )
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        if not joined_patient:
+            query = query.join(Patient, Patient.id == NurseDoctorVisit.patient_id)
+            joined_patient = True
+        query = query.filter(
+            or_(
+                Patient.first_name.ilike(term),
+                Patient.last_name.ilike(term),
+                Patient.patient_uid.ilike(term),
+                NurseDoctorVisit.doctor_name.ilike(term),
+                NurseDoctorVisit.notes.ilike(term),
+            )
+        )
+
+    total = query.count()
+    rows = (
+        query.order_by(
+            NurseDoctorVisit.visited_at.desc(),
+            NurseDoctorVisit.id.desc(),
+        )
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    if patient_id and visit_date:
+        all_for_day = (
+            _visit_date_filter(
+                _visit_query(db).filter(NurseDoctorVisit.patient_id == patient_id),
+                visit_date,
+            )
+            .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
+            .all()
+        )
+        numbers = _assign_visit_numbers(all_for_day)
+        items = [
+            _serialize_visit(row, visit_number=numbers.get(row.id))
+            for row in rows
+        ]
+    else:
+        numbers = _group_visit_numbers_by_patient_date(db, rows)
+        items = [
+            _serialize_visit(row, visit_number=numbers.get(row.id))
+            for row in rows
+        ]
+
+    return NurseDoctorVisitListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        items=items,
+    )
+
+
+def update_doctor_visit_service(
+    db: Session,
+    visit_id: int,
+    payload: NurseDoctorVisitUpdate,
+    nurse: User,
+) -> NurseDoctorVisitResponse:
+    visit = db.query(NurseDoctorVisit).filter(NurseDoctorVisit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Doctor visit not found")
+    if visit.is_voided:
+        raise HTTPException(status_code=400, detail="Cannot edit a voided visit")
+
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    if "doctor_id" in update_data:
+        doctor = _active_doctor(db, update_data["doctor_id"])
+        visit.doctor_id = doctor.id
+        visit.doctor_name = doctor_display(db, doctor.id) or _user_display_name(doctor)
+
+    if "visited_at" in update_data:
+        visit.visited_at = _parse_visited_at(update_data["visited_at"])
+
+    if "notes" in update_data:
+        visit.notes = (update_data["notes"] or "").strip() or None
+
+    visit.updated_by = nurse.id
+    visit.updated_by_name = _user_display_name(nurse)
+    visit.updated_at = _now()
+
+    db.commit()
+    db.refresh(visit)
+
+    visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
+    day = visit.visited_at.astimezone(IST).date()
+    same_day = (
+        _visit_date_filter(
+            _visit_query(db).filter(NurseDoctorVisit.patient_id == visit.patient_id),
+            day,
+        )
+        .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
+        .all()
+    )
+    numbers = _assign_visit_numbers(same_day)
+    return _serialize_visit(visit, visit_number=numbers.get(visit.id))
+
+
+def void_doctor_visit_service(
+    db: Session,
+    visit_id: int,
+    payload: NurseDoctorVisitVoidRequest,
+    nurse: User,
+) -> NurseDoctorVisitResponse:
+    visit = db.query(NurseDoctorVisit).filter(NurseDoctorVisit.id == visit_id).first()
+    if not visit:
+        raise HTTPException(status_code=404, detail="Doctor visit not found")
+    if visit.is_voided:
+        raise HTTPException(status_code=400, detail="Visit is already voided")
+
+    visit.is_voided = True
+    visit.voided_by = nurse.id
+    visit.voided_by_name = _user_display_name(nurse)
+    visit.voided_at = _now()
+    visit.void_reason = payload.void_reason.strip()
+
+    db.commit()
+    db.refresh(visit)
+    return _serialize_visit(visit, visit_number=None)
+
+
+def list_active_doctors_service(
+    db: Session,
+    *,
+    search: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> NurseDoctorListResponse:
+    page = max(page, 1)
+    page_size = min(max(page_size, 1), 100)
+
+    query = (
+        db.query(User)
+        .options(joinedload(User.department))
+        .join(Role, User.role_id == Role.id)
+        .outerjoin(Department, User.department_id == Department.id)
+        .filter(
+            User.is_active.is_(True),
+            User.deleted_at.is_(None),
+            Role.name == h.DOCTOR_ROLE,
+        )
+    )
+
+    if search and search.strip():
+        term = f"%{search.strip()}%"
+        query = query.filter(
+            or_(
+                User.first_name.ilike(term),
+                User.last_name.ilike(term),
+                User.specialization.ilike(term),
+                Department.name.ilike(term),
+            )
+        )
+
+    total = query.count()
+    doctors = (
+        query.order_by(User.first_name.asc(), User.last_name.asc(), User.id.asc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+
+    items = [
+        NurseDoctorOption(
+            id=doctor.id,
+            name=h.display_name(doctor.first_name, doctor.last_name, prefix="Dr. "),
+            specialization=doctor.specialization
+            or (doctor.department.name if doctor.department else None),
+        )
+        for doctor in doctors
+    ]
+
+    return NurseDoctorListResponse(
+        total=total,
+        page=page,
+        page_size=page_size,
+        doctors=items,
+    )
+
+
+def _doctor_can_view_patient(db: Session, doctor_id: int, patient_id: int) -> bool:
+    admitted = (
+        db.query(IpdAdmission.id)
+        .filter(
+            IpdAdmission.patient_id == patient_id,
+            IpdAdmission.doctor_id == doctor_id,
+            IpdAdmission.status == "admitted",
+        )
+        .first()
+    )
+    if admitted:
+        return True
+
+    appointment = (
+        db.query(Appointment.id)
+        .filter(
+            Appointment.patient_id == patient_id,
+            Appointment.doctor_id == doctor_id,
+            Appointment.status != "cancelled",
+        )
+        .first()
+    )
+    return appointment is not None
+
+
+def get_doctor_patient_visits_service(
+    db: Session,
+    *,
+    doctor_id: int,
+    patient_id: int | None = None,
+    patient_uid: str | None = None,
+    visit_date: date | None = None,
+) -> DoctorPatientVisitsResponse:
+    if not patient_id and not patient_uid:
+        raise HTTPException(
+            status_code=400,
+            detail="Provide patient_id or patient_uid",
+        )
+
+    patient_query = db.query(Patient).filter(Patient.is_active.is_(True))
+    if patient_id:
+        patient_query = patient_query.filter(Patient.id == patient_id)
+    if patient_uid:
+        patient_query = patient_query.filter(
+            Patient.patient_uid.ilike(patient_uid.strip())
+        )
+    patient = patient_query.first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+
+    if not _doctor_can_view_patient(db, doctor_id, patient.id):
+        raise HTTPException(
+            status_code=403,
+            detail="You are not authorized to view visits for this patient",
+        )
+
+    on_date = visit_date or _now().date()
+    visits = (
+        _visit_date_filter(
+            _visit_query(db).filter(NurseDoctorVisit.patient_id == patient.id),
+            on_date,
+        )
+        .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
+        .all()
+    )
+    numbers = _assign_visit_numbers(visits)
+    serialized = [
+        _serialize_visit(visit, visit_number=numbers.get(visit.id))
+        for visit in visits
+    ]
+
+    return DoctorPatientVisitsResponse(
+        patient_id=patient.id,
+        patient_uid=patient.patient_uid,
+        patient_name=_patient_display_name(patient),
+        visit_date=on_date,
+        visit_count=len(serialized),
+        visits=serialized,
+    )
