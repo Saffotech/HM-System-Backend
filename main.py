@@ -58,6 +58,7 @@ from Routers.doctor_consultation_router import router as consultation_router
 from Routers.doctor_lab_test_router import router as lab_test_router
 from Routers.doctor_notification_router import router as doctor_notification_router
 from Routers.doctor_patient_history_router import router as patient_router
+from Routers.doctor_patient_clinical_router import router as doctor_patient_clinical_router
 from Routers.doctor_patient_queue_router import router as patient_queue_router
 from Routers.doctor_prescription_router import router as prescription_router
 from Routers.doctor_profile_router import router as doctor_profile_router
@@ -138,6 +139,7 @@ app.include_router(doctor_ipd_router)
 app.include_router(consultation_router)
 app.include_router(patient_queue_router)
 app.include_router(patient_router)
+app.include_router(doctor_patient_clinical_router)
 app.include_router(prescription_router)
 app.include_router(lab_test_router)
 app.include_router(doctor_profile_router)

@@ -1,4 +1,5 @@
 """Audit logging for doctor-module write actions (Super Admin reads via GET /super-admin/audit)."""
+from datetime import date
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
@@ -335,6 +336,60 @@ def log_patient_history_view(
         details={
             "patient_uid": patient_uid,
             "encounter_type": encounter_type,
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def log_patient_vitals_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    patient_id: int,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="doctor.patient_vitals.view",
+        resource_type="patient",
+        resource_id=patient_id,
+        summary=f"Viewed vitals for patient {patient_id}",
+        details={
+            "patient_id": patient_id,
+            "from_date": from_date.isoformat() if from_date else None,
+            "to_date": to_date.isoformat() if to_date else None,
+        },
+        ip_address=ip_address,
+        user_agent=user_agent,
+    )
+
+
+def log_patient_notes_view(
+    db: Session,
+    *,
+    actor: User,
+    ip_address: str | None,
+    user_agent: str | None,
+    patient_id: int,
+    from_date: Optional[date] = None,
+    to_date: Optional[date] = None,
+) -> None:
+    safe_log_event(
+        db,
+        actor=actor,
+        action="doctor.patient_notes.view",
+        resource_type="patient",
+        resource_id=patient_id,
+        summary=f"Viewed nursing notes for patient {patient_id}",
+        details={
+            "patient_id": patient_id,
+            "from_date": from_date.isoformat() if from_date else None,
+            "to_date": to_date.isoformat() if to_date else None,
         },
         ip_address=ip_address,
         user_agent=user_agent,

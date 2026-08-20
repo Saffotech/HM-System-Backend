@@ -62,6 +62,8 @@ PERMISSIONS_LIST = [
     "nurse_notes:view",
     "nurse_notes:create",
     "nurse_notes:update",
+    "doctor_vitals:view",
+    "doctor_notes:view",
     "nurse_profile:view",
     "nurse_profile:update",
     "nurse_profile:upload_image",
@@ -194,6 +196,8 @@ ROLES_DATA = {
             "notifications:view",
             "notifications:update",
             "doctor_patient_visits:view",
+            "doctor_vitals:view",
+            "doctor_notes:view",
         ],
     },
     "nurse": {
