@@ -2,7 +2,7 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import Date, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from Models.department import Department
@@ -165,26 +165,6 @@ def _serialize_visits_with_numbers(
     ]
 
 
-def _group_visit_numbers_by_patient_date(
-    db: Session,
-    visits: list[NurseDoctorVisit],
-) -> dict[int, int]:
-    """Compute visit_number per visit id across patient+date groups."""
-    if not visits:
-        return {}
-
-    groups: dict[tuple[int, date], list[NurseDoctorVisit]] = {}
-    for visit in visits:
-        local_day = visit.visited_at.astimezone(IST).date()
-        key = (visit.patient_id, local_day)
-        groups.setdefault(key, []).append(visit)
-
-    numbers: dict[int, int] = {}
-    for group_visits in groups.values():
-        numbers.update(_assign_visit_numbers(group_visits))
-    return numbers
-
-
 def create_doctor_visit_service(
     db: Session,
     payload: NurseDoctorVisitCreate,
@@ -242,7 +222,32 @@ def list_doctor_visits_service(
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
 
-    query = _visit_query(db)
+    ist_day = cast(
+        func.timezone("Asia/Kolkata", NurseDoctorVisit.visited_at),
+        Date,
+    )
+    row_number = func.row_number().over(
+        partition_by=(NurseDoctorVisit.patient_id, ist_day),
+        order_by=(
+            NurseDoctorVisit.visited_at.asc(),
+            NurseDoctorVisit.id.asc(),
+        ),
+    ).label("visit_number")
+    numbered = (
+        db.query(NurseDoctorVisit.id.label("id"), row_number)
+        .filter(NurseDoctorVisit.is_voided.is_(False))
+        .subquery()
+    )
+
+    query = (
+        db.query(NurseDoctorVisit, numbered.c.visit_number)
+        .join(numbered, numbered.c.id == NurseDoctorVisit.id)
+        .options(
+            joinedload(NurseDoctorVisit.patient),
+            joinedload(NurseDoctorVisit.doctor),
+        )
+        .filter(NurseDoctorVisit.is_voided.is_(False))
+    )
     joined_patient = False
 
     if patient_id:
@@ -295,26 +300,10 @@ def list_doctor_visits_service(
         .all()
     )
 
-    if patient_id and visit_date:
-        all_for_day = (
-            _visit_date_filter(
-                _visit_query(db).filter(NurseDoctorVisit.patient_id == patient_id),
-                visit_date,
-            )
-            .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
-            .all()
-        )
-        numbers = _assign_visit_numbers(all_for_day)
-        items = [
-            _serialize_visit(row, visit_number=numbers.get(row.id))
-            for row in rows
-        ]
-    else:
-        numbers = _group_visit_numbers_by_patient_date(db, rows)
-        items = [
-            _serialize_visit(row, visit_number=numbers.get(row.id))
-            for row in rows
-        ]
+    items = [
+        _serialize_visit(visit, visit_number=visit_number)
+        for visit, visit_number in rows
+    ]
 
     return NurseDoctorVisitListResponse(
         total=total,
