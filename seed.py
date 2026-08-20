@@ -106,6 +106,9 @@ PERMISSIONS_LIST = [
     "nurse_doctor_visits:view",
     "nurse_doctor_visits:create",
     "nurse_doctor_visits:update",
+    "nurse_other_visits:view",
+    "nurse_other_visits:create",
+    "nurse_other_visits:update",
     "doctor_patient_visits:view",
     "bed_allocation:view",
     "bed_allocation:create",
@@ -221,6 +224,9 @@ ROLES_DATA = {
             "nurse_doctor_visits:view",
             "nurse_doctor_visits:create",
             "nurse_doctor_visits:update",
+            "nurse_other_visits:view",
+            "nurse_other_visits:create",
+            "nurse_other_visits:update",
         ],
     },
     "opd_billing": {
@@ -331,6 +337,7 @@ DEPARTMENTS = [
     {"name": "Laboratory", "code": "LAB"},
     {"name": "Radiology", "code": "RAD"},
 ]
+
 
 
 def upsert_permissions(db) -> dict[str, int]:
