@@ -427,6 +427,29 @@ def resolve_bed_rate(
     return float(bed_tariff.general_ward_charge)
 
 
+def get_special_bed_rate(
+    pricing: PricingOut,
+    *,
+    bed_number: Optional[str] = None,
+) -> Optional[float]:
+    """
+    Return charge_per_day only when Admin set a special_bed_rates override.
+    Used for IPD bed list display — ward rate is shown at ward level, not per bed.
+    """
+    bed_tariff = pricing.bed_tariff if pricing and pricing.bed_tariff else None
+    if not bed_tariff:
+        return None
+
+    bed_key = str(bed_number or "").strip().lower()
+    if not bed_key:
+        return None
+
+    for row in bed_tariff.special_bed_rates or []:
+        if str(row.bed_number or "").strip().lower() == bed_key:
+            return float(row.charge_per_day)
+    return None
+
+
 def calculate_bed_days(admitted_at: Optional[datetime]) -> int:
     """
     days = max(1, ceil((now - admitted_at) / 24h))

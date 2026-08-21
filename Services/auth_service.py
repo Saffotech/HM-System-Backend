@@ -1,4 +1,5 @@
 from fastapi import HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from Models.role import Role
@@ -11,7 +12,8 @@ from Services.role_policy import assert_can_assign_role, caller_role_name
 
 
 def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
-    existing = db.query(User).filter(User.email == data.email).first()
+    email = (data.email or "").strip().lower()
+    existing = db.query(User).filter(func.lower(User.email) == email).first()
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
@@ -40,7 +42,7 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
     new_user = User(
         first_name=data.first_name,
         last_name=data.last_name,
-        email=data.email,
+        email=email,
         password=hash_password(data.password),
         role_id=data.role_id,
         department_id=department_id,

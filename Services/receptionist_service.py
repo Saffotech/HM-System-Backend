@@ -1,6 +1,12 @@
-"""Receptionist module — view-only appointment boards (scheduled / completed)."""
+"""Receptionist module — view-only appointment boards (scheduled / completed).
+
+Hot paths (dashboard / today-queue / doctor-queue / history / schedule) are
+optimized for SQL-first counts, DISTINCT ON canonical rows, cheap ID pagination,
+throttled day-rollover, and batched schedule slots.
+"""
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
+from time import monotonic
 from typing import Optional
 
 from fastapi import HTTPException
@@ -24,6 +30,10 @@ from Services.queue_helpers import (
 )
 
 IST = opd_helpers.IST
+
+# Throttle expensive past-appointment rollover on hot receptionist GETs.
+_LIFECYCLE_TTL_SEC = 60.0
+_last_lifecycle_at: float = 0.0
 
 
 def receptionist_appointment_status_from_query(value: str | None) -> str | None:
@@ -173,28 +183,46 @@ def _dedupe_canonical_rows(rows: list[tuple]) -> list[tuple]:
     return canonical
 
 
+def _maybe_mark_past_appointments(db: Session) -> None:
+    """Run day-rollover at most once per TTL window (not on every queue poll)."""
+    global _last_lifecycle_at
+    now = monotonic()
+    if now - _last_lifecycle_at < _LIFECYCLE_TTL_SEC:
+        return
+    _last_lifecycle_at = now
+    try:
+        from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
+
+        mark_past_scheduled_as_no_show(db)
+    except Exception:
+        db.rollback()
+
+
 def _enrich_rows_with_visits(
     db: Session, rows: list[tuple], *, persist_links: bool = True
 ) -> list[tuple]:
     """
     Attach visits the same way OPD does (FK first, then patient+doctor+dept+day).
 
-    Read-only boards must never raise queue/payment errors — only resolve display
-    payment_status. Optionally persist missing appointment_id for future joins.
+    Only re-resolves rows that already lack a joined visit (orphan bills).
     """
     from Services import appointment_service
 
     if not rows:
         return rows
 
-    appointments = [row[0] for row in rows]
-    visit_map = appointment_service._load_visits_for_appointments(db, appointments)
+    missing = [row[0] for row in rows if row[2] is None]
+    visit_map = (
+        appointment_service._load_visits_for_appointments(db, missing)
+        if missing
+        else {}
+    )
     linked_any = False
     enriched: list[tuple] = []
 
     for row in rows:
         apt = row[0]
-        visit = visit_map.get(apt.id, row[2])
+        visit = row[2] if row[2] is not None else visit_map.get(apt.id)
         if persist_links and visit is not None and visit.appointment_id is None:
             visit.appointment_id = apt.id
             linked_any = True
@@ -415,6 +443,19 @@ def _canonical_rows(query, Visit, *, partition_by_patient: bool = True):
     )
 
 
+def _canonical_rows_patient_doctor(query, Visit):
+    """One row per (patient_id, doctor_id) — dashboard paid/unpaid canonical."""
+    return (
+        query.order_by(
+            Appointment.patient_id.asc(),
+            Appointment.doctor_id.asc(),
+            *_canonical_priority_order(Visit),
+        )
+        .distinct(Appointment.patient_id, Appointment.doctor_id)
+        .all()
+    )
+
+
 def _paginate_rows(rows: list, page: int, limit: int, *, sort_key, reverse: bool = False):
     page = max(page, 1)
     limit = min(max(limit, 1), 100)
@@ -422,6 +463,91 @@ def _paginate_rows(rows: list, page: int, limit: int, *, sort_key, reverse: bool
     total = len(ordered)
     start = (page - 1) * limit
     return ordered[start : start + limit], total, page, limit
+
+
+def _page_canonical_board(
+    db: Session,
+    query,
+    Visit,
+    *,
+    partition: str,
+    page: int,
+    limit: int,
+    payment_filter: Optional[str],
+    reverse: bool = False,
+) -> tuple[list[tuple], int, int, int]:
+    """
+    Canonical DISTINCT ON → enrich orphan visits only → payment filter → paginate.
+
+    Loads full ORM rows only for the current page (IDs sorted first).
+    """
+    page = max(page, 1)
+    limit = min(max(limit, 1), 100)
+
+    if partition == "patient":
+        id_rows = (
+            query.order_by(
+                Appointment.patient_id.asc(),
+                *_canonical_priority_order(Visit),
+            )
+            .distinct(Appointment.patient_id)
+            .with_entities(Appointment.id, Appointment.scheduled_at)
+            .all()
+        )
+    elif partition == "patient_doctor":
+        id_rows = (
+            query.order_by(
+                Appointment.patient_id.asc(),
+                Appointment.doctor_id.asc(),
+                *_canonical_priority_order(Visit),
+            )
+            .distinct(Appointment.patient_id, Appointment.doctor_id)
+            .with_entities(Appointment.id, Appointment.scheduled_at)
+            .all()
+        )
+    else:
+        id_rows = (
+            query.order_by(
+                Appointment.id.asc(),
+                *_canonical_priority_order(Visit),
+            )
+            .distinct(Appointment.id)
+            .with_entities(Appointment.id, Appointment.scheduled_at)
+            .all()
+        )
+
+    id_rows = sorted(
+        id_rows,
+        key=lambda r: (r.scheduled_at or datetime.min.replace(tzinfo=IST), r.id),
+        reverse=reverse,
+    )
+    all_ids = [r.id for r in id_rows]
+    if not all_ids:
+        return [], 0, page, limit
+
+    # Load light rows for payment filter (visit join already on query).
+    light = (
+        query.filter(Appointment.id.in_(all_ids))
+        .order_by(None)
+        .all()
+    )
+    # Deduplicate ORM join fan-out by appointment id.
+    by_id: dict[int, tuple] = {}
+    for row in light:
+        apt = row[0]
+        existing = by_id.get(apt.id)
+        if existing is None or (row[2] is not None and existing[2] is None):
+            by_id[apt.id] = row
+    ordered_light = [by_id[i] for i in all_ids if i in by_id]
+    ordered_light = _enrich_rows_with_visits(db, ordered_light)
+    ordered_light = _filter_canonical_rows(
+        ordered_light, status=None, payment_filter=payment_filter
+    )
+
+    total = len(ordered_light)
+    start = (page - 1) * limit
+    page_rows = ordered_light[start : start + limit]
+    return page_rows, total, page, limit
 
 
 def _today_range() -> tuple[datetime, datetime]:
@@ -451,7 +577,7 @@ def _load_canonical_rows(
     include_doctor_search: bool = False,
     order_desc: bool = False,
 ) -> list[tuple]:
-    q, _Visit = _receptionist_appointments_query(
+    q, Visit = _receptionist_appointments_query(
         db,
         date_from=date_from,
         date_to=date_to or date_from,
@@ -467,16 +593,11 @@ def _load_canonical_rows(
         q = q.filter(
             _appointment_search_filter(search, include_doctor=include_doctor_search)
         )
-    if order_desc:
-        q = q.order_by(Appointment.scheduled_at.desc(), Appointment.id.desc())
-    else:
-        q = q.order_by(*_appointment_list_order())
 
-    rows = q.all()
+    rows = _canonical_rows_patient_doctor(q, Visit)
     rows = _enrich_rows_with_visits(db, rows)
-    canonical = _dedupe_canonical_rows(rows)
     filtered = _filter_canonical_rows(
-        canonical, status=status, payment_filter=payment_filter
+        rows, status=status, payment_filter=payment_filter
     )
     reverse = order_desc
     filtered.sort(
@@ -490,32 +611,80 @@ def _load_canonical_rows(
 
 
 def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
-    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
-
-    mark_past_scheduled_as_no_show(db)
+    """KPI cards — SQL aggregates on canonical (patient, doctor) rows for today."""
+    _maybe_mark_past_appointments(db)
     today = _today()
-    # Resolve visits like OPD so paid orphan bills count correctly
-    rows = _load_canonical_rows(db, date_from=today, date_to=today, doctor_id=doctor_id)
-    completed = [
-        r for r in rows if status_value(r[0].status) == AppointmentStatus.completed.value
-    ]
-    paid = [r for r in rows if r[2] is not None and is_visit_paid(r[2])]
-    unpaid = [r for r in rows if r[2] is None or not is_visit_paid(r[2])]
+    day_start, day_end = _today_range()
 
-    cancelled_q = db.query(Appointment).filter(
-        Appointment.scheduled_at >= _today_range()[0],
-        Appointment.scheduled_at < _today_range()[1],
+    q, Visit = _todays_appointments_query(
+        db,
+        doctor_id=doctor_id,
+        payment_filter=None,
+        include_cancelled=False,
+    )
+    # DISTINCT ON (patient_id, doctor_id) then aggregate — same paid/unpaid rules.
+    canonical = (
+        q.order_by(
+            Appointment.patient_id.asc(),
+            Appointment.doctor_id.asc(),
+            *_canonical_priority_order(Visit),
+        )
+        .distinct(Appointment.patient_id, Appointment.doctor_id)
+        .with_entities(
+            Appointment.id.label("appointment_id"),
+            Appointment.status.label("status"),
+            Visit.id.label("visit_id"),
+            Visit.payment_status.label("payment_status"),
+            Visit.grand_total.label("grand_total"),
+        )
+        .all()
+    )
+
+    # Orphan paid visits (no appointment_id) still need enrich for unpaid→paid.
+    missing_ids = [r.appointment_id for r in canonical if r.visit_id is None]
+    orphan_paid: set[int] = set()
+    if missing_ids:
+        apts = db.query(Appointment).filter(Appointment.id.in_(missing_ids)).all()
+        from Services import appointment_service
+
+        visit_map = appointment_service._load_visits_for_appointments(db, apts)
+        for apt_id, visit in visit_map.items():
+            if visit is not None and is_visit_paid(visit):
+                orphan_paid.add(apt_id)
+
+    total = len(canonical)
+    completed = 0
+    paid = 0
+    unpaid = 0
+    for row in canonical:
+        st = status_value(row.status)
+        if st == AppointmentStatus.completed.value:
+            completed += 1
+        is_paid = False
+        if row.visit_id is not None:
+            if (row.payment_status or "") == "paid" or float(row.grand_total or 0) <= 0:
+                is_paid = True
+        elif row.appointment_id in orphan_paid:
+            is_paid = True
+        if is_paid:
+            paid += 1
+        else:
+            unpaid += 1
+
+    cancelled_q = db.query(func.count(Appointment.id)).filter(
+        Appointment.scheduled_at >= day_start,
+        Appointment.scheduled_at < day_end,
         Appointment.status == AppointmentStatus.cancelled,
     )
     if doctor_id:
         cancelled_q = cancelled_q.filter(Appointment.doctor_id == doctor_id)
 
     return {
-        "total_patients": len(rows),
-        "completed": len(completed),
-        "todays_paid_appointments": len(paid),
-        "todays_unpaid_appointments": len(unpaid),
-        "todays_cancelled": cancelled_q.count(),
+        "total_patients": total,
+        "completed": completed,
+        "todays_paid_appointments": paid,
+        "todays_unpaid_appointments": unpaid,
+        "todays_cancelled": int(cancelled_q.scalar() or 0),
     }
 
 
@@ -533,12 +702,8 @@ def get_today_queue(
     limit: int = 20,
 ) -> dict:
     """Today's appointments (paid and unpaid); optional appointment status and payment filters."""
-    from Services.doctor_appointment_service import mark_past_scheduled_as_no_show
-
-    mark_past_scheduled_as_no_show(db)
+    _maybe_mark_past_appointments(db)
     today = _today()
-    # Do not SQL-filter by payment — orphan paid visits lack appointment_id FK.
-    # Resolve visits like OPD, then filter in Python.
     q, Visit = _todays_appointments_query(
         db,
         doctor_id=doctor_id,
@@ -554,15 +719,14 @@ def get_today_queue(
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
 
-    canonical = _enrich_rows_with_visits(db, _canonical_rows(q, Visit))
-    canonical = _filter_canonical_rows(
-        canonical, status=None, payment_filter=payment_filter
-    )
-    rows, total, page, limit = _paginate_rows(
-        canonical,
-        page,
-        limit,
-        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+    rows, total, page, limit = _page_canonical_board(
+        db,
+        q,
+        Visit,
+        partition="patient",
+        page=page,
+        limit=limit,
+        payment_filter=payment_filter,
     )
     return {
         "queue_date": today,
@@ -600,6 +764,7 @@ def get_doctor_queue(
     page: Optional[int] = None,
     limit: Optional[int] = None,
 ) -> dict:
+    _maybe_mark_past_appointments(db)
     target_date = queue_date or _today()
     q, Visit = _receptionist_appointments_query(
         db,
@@ -613,20 +778,24 @@ def get_doctor_queue(
     if search:
         q = q.filter(_appointment_search_filter(search))
 
-    canonical = _enrich_rows_with_visits(db, _canonical_rows(q, Visit))
-    canonical = _filter_canonical_rows(
-        canonical, status=None, payment_filter=payment_filter
-    )
-    if page is not None and limit is not None:
-        rows, total, page, limit = _paginate_rows(
-            canonical,
-            page,
-            limit,
-            sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+    if page is None or limit is None:
+        # No pagination → full board (canonical + orphan visit enrich).
+        all_rows = _enrich_rows_with_visits(db, _canonical_rows(q, Visit))
+        all_rows = _filter_canonical_rows(
+            all_rows, status=None, payment_filter=payment_filter
         )
-    else:
-        rows = sorted(canonical, key=lambda r: (r[0].scheduled_at, r[0].id))
+        rows = sorted(all_rows, key=lambda r: (r[0].scheduled_at, r[0].id))
         total, page, limit = len(rows), 1, len(rows) or 1
+    else:
+        rows, total, page, limit = _page_canonical_board(
+            db,
+            q,
+            Visit,
+            partition="patient",
+            page=page,
+            limit=limit,
+            payment_filter=payment_filter,
+        )
 
     return {
         "doctor_id": doctor_id,
@@ -713,15 +882,14 @@ def get_queue_history(
         search=search,
     )
 
-    unique_rows = _enrich_rows_with_visits(db, _unique_appointment_rows(q, Visit))
-    unique_rows = _filter_canonical_rows(
-        unique_rows, status=None, payment_filter=payment_filter
-    )
-    rows, total, page, limit = _paginate_rows(
-        unique_rows,
-        page,
-        limit,
-        sort_key=lambda r: (r[0].scheduled_at, r[0].id),
+    rows, total, page, limit = _page_canonical_board(
+        db,
+        q,
+        Visit,
+        partition="appointment",
+        page=page,
+        limit=limit,
+        payment_filter=payment_filter,
         reverse=True,
     )
     history = [
@@ -804,7 +972,13 @@ def _appointment_counts_by_doctor(db: Session, target_date: date) -> dict[int, d
     }
 
 
-def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> list[dict]:
+def _build_doctor_slots(
+    db: Session,
+    doctor_id: int,
+    schedule_date: date,
+    *,
+    booked_hm: set[tuple[int, int]] | None = None,
+) -> list[dict]:
     """Slots from Admin OPD settings (hospital default or per-doctor override)."""
     day = datetime.combine(schedule_date, time.min, tzinfo=IST)
     config = opd_settings_svc.resolve_doctor_slot_settings(db, doctor_id)
@@ -813,29 +987,29 @@ def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> lis
     if weekday not in working_days:
         return []
 
-    day_start = datetime.combine(schedule_date, time.min, tzinfo=IST)
-    day_end = datetime.combine(schedule_date, time.max, tzinfo=IST)
     duration = max(5, min(240, int(config.get("slot_duration_minutes") or 30)))
 
-    booked = (
-        db.query(Appointment)
-        .filter(
-            Appointment.doctor_id == doctor_id,
-            Appointment.scheduled_at >= day_start,
-            Appointment.scheduled_at <= day_end,
-            Appointment.status.in_(
-                [AppointmentStatus.scheduled, AppointmentStatus.completed]
-            ),
+    if booked_hm is None:
+        day_start = datetime.combine(schedule_date, time.min, tzinfo=IST)
+        day_end = datetime.combine(schedule_date, time.max, tzinfo=IST)
+        booked = (
+            db.query(Appointment)
+            .filter(
+                Appointment.doctor_id == doctor_id,
+                Appointment.scheduled_at >= day_start,
+                Appointment.scheduled_at <= day_end,
+                Appointment.status.in_(
+                    [AppointmentStatus.scheduled, AppointmentStatus.completed]
+                ),
+            )
+            .all()
         )
-        .all()
-    )
-
-    booked_hm = set()
-    for apt in booked:
-        if apt.scheduled_at is None:
-            continue
-        apt_ist = apt.scheduled_at.astimezone(IST)
-        booked_hm.add((apt_ist.hour, apt_ist.minute))
+        booked_hm = set()
+        for apt in booked:
+            if apt.scheduled_at is None:
+                continue
+            apt_ist = apt.scheduled_at.astimezone(IST)
+            booked_hm.add((apt_ist.hour, apt_ist.minute))
 
     slots = []
     for slot_time in opd_settings_svc.iter_slot_datetimes(day, config):
@@ -850,6 +1024,35 @@ def _build_doctor_slots(db: Session, doctor_id: int, schedule_date: date) -> lis
             }
         )
     return slots
+
+
+def _booked_slots_by_doctor(
+    db: Session, doctor_ids: list[int], schedule_date: date
+) -> dict[int, set[tuple[int, int]]]:
+    """One query for booked HH:MM per doctor on a date."""
+    if not doctor_ids:
+        return {}
+    day_start = datetime.combine(schedule_date, time.min, tzinfo=IST)
+    day_end = datetime.combine(schedule_date, time.max, tzinfo=IST)
+    rows = (
+        db.query(Appointment.doctor_id, Appointment.scheduled_at)
+        .filter(
+            Appointment.doctor_id.in_(doctor_ids),
+            Appointment.scheduled_at >= day_start,
+            Appointment.scheduled_at <= day_end,
+            Appointment.status.in_(
+                [AppointmentStatus.scheduled, AppointmentStatus.completed]
+            ),
+        )
+        .all()
+    )
+    out: dict[int, set[tuple[int, int]]] = {did: set() for did in doctor_ids}
+    for doctor_id, scheduled_at in rows:
+        if scheduled_at is None:
+            continue
+        apt_ist = scheduled_at.astimezone(IST)
+        out.setdefault(doctor_id, set()).add((apt_ist.hour, apt_ist.minute))
+    return out
 
 
 def get_doctors_schedule(
@@ -868,6 +1071,7 @@ def get_doctors_schedule(
 
     Returns active doctors with shift fields from doctor_profiles and that day's
     appointment counts. Filters: doctor_id, department_id, search, page, page_size.
+    Slots are built only when include_slots=true (batched booked times).
     """
     page = max(page, 1)
     page_size = min(max(page_size, 1), 100)
@@ -923,13 +1127,24 @@ def get_doctors_schedule(
         "cancelled_count": 0,
     }
 
+    booked_by_doctor: dict[int, set[tuple[int, int]]] = {}
+    if include_slots and doctors:
+        booked_by_doctor = _booked_slots_by_doctor(
+            db, [d.id for d in doctors], schedule_date
+        )
+
     items = []
     for doctor in doctors:
         profile: DoctorProfile | None = doctor.doctor_profile
         dept: Department | None = doctor.department
         stats = counts.get(doctor.id, empty_stats)
         slots = (
-            _build_doctor_slots(db, doctor.id, schedule_date)
+            _build_doctor_slots(
+                db,
+                doctor.id,
+                schedule_date,
+                booked_hm=booked_by_doctor.get(doctor.id, set()),
+            )
             if include_slots
             else None
         )
@@ -952,7 +1167,6 @@ def get_doctors_schedule(
                 "scheduled_count": stats["scheduled_count"],
                 "completed_count": stats["completed_count"],
                 "cancelled_count": stats["cancelled_count"],
-                # Active doctors are listable; shift fields indicate configured hours.
                 "is_available": True,
                 "slots": slots,
                 "total_slots": len(slots) if slots else 0,

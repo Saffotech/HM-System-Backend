@@ -146,19 +146,7 @@ def doctors_by_department(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("opd:view")),
 ):
-    dept, doctors = opd_service.list_doctors_in_department(db, department_id)
-    return {
-        "department": dept.name,
-        "doctors": [
-            {
-                "id": d.id,
-                "name": opd_service.display_name(d.first_name, d.last_name, prefix="Dr. "),
-                "department_id": d.department_id,
-                "department_name": dept.name,
-            }
-            for d in doctors
-        ],
-    }
+    return opd_service.list_department_doctors_with_fees(db, department_id)
 
 
 # ── Billing preview & registration ────────────────────────────
@@ -166,24 +154,29 @@ def doctors_by_department(
 @router.post("/bill/preview", response_model=BillPreviewResponse)
 def preview_bill_fees(
     data: BillPreviewRequest,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:view")),
 ):
-    return opd_service.build_bill_preview(data)
+    return opd_service.build_bill_preview(db, data)
 
 
 @router.post("/patient/preview-bill", response_model=BillPreviewResponse)
 def preview_bill_register_body(
     data: PatientCreate,
+    db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("billing:view")),
 ):
     return opd_service.build_bill_preview(
+        db,
         BillPreviewRequest(
             registration_fee=data.registration_fee,
             consultation_fee=data.consultation_fee,
             gst_percent=data.gst_percent,
-        )
+            doctor_id=data.doctor_id,
+            department_id=data.department_id,
+        ),
     )
 
 

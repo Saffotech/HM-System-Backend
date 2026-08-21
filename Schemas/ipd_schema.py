@@ -55,7 +55,7 @@ class IpdTransferBedRequest(BaseModel):
 
 class IpdDoctorVisitCreate(BaseModel):
     doctor_id: int
-    charge: float = Field(ge=0)
+    charge: Optional[float] = Field(None, ge=0)
     visited_at: Optional[str] = None
     notes: Optional[str] = None
 

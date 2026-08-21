@@ -16,11 +16,13 @@ class VisitBillingFields(BaseModel):
 
 
 class BillPreviewRequest(BaseModel):
-    """Preview totals — fees only, no patient/visit required."""
+    """Preview totals. Amounts are resolved from Admin OPD pricing when db is used."""
 
     registration_fee: float = Field(200.0, ge=0)
     consultation_fee: float = Field(800.0, ge=0)
     gst_percent: float = Field(5.0, ge=0, le=100)
+    doctor_id: Optional[int] = None
+    department_id: Optional[int] = None
 
 
 class PatientRegisterRequest(PatientFields, VisitBillingFields):
