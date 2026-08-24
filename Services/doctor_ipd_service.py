@@ -274,7 +274,10 @@ def save_doctor_ipd_consultation_service(
     return {
         "success": True,
         "message": "IPD consultation saved",
-        "admission": h.admission_to_dict(db, admission, use_dashboard_status=False),
+        "admission": h.with_nurse_names(
+            db,
+            [h.admission_to_dict(db, admission, use_dashboard_status=False)],
+        )[0],
         "visit": {
             "id": visit.id,
             "admission_id": visit.admission_id,

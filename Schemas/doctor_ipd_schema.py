@@ -39,6 +39,8 @@ class DoctorIpdAdmissionItem(BaseModel):
     admitted_at: Optional[str] = None
     discharged_at: Optional[str] = None
     created_at: Optional[str] = None
+    nurse_id: Optional[int] = None
+    nurse_name: Optional[str] = None
 
 
 class DoctorIpdAdmissionListResponse(PaginatedResponse[DoctorIpdAdmissionItem]):

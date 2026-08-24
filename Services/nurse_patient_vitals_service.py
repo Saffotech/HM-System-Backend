@@ -280,6 +280,7 @@ def _serialize_vital(vital: PatientVitals, db: Session | None = None) -> VitalRe
         "doctor_id": getattr(vital, "doctor_id", None),
         "doctor_name": getattr(vital, "doctor_name", None),
         "recorded_by_name": recorded_by_name,
+        "nurse_name": recorded_by_name,
         "status": _status_value(vital.status),
     }
     if history is not None:

@@ -71,6 +71,7 @@ class VitalResponse(BaseModel):
     doctor_name: Optional[str] = None
     recorded_by: int
     recorded_by_name: Optional[str] = None
+    nurse_name: Optional[str] = None
 
     temperature: Optional[float]
     blood_pressure: Optional[str]

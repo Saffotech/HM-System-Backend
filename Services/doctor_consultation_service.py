@@ -207,7 +207,9 @@ def save_consultation_service(
                         db, notified_rx, doctor_id=doctor_id
                     )
 
-        appointment_dict = h.appointment_to_dict(db, appointment)
+        appointment_dict = h.with_nurse_names(
+            db, [h.appointment_to_dict(db, appointment)]
+        )[0]
         return {
             "success": True,
             "message": "Consultation saved",
