@@ -8,6 +8,7 @@ class NurseDoctorVisitCreate(BaseModel):
     patient_id: Optional[int] = None
     appointment_id: Optional[int] = None
     doctor_id: int = Field(..., ge=1)
+    department_id: Optional[int] = Field(None, ge=1)
     visited_at: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -20,6 +21,7 @@ class NurseDoctorVisitCreate(BaseModel):
 
 class NurseDoctorVisitUpdate(BaseModel):
     doctor_id: Optional[int] = Field(None, ge=1)
+    department_id: Optional[int] = Field(None, ge=1)
     visited_at: Optional[datetime] = None
     notes: Optional[str] = None
 
@@ -35,6 +37,8 @@ class NurseDoctorVisitResponse(BaseModel):
     patient_name: Optional[str] = None
     doctor_id: int
     doctor_name: str
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
     visited_at: datetime
     notes: Optional[str] = None
     visit_number: Optional[int] = None
@@ -60,6 +64,8 @@ class NurseDoctorOption(BaseModel):
     id: int
     name: str
     specialization: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
 
 
 class NurseDoctorListResponse(BaseModel):

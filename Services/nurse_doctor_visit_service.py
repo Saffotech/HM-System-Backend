@@ -57,6 +57,7 @@ def _parse_visited_at(value: datetime | None) -> datetime:
 def _active_doctor(db: Session, doctor_id: int) -> User:
     doctor = (
         db.query(User)
+        .options(joinedload(User.department))
         .join(Role, User.role_id == Role.id)
         .filter(
             User.id == doctor_id,
@@ -71,12 +72,58 @@ def _active_doctor(db: Session, doctor_id: int) -> User:
     return doctor
 
 
+def _active_department(db: Session, department_id: int) -> Department:
+    department = (
+        db.query(Department)
+        .filter(
+            Department.id == department_id,
+            Department.is_active.is_(True),
+        )
+        .first()
+    )
+    if not department:
+        raise HTTPException(status_code=404, detail="Department not found")
+    return department
+
+
+def _resolve_visit_department(
+    db: Session,
+    doctor: User,
+    department_id: int | None = None,
+) -> tuple[int | None, str | None]:
+    """Snapshot the department selected for this visit.
+
+    Frontend currently sends doctor_id only. Use the doctor's department,
+    or an explicit department_id when provided.
+    """
+    if department_id is not None:
+        department = _active_department(db, department_id)
+        if doctor.department_id and doctor.department_id != department.id:
+            raise HTTPException(
+                status_code=400,
+                detail="Doctor does not belong to the selected department",
+            )
+        return department.id, department.name
+
+    department = doctor.department
+    if department is None and doctor.department_id:
+        department = (
+            db.query(Department)
+            .filter(Department.id == doctor.department_id)
+            .first()
+        )
+    if department:
+        return department.id, department.name
+    return None, None
+
+
 def _visit_query(db: Session):
     return (
         db.query(NurseDoctorVisit)
         .options(
             joinedload(NurseDoctorVisit.patient),
-            joinedload(NurseDoctorVisit.doctor),
+            joinedload(NurseDoctorVisit.doctor).joinedload(User.department),
+            joinedload(NurseDoctorVisit.department),
         )
         .filter(NurseDoctorVisit.is_voided.is_(False))
     )
@@ -135,6 +182,14 @@ def _serialize_visit(
     visit_number: int | None = None,
 ) -> NurseDoctorVisitResponse:
     patient = visit.patient
+    doctor = visit.doctor
+    department_id = visit.department_id
+    department_name = visit.department_name
+    if not department_name:
+        live_dept = getattr(visit, "department", None) or getattr(doctor, "department", None)
+        if live_dept:
+            department_id = department_id or live_dept.id
+            department_name = live_dept.name
     return NurseDoctorVisitResponse(
         id=visit.id,
         patient_id=visit.patient_id,
@@ -142,6 +197,8 @@ def _serialize_visit(
         patient_name=_patient_display_name(patient),
         doctor_id=visit.doctor_id,
         doctor_name=visit.doctor_name,
+        department_id=department_id,
+        department_name=department_name,
         visited_at=visit.visited_at,
         notes=visit.notes,
         visit_number=visit_number,
@@ -176,11 +233,18 @@ def create_doctor_visit_service(
         patient_id=payload.patient_id,
     )
     doctor = _active_doctor(db, payload.doctor_id)
+    department_id, department_name = _resolve_visit_department(
+        db,
+        doctor,
+        payload.department_id,
+    )
 
     visit = NurseDoctorVisit(
         patient_id=patient.id,
         doctor_id=doctor.id,
         doctor_name=doctor_display(db, doctor.id) or _user_display_name(doctor),
+        department_id=department_id,
+        department_name=department_name,
         visited_at=_parse_visited_at(payload.visited_at),
         notes=(payload.notes or "").strip() or None,
         recorded_by=nurse.id,
@@ -244,7 +308,8 @@ def list_doctor_visits_service(
         .join(numbered, numbered.c.id == NurseDoctorVisit.id)
         .options(
             joinedload(NurseDoctorVisit.patient),
-            joinedload(NurseDoctorVisit.doctor),
+            joinedload(NurseDoctorVisit.doctor).joinedload(User.department),
+            joinedload(NurseDoctorVisit.department),
         )
         .filter(NurseDoctorVisit.is_voided.is_(False))
     )
@@ -285,6 +350,7 @@ def list_doctor_visits_service(
                 Patient.last_name.ilike(term),
                 Patient.patient_uid.ilike(term),
                 NurseDoctorVisit.doctor_name.ilike(term),
+                NurseDoctorVisit.department_name.ilike(term),
                 NurseDoctorVisit.notes.ilike(term),
             )
         )
@@ -333,6 +399,19 @@ def update_doctor_visit_service(
         doctor = _active_doctor(db, update_data["doctor_id"])
         visit.doctor_id = doctor.id
         visit.doctor_name = doctor_display(db, doctor.id) or _user_display_name(doctor)
+        next_department_id = update_data.get("department_id")
+        visit.department_id, visit.department_name = _resolve_visit_department(
+            db,
+            doctor,
+            next_department_id,
+        )
+    elif "department_id" in update_data:
+        doctor = _active_doctor(db, visit.doctor_id)
+        visit.department_id, visit.department_name = _resolve_visit_department(
+            db,
+            doctor,
+            update_data["department_id"],
+        )
 
     if "visited_at" in update_data:
         visit.visited_at = _parse_visited_at(update_data["visited_at"])
@@ -431,6 +510,8 @@ def list_active_doctors_service(
             name=h.display_name(doctor.first_name, doctor.last_name, prefix="Dr. "),
             specialization=doctor.specialization
             or (doctor.department.name if doctor.department else None),
+            department_id=doctor.department_id,
+            department_name=doctor.department.name if doctor.department else None,
         )
         for doctor in doctors
     ]
