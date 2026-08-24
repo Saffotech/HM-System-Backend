@@ -8,6 +8,7 @@ from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_nursing_notes import NursingNote, NursingNoteStatus
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 
 from Schemas.nurse_schema import (
     NursingNoteCreate,
@@ -195,6 +196,9 @@ def _serialize_note(note: NursingNote, db: Session | None = None) -> NursingNote
         "nurse_name": nurse_name,
         "created_by_name": getattr(note, "created_by_name", None) or nurse_name,
         "bed_number": getattr(note, "bed_number", None),
+        "ward_name": getattr(note, "ward_name", None),
+        "doctor_id": getattr(note, "doctor_id", None),
+        "doctor_name": getattr(note, "doctor_name", None),
         "status": _status_value(note.status),
     }
     if history is not None:
@@ -236,6 +240,22 @@ def _enrich_note(db: Session, note: NursingNote) -> NursingNote:
     )
     if bed:
         note.bed_number = bed.bed_number
+        note.ward_name = bed.ward_name
+
+    doctor_id, doctor_name = attending_doctors_for_patients(
+        db, [note.patient_id]
+    ).get(note.patient_id, (None, None))
+    if not doctor_id and note.appointment_id:
+        appointment = note.appointment or (
+            db.query(Appointment)
+            .filter(Appointment.id == note.appointment_id)
+            .first()
+        )
+        if appointment and appointment.doctor_id:
+            doctor_id = appointment.doctor_id
+            doctor_name = doctor_name_map(db, [doctor_id]).get(doctor_id)
+    note.doctor_id = doctor_id
+    note.doctor_name = doctor_name
 
     nurse = (
         db.query(User)
@@ -283,6 +303,24 @@ def _enrich_notes_batch(
         if bed.patient_id not in beds:
             beds[bed.patient_id] = bed
 
+    extra_doctor_ids: dict[int, int] = {}
+    appointment_ids = {n.appointment_id for n in notes if n.appointment_id}
+    if appointment_ids:
+        for appointment in (
+            db.query(Appointment)
+            .filter(Appointment.id.in_(appointment_ids))
+            .all()
+        ):
+            extra_doctor_ids[appointment.id] = appointment.doctor_id
+
+    attending_map = attending_doctors_for_patients(db, patient_ids)
+    fallback_ids = [
+        extra_doctor_ids.get(n.appointment_id)
+        for n in notes
+        if n.appointment_id and not attending_map.get(n.patient_id, (None, None))[0]
+    ]
+    fallback_names = doctor_name_map(db, fallback_ids)
+
     for note in notes:
         patient = patients.get(note.patient_id)
         if patient:
@@ -292,6 +330,16 @@ def _enrich_notes_batch(
         bed = beds.get(note.patient_id)
         if bed:
             note.bed_number = bed.bed_number
+            note.ward_name = bed.ward_name
+
+        doctor_id, doctor_name = attending_map.get(note.patient_id, (None, None))
+        if not doctor_id and note.appointment_id:
+            extra_id = extra_doctor_ids.get(note.appointment_id)
+            if extra_id:
+                doctor_id = extra_id
+                doctor_name = fallback_names.get(extra_id)
+        note.doctor_id = doctor_id
+        note.doctor_name = doctor_name
 
         nurse = nurses.get(note.nurse_id)
         if nurse:

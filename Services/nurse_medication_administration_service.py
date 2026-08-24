@@ -8,6 +8,7 @@ from Models.opd_billing import Bed
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
 from Models.nurse_medication_administration import MedicationAdministration, _now
 from Models.user import User
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate,
@@ -203,6 +204,15 @@ def get_medication_patients_service(
         .all()
     )
 
+    attending_map = attending_doctors_for_patients(
+        db,
+        [patient.id for _, patient, _ in records],
+    )
+    prescription_doctor_names = doctor_name_map(
+        db,
+        [prescription.doctor_id for prescription, _, _ in records],
+    )
+
     result = []
 
     for prescription, patient, bed in records:
@@ -215,7 +225,11 @@ def get_medication_patients_service(
             )
             .count()
         )
- 
+        doctor_id, doctor_name = attending_map.get(patient.id, (None, None))
+        if not doctor_id and prescription.doctor_id:
+            doctor_id = prescription.doctor_id
+            doctor_name = prescription_doctor_names.get(prescription.doctor_id)
+
         result.append({
 
             "patient_id": patient.id,
@@ -232,6 +246,10 @@ def get_medication_patients_service(
 
             "ward_name":
                 bed.ward_name,
+
+            "doctor_id": doctor_id,
+
+            "doctor_name": doctor_name,
 
             "medicine_count":
                 medicine_count
@@ -288,6 +306,14 @@ def get_patient_medications_service(
         ).order_by(Bed.admitted_at.desc())
          .first()
     )
+    doctor_id, doctor_name = attending_doctors_for_patients(
+        db, [patient_id]
+    ).get(patient_id, (None, None))
+    if not doctor_id and prescription.doctor_id:
+        doctor_id = prescription.doctor_id
+        doctor_name = doctor_name_map(db, [prescription.doctor_id]).get(
+            prescription.doctor_id
+        )
     return {
         "patient_id": patient.id,
         "patient_uid": patient.patient_uid,
@@ -303,6 +329,9 @@ def get_patient_medications_service(
 
         "ward_name":
             bed.ward_name if bed else None,
+
+        "doctor_id": doctor_id,
+        "doctor_name": doctor_name,
 
         "medications": [
             {

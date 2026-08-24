@@ -144,3 +144,50 @@ def doctor_display(db: Session, doctor_id: Optional[int]) -> Optional[str]:
     if not doctor:
         return None
     return display_name(doctor.first_name, doctor.last_name, prefix="Dr. ")
+
+
+def doctor_name_map(db: Session, doctor_ids: list[int] | set[int]) -> dict[int, str]:
+    unique = {doctor_id for doctor_id in doctor_ids if doctor_id}
+    if not unique:
+        return {}
+    doctors = db.query(User).filter(User.id.in_(unique)).all()
+    return {
+        doctor.id: display_name(doctor.first_name, doctor.last_name, prefix="Dr. ")
+        for doctor in doctors
+    }
+
+
+def attending_doctors_for_patients(
+    db: Session,
+    patient_ids: list[int] | set[int],
+) -> dict[int, tuple[Optional[int], Optional[str]]]:
+    """Latest admitted IPD attending doctor per patient: patient_id -> (doctor_id, doctor_name)."""
+    unique = {patient_id for patient_id in patient_ids if patient_id}
+    if not unique:
+        return {}
+
+    admissions = (
+        db.query(IpdAdmission)
+        .filter(
+            IpdAdmission.patient_id.in_(unique),
+            IpdAdmission.status == "admitted",
+        )
+        .order_by(IpdAdmission.admitted_at.desc(), IpdAdmission.id.desc())
+        .all()
+    )
+    latest: dict[int, IpdAdmission] = {}
+    for admission in admissions:
+        if admission.patient_id not in latest:
+            latest[admission.patient_id] = admission
+
+    names = doctor_name_map(
+        db,
+        [admission.doctor_id for admission in latest.values() if admission.doctor_id],
+    )
+    return {
+        patient_id: (
+            admission.doctor_id,
+            names.get(admission.doctor_id) if admission.doctor_id else None,
+        )
+        for patient_id, admission in latest.items()
+    }

@@ -5,6 +5,7 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
     status
 )
 from sqlalchemy.orm import Session
@@ -18,6 +19,8 @@ from dependencies import (
 
 from Models.user import User
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate
@@ -105,6 +108,8 @@ def get_medication_patients(
 @router.get("/patient/{patient_id}")
 def get_patient_medications(
 
+    request: Request,
+
     patient_id: int = Path(
         ...,
         ge=1,
@@ -124,10 +129,18 @@ def get_patient_medications(
     )
 ):
 
-    return get_patient_medications_service(
+    result = get_patient_medications_service(
         db=db,
         patient_id=patient_id
     )
+    nurse_audit.log_medication_patient_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        patient_id=patient_id,
+    )
+    return result
 
 
 # ==========================================================
@@ -141,6 +154,7 @@ def get_patient_medications(
 def administer_medication(
 
     medication_data: MedicationAdministrationCreate,
+    request: Request,
 
     current_user: User = Depends(
         get_current_user
@@ -155,11 +169,19 @@ def administer_medication(
     db: Session = Depends(get_db)
 ):
 
-    return administer_medication_service(
+    result = administer_medication_service(
         db=db,
         medication_data=medication_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_medication_administer(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -169,6 +191,7 @@ def administer_medication(
 @router.put("/administer/{administration_id}")
 def update_medication_administration(
     medication_data: MedicationAdministrationUpdate,
+    request: Request,
     administration_id: int = Path(..., ge=1),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
@@ -177,12 +200,21 @@ def update_medication_administration(
     db: Session = Depends(get_db)
 ):
 
-    return update_medication_administration_service(
+    result = update_medication_administration_service(
         db=db,
         administration_id=administration_id,
         medication_data=medication_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_medication_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        administration_id=administration_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================

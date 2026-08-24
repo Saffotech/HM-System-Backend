@@ -24,6 +24,7 @@ from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Bed
 from Models.patient import Patient
 from Services import doctor_helpers as h
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 
 
 def get_nurse_today_queue_service(
@@ -78,8 +79,7 @@ def get_nurse_today_queue_service(
 
     total = query.count()
 
-    items = []
-    for row in (
+    rows = (
         query
         .order_by(
             PatientQueue.priority.desc(),
@@ -88,7 +88,11 @@ def get_nurse_today_queue_service(
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
-    ):
+    )
+    names = doctor_name_map(db, [row.doctor_id for row in rows])
+
+    items = []
+    for row in rows:
         items.append({
             "id": row.id,
             "appointment_id": row.appointment_id,
@@ -98,6 +102,7 @@ def get_nurse_today_queue_service(
             "patient_phone": row.patient_phone,
             "appointment_uid": row.appointment_uid,
             "doctor_id": row.doctor_id,
+            "doctor_name": names.get(row.doctor_id),
             "token_number": row.token_number,
             "queue_date": row.queue_date,
             "status": row.status.value if hasattr(row.status, "value") else row.status,
@@ -374,9 +379,11 @@ def get_nurse_bed_patients_service(
     patient_ids = [patient.id for _, patient, _ in rows]
     vitals_map = _latest_vitals_map(db, patient_ids)
     pending_map = _pending_medication_counts(db, patient_ids)
+    attending_map = attending_doctors_for_patients(db, patient_ids)
 
     items = []
     for bed, patient, department in rows:
+        doctor_id, doctor_name = attending_map.get(patient.id, (None, None))
         items.append({
             "patient_id": patient.id,
             "patient_name": h.display_name(
@@ -388,6 +395,8 @@ def get_nurse_bed_patients_service(
             "bed_id": bed.id,
             "bed_number": bed.bed_number,
             "ward_name": bed.ward_name,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name,
             "department_id": bed.department_id,
             "department_name": department.name if department else None,
             "admitted_at": bed.admitted_at,
@@ -552,11 +561,21 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         .all()
     )
 
+    occupied_patient_ids = [
+        r.patient_id
+        for r in allocation_rows
+        if r.bed_status == "occupied" and r.patient_id is not None
+    ]
+    attending_map = attending_doctors_for_patients(db, occupied_patient_ids)
+
     my_beds = []
     for r in allocation_rows:
         is_occupied = r.bed_status == "occupied" and r.patient_id is not None
         patient_name = (
             h.display_name(r.patient_first_name, r.patient_last_name) if is_occupied else None
+        )
+        doctor_id, doctor_name = (
+            attending_map.get(r.patient_id, (None, None)) if is_occupied else (None, None)
         )
 
         my_beds.append(
@@ -566,6 +585,8 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
                 "ward_name": r.ward_name,
                 "patient_id": r.patient_id,
                 "patient_name": patient_name,
+                "doctor_id": doctor_id,
+                "doctor_name": doctor_name,
                 "assigned_from": r.shift_date,
                 "assigned_until": r.assigned_until,
                 "shift_name": r.shift_name,

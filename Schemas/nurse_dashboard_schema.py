@@ -19,6 +19,7 @@ class NurseDashboardQueueItem(BaseModel):
     patient_phone: Optional[str] = None
     appointment_uid: Optional[str] = None
     doctor_id: int
+    doctor_name: Optional[str] = None
     token_number: int
     queue_date: date
     status: str
@@ -58,6 +59,8 @@ class NurseDashboardBedPatientItem(BaseModel):
     bed_id: int
     bed_number: str
     ward_name: str
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
     department_id: Optional[int] = None
     department_name: Optional[str] = None
     admitted_at: Optional[datetime] = None
@@ -115,6 +118,8 @@ class NurseMyDutyBedItem(BaseModel):
     ward_name: Optional[str] = None
     patient_id: Optional[int] = None
     patient_name: Optional[str] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
     assigned_from: date
     assigned_until: Optional[date] = None
     shift_name: Optional[str] = None

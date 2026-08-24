@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
     status
 )
 
@@ -26,6 +27,8 @@ from Schemas.nurse_schema import (
     NursingNoteResponse
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Services.nurse_nursing_notes_service import (
     create_note_service,
     update_note_service,
@@ -52,6 +55,7 @@ router = APIRouter(
 def create_note(
 
     note_data: NursingNoteCreate,
+    request: Request,
 
     db: Session = Depends(get_db),
 
@@ -66,11 +70,19 @@ def create_note(
     )
 ):
 
-    return create_note_service(
+    result = create_note_service(
         db=db,
         note_data=note_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_notes_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -84,6 +96,7 @@ def create_note(
 def update_note(
 
     note_data: NursingNoteUpdate,
+    request: Request,
 
     note_id: int = Path(
         ...,
@@ -104,12 +117,21 @@ def update_note(
     )
 ):
 
-    return update_note_service(
+    result = update_note_service(
         db=db,
         note_id=note_id,
         note_data=note_data,
         nurse_id=current_user.id,
     )
+    nurse_audit.log_notes_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        note_id=note_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -274,6 +296,8 @@ def get_all_notes(
 )
 def get_note(
 
+    request: Request,
+
     note_id: int = Path(
         ...,
         ge=1,
@@ -293,7 +317,15 @@ def get_note(
     )
 ):
 
-    return get_note_by_id_service(
+    result = get_note_by_id_service(
         db=db,
         note_id=note_id
     )
+    nurse_audit.log_notes_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        note_id=note_id,
+    )
+    return result

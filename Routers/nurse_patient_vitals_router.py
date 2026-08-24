@@ -6,6 +6,7 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
     status
 )
 
@@ -26,6 +27,8 @@ from Schemas.nurse_schema import (
     VitalResponse
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Services.nurse_patient_vitals_service import (
     create_vital_service,
     update_vital_service,
@@ -52,6 +55,7 @@ router = APIRouter(
 def create_vital(
 
     vital_data: VitalCreate,
+    request: Request,
 
     db: Session = Depends(get_db),
 
@@ -66,11 +70,19 @@ def create_vital(
     )
 ):
 
-    return create_vital_service(
+    result = create_vital_service(
         db=db,
         vital_data=vital_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_vitals_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -84,6 +96,7 @@ def create_vital(
 def update_vital(
 
     vital_data: VitalUpdate,
+    request: Request,
 
     vital_id: int = Path(
         ...,
@@ -104,12 +117,21 @@ def update_vital(
     )
 ):
 
-    return update_vital_service(
+    result = update_vital_service(
         db=db,
         vital_id=vital_id,
         vital_data=vital_data,
         nurse_id=current_user.id,
     )
+    nurse_audit.log_vitals_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        vital_id=vital_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -274,6 +296,8 @@ def get_all_vitals(
 )
 def get_vital(
 
+    request: Request,
+
     vital_id: int = Path(
         ...,
         ge=1,
@@ -293,7 +317,15 @@ def get_vital(
     )
 ):
 
-    return get_vital_by_id_service(
+    result = get_vital_by_id_service(
         db=db,
         vital_id=vital_id
     )
+    nurse_audit.log_vitals_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        vital_id=vital_id,
+    )
+    return result

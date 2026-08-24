@@ -5,6 +5,7 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
     status
 )
 
@@ -19,6 +20,8 @@ from dependencies import (
 
 from Models.user import User
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverCreate,
     ShiftHandoverPatientsBulkCreate,
@@ -50,6 +53,7 @@ router = APIRouter(
 def create_handover(
 
     handover_data: ShiftHandoverCreate,
+    request: Request,
 
     current_user: User = Depends(
         get_current_user
@@ -64,11 +68,19 @@ def create_handover(
     db: Session = Depends(get_db)
 ):
 
-    return create_handover_service(
+    result = create_handover_service(
         db=db,
         handover_data=handover_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_handover_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -82,6 +94,7 @@ def create_handover(
 def add_handover_patients(
 
     patient_data: ShiftHandoverPatientsBulkCreate,
+    request: Request,
 
     handover_id: int = Path(
         ...,
@@ -102,12 +115,21 @@ def add_handover_patients(
     db: Session = Depends(get_db)
 ):
 
-    return bulk_add_handover_patients_service(
+    result = bulk_add_handover_patients_service(
         db=db,
         handover_id=handover_id,
         patient_data=patient_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_handover_patients_add(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        handover_id=handover_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -116,6 +138,8 @@ def add_handover_patients(
 
 @router.delete("/patients/{patient_summary_id}")
 def delete_handover_patient(
+
+    request: Request,
 
     patient_summary_id: int = Path(
         ...,
@@ -136,11 +160,19 @@ def delete_handover_patient(
     db: Session = Depends(get_db)
 ):
 
-    return delete_handover_patient_service(
+    result = delete_handover_patient_service(
         db=db,
         patient_summary_id=patient_summary_id,
         nurse_id=current_user.id
     )
+    nurse_audit.log_handover_patient_delete(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        patient_summary_id=patient_summary_id,
+    )
+    return result
 
 
 # ==========================================================
@@ -149,6 +181,8 @@ def delete_handover_patient(
 
 @router.put("/{handover_id}/submit")
 def submit_handover(
+
+    request: Request,
 
     handover_id: int = Path(
         ...,
@@ -169,11 +203,20 @@ def submit_handover(
     db: Session = Depends(get_db)
 ):
 
-    return submit_handover_service(
+    result = submit_handover_service(
         db=db,
         handover_id=handover_id,
         nurse_id=current_user.id
     )
+    nurse_audit.log_handover_submit(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        handover_id=handover_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -285,6 +328,8 @@ def get_handovers(
 @router.get("/{handover_id}")
 def get_handover_detail(
 
+    request: Request,
+
     handover_id: int = Path(
         ...,
         ge=1,
@@ -304,7 +349,15 @@ def get_handover_detail(
     db: Session = Depends(get_db)
 ):
 
-    return get_handover_detail_service(
+    result = get_handover_detail_service(
         db=db,
         handover_id=handover_id
     )
+    nurse_audit.log_handover_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        handover_id=handover_id,
+    )
+    return result

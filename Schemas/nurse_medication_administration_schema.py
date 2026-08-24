@@ -87,6 +87,8 @@ class PatientMedicationResponse(BaseModel):
 
     bed_number: Optional[str] = None
     ward_name: Optional[str] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
 
     medications: List[PatientMedicationItem]
 

@@ -78,6 +78,7 @@ from Routers.nurse_shift_bed_allocation_router import (
 from Routers.nurse_workforce_router import router as nurse_workforce_router
 from Routers.nurse_doctor_visit_router import router as nurse_doctor_visit_router
 from Routers.nurse_other_visit_router import router as nurse_other_visit_router
+from Routers.nurse_lab_report_router import router as nurse_lab_report_router
 from Routers.doctor_patient_visit_router import router as doctor_patient_visit_router
 from Routers.opd import router as opd_router
 from Routers.ipd import router as ipd_router
@@ -155,6 +156,7 @@ app.include_router(nurse_bed_allocation_router)
 app.include_router(nurse_workforce_router)
 app.include_router(nurse_doctor_visit_router)
 app.include_router(nurse_other_visit_router)
+app.include_router(nurse_lab_report_router)
 app.include_router(doctor_patient_visit_router)
 app.include_router(pharmacy_router)
 app.include_router(pharmacist_profile_router)
