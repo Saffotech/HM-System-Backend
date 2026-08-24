@@ -56,7 +56,12 @@ def register(
 
 
 @router.post("/login")
-def login(data: UserLogin, db: Session = Depends(get_db)):
+@router.post("/login")
+def login(
+    request: Request,
+    data: UserLogin,
+    db: Session = Depends(get_db),
+):
     email = (data.email or "").strip().lower()
     user = (
         db.query(User)
