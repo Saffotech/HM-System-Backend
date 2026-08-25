@@ -50,8 +50,9 @@ class DoctorIpdAdmissionListResponse(PaginatedResponse[DoctorIpdAdmissionItem]):
 class DoctorIpdLabOrderPayload(BaseModel):
     """Lab line on IPD consult save. Parent is the path admission_id."""
 
-    test_name: str = Field(..., min_length=1, max_length=255)
-    category: str = Field(..., min_length=1, max_length=100)
+    test_name: Optional[str] = Field(None, min_length=1, max_length=255)
+    lab_test_id: Optional[int] = Field(default=None, gt=0)
+    category: Optional[str] = Field(None, min_length=1, max_length=100)
     department_id: Optional[int] = None
     priority: str = Field(default="Normal", max_length=50)
     clinical_notes: Optional[str] = Field(default=None, max_length=500)

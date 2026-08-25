@@ -15,6 +15,7 @@ from Schemas.doctor_lab_test_schema import (
     LabTestResponse,
 )
 from Services import doctor_helpers as h
+from Services.lab_test_catalog_service import resolve_catalog_test
 from Services.lab_department_helpers import resolve_lab_department_id
 from Services.lab_notification_helpers import (
     notify_lab_techs_order_cancelled,
@@ -76,6 +77,8 @@ def _serialize_lab_test(
         appointment_id=order.appointment_id,
         admission_id=getattr(order, "admission_id", None),
         department_id=order.department_id,
+        lab_test_id=order.lab_test_id,
+        price=order.price,
         test_name=order.test_name,
         category=order.category,
         priority=order.priority,
@@ -101,6 +104,8 @@ def _serialize_lab_test_response(
         ),
         doctor_id=order.doctor_id,
         department_id=order.department_id,
+        lab_test_id=order.lab_test_id,
+        price=order.price,
         test_name=order.test_name,
         category=order.category,
         priority=order.priority,
@@ -167,11 +172,16 @@ def create_lab_test_service(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
+    test_match = (
+        LabTestOrder.lab_test_id == payload.lab_test_id
+        if payload.lab_test_id is not None
+        else LabTestOrder.test_name == payload.test_name
+    )
     existing_test = (
         db.query(LabTestOrder)
         .filter(
             *duplicate_filter,
-            LabTestOrder.test_name == payload.test_name,
+            test_match,
             LabTestOrder.status != LabTestStatus.CANCELLED,
         )
         .first()
@@ -182,12 +192,27 @@ def create_lab_test_service(
             detail=duplicate_detail,
         )
 
-    department_id = resolve_lab_department_id(
-        db,
-        department_id=payload.department_id,
-        category=payload.category,
-        test_name=payload.test_name,
-    )
+    if payload.lab_test_id is not None:
+        catalog_test = resolve_catalog_test(
+            db,
+            lab_test_id=payload.lab_test_id,
+            test_name=payload.test_name,
+            department_id=payload.department_id,
+        )
+        department_id = catalog_test.department_id
+    else:
+        department_id = resolve_lab_department_id(
+            db,
+            department_id=payload.department_id,
+            category=payload.category,
+            test_name=payload.test_name,
+        )
+        catalog_test = resolve_catalog_test(
+            db,
+            lab_test_id=None,
+            test_name=payload.test_name,
+            department_id=department_id,
+        )
 
     lab_test = LabTestOrder(
         appointment_id=appointment.id if appointment else None,
@@ -196,9 +221,14 @@ def create_lab_test_service(
         patient_name=h.display_name(patient.first_name, patient.last_name),
         patient_uhid=patient.patient_uid,
         doctor_id=doctor_id,
-        department_id=department_id,
-        test_name=payload.test_name,
-        category=payload.category,
+        department_id=catalog_test.department_id,
+        lab_test_id=catalog_test.id,
+        test_name=catalog_test.test_name,
+        price=catalog_test.price,
+        category=payload.category or (
+            "Radiology" if (catalog_test.department.code or "").upper() == "RAD"
+            else "Laboratory"
+        ),
         priority=payload.priority,
         clinical_notes=payload.clinical_notes,
         status=LabTestStatus.ORDERED,
@@ -425,6 +455,8 @@ def get_doctor_lab_report_by_test_service(
             ),
         ),
         "test_name": order.test_name,
+        "lab_test_id": order.lab_test_id,
+        "price": order.price,
         "category": order.category,
         "department_id": order.department_id,
         "priority": order.priority,

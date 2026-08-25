@@ -10,6 +10,7 @@ import sys
 
 from database import SessionLocal
 from Models.department import Department
+from Models.lab_test import LabTest
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.opd_settings import OPD_SETTINGS_ROW_ID, OpdSettings
@@ -45,6 +46,10 @@ PERMISSIONS_LIST = [
     "lab:create",
     "lab:update",
     "lab:upload_report",
+    "lab_catalog:view",
+    "lab_catalog:create",
+    "lab_catalog:update",
+    "lab_catalog:activate",
     "prescriptions:create",
     "prescriptions:view",
     "prescriptions:update",
@@ -343,6 +348,28 @@ DEPARTMENTS = [
     {"name": "Radiology", "code": "RAD"},
 ]
 
+LAB_TEST_CATALOG = [
+    {"test_name": "Blood Test", "department_code": "LAB", "price": 0},
+    {"test_name": "Urine Test", "department_code": "LAB", "price": 0},
+    {"test_name": "Stool Test", "department_code": "LAB", "price": 0},
+    {"test_name": "Biochemistry", "department_code": "LAB", "price": 0},
+    {"test_name": "Hematology", "department_code": "LAB", "price": 0},
+    {"test_name": "Microbiology", "department_code": "LAB", "price": 0},
+    {"test_name": "Histopathology", "department_code": "LAB", "price": 0},
+    {"test_name": "CBC", "department_code": "LAB", "price": 0},
+    {"test_name": "Lipid Profile", "department_code": "LAB", "price": 0},
+    {"test_name": "Blood Sugar", "department_code": "LAB", "price": 0},
+    {"test_name": "Urine Routine", "department_code": "LAB", "price": 0},
+    {"test_name": "X-Ray", "department_code": "RAD", "price": 0},
+    {"test_name": "Ultrasound (USG)", "department_code": "RAD", "price": 0},
+    {"test_name": "CT Scan", "department_code": "RAD", "price": 0},
+    {"test_name": "MRI", "department_code": "RAD", "price": 0},
+    {"test_name": "Mammography", "department_code": "RAD", "price": 0},
+    {"test_name": "X-Ray Chest", "department_code": "RAD", "price": 0},
+    {"test_name": "MRI Brain", "department_code": "RAD", "price": 0},
+    {"test_name": "CT Scan Abdomen", "department_code": "RAD", "price": 0},
+]
+
 
 
 def upsert_permissions(db) -> dict[str, int]:
@@ -458,6 +485,34 @@ def upsert_departments(db) -> dict[str, int]:
     db.commit()
     print(f"Departments synced: {len(dept_ids)} total ({added} new)")
     return dept_ids
+
+
+def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
+    added = 0
+    for item in LAB_TEST_CATALOG:
+        department_id = department_ids[item["department_code"]]
+        test = (
+            db.query(LabTest)
+            .filter(
+                LabTest.test_name == item["test_name"],
+                LabTest.department_id == department_id,
+            )
+            .first()
+        )
+        if test:
+            continue
+        db.add(
+            LabTest(
+                test_name=item["test_name"],
+                department_id=department_id,
+                price=item["price"],
+                active=True,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(f"Lab test catalog synced: {added} new ({len(LAB_TEST_CATALOG)} defaults)")
 
 
 def ensure_hospital_settings(db) -> None:
@@ -915,7 +970,8 @@ def main() -> None:
 
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
-        upsert_departments(db)
+        department_ids = upsert_departments(db)
+        upsert_lab_tests(db, department_ids)
         ensure_hospital_settings(db)
         ensure_opd_settings(db)
         ensure_nurse_profiles(db, role_ids)

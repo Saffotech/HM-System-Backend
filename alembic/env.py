@@ -22,6 +22,7 @@ from Models.ipd import (
 )
 from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder
+from Models.lab_test import LabTest
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
 from Models.doctor_profile import DoctorProfile  # noqa: F401

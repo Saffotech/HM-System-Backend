@@ -28,7 +28,9 @@ def _serialize_lab_order(order: LabTestOrder) -> dict:
     return {
         "id": order.id,
         "appointment_id": order.appointment_id,
+        "lab_test_id": order.lab_test_id,
         "test_name": order.test_name,
+        "price": order.price,
         "category": order.category,
         "priority": order.priority,
         "status": status_value(order.status),
