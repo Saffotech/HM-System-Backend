@@ -38,6 +38,10 @@ class NurseDoctorVisitResponse(BaseModel):
     visited_at: datetime
     notes: Optional[str] = None
     visit_number: Optional[int] = None
+    day_visit_count: Optional[int] = None
+    # Populated when patient is IPD-admitted and a billable visit was synced
+    admission_id: Optional[int] = None
+    charge: Optional[float] = None
     recorded_by: int
     recorded_by_name: str
     created_at: datetime

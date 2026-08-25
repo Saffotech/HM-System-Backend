@@ -3,6 +3,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -11,7 +12,8 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.orm import relationship as orm_relationship
 
 from database import Base
 
@@ -40,6 +42,11 @@ class IpdAdmission(Base):
     # admitted | discharged | cancelled
     status = Column(String, nullable=False, default="admitted", index=True)
 
+    # self | insurance_cashless | insurance_copay
+    payment_type = Column(String, nullable=False, default="self", index=True)
+    # cash | card | upi when payment_type == self
+    self_pay_method = Column(String, nullable=True)
+
     admitted_at = Column(DateTime(timezone=True), nullable=False, default=_now)
     discharged_at = Column(DateTime(timezone=True), nullable=True)
 
@@ -49,8 +56,90 @@ class IpdAdmission(Base):
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
-    visits = relationship("IpdDoctorVisit", back_populates="admission", cascade="all, delete-orphan")
-    bills = relationship("IpdBill", back_populates="admission", cascade="all, delete-orphan")
+    visits = orm_relationship(
+        "IpdDoctorVisit", back_populates="admission", cascade="all, delete-orphan"
+    )
+    bills = orm_relationship(
+        "IpdBill", back_populates="admission", cascade="all, delete-orphan"
+    )
+    insurance_claim = orm_relationship(
+        "IpdInsuranceClaim",
+        back_populates="admission",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    billing = orm_relationship(
+        "IpdAdmissionBilling",
+        back_populates="admission",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+
+class IpdAdmissionBilling(Base):
+    """Persisted hospital charge heads + manual daily lines for an admission."""
+
+    __tablename__ = "ipd_admission_billing"
+
+    id = Column(Integer, primary_key=True, index=True)
+    admission_id = Column(
+        Integer,
+        ForeignKey("ipd_admissions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    charge_heads = Column(JSONB, nullable=False, server_default="[]")
+    # Manual (and optionally edited) daily rows; auto bed/visit/pharmacy merged on read
+    daily_charges = Column(JSONB, nullable=False, server_default="[]")
+    updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+    admission = orm_relationship("IpdAdmission", back_populates="billing")
+
+
+class IpdInsuranceClaim(Base):
+    """Cashless / copay insurance profile bound to one IPD admission."""
+
+    __tablename__ = "ipd_insurance_claims"
+
+    id = Column(Integer, primary_key=True, index=True)
+    admission_id = Column(
+        Integer,
+        ForeignKey("ipd_admissions.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
+
+    # cashless | pay_and_claim
+    claim_type = Column(String, nullable=False, index=True)
+    insurer = Column(String, nullable=False)
+    policy_no = Column(String, nullable=False, index=True)
+    policy_holder = Column(String, nullable=False)
+    relationship = Column(String, nullable=False)
+    member_id = Column(String, nullable=True)
+
+    claimed_amount = Column(Float, nullable=False, default=0.0)
+    estimate_amount = Column(Float, nullable=True)
+    approved_amount = Column(Float, nullable=False, default=0.0)
+    available_si = Column(Float, nullable=True)
+
+    # Active | Exhausted | Expired | Cancelled
+    policy_status = Column(String, nullable=False, default="Active")
+    # pending | under_review | approved | rejected | settled
+    claim_status = Column(String, nullable=False, default="pending", index=True)
+
+    insurance_payments = Column(JSONB, nullable=False, server_default="[]")
+    patient_payments = Column(JSONB, nullable=False, server_default="[]")
+
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+    updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
+
+    admission = orm_relationship("IpdAdmission", back_populates="insurance_claim")
 
 
 class IpdDoctorVisit(Base):
@@ -65,9 +154,18 @@ class IpdDoctorVisit(Base):
     charge = Column(Float, nullable=False, default=0.0)
     notes = Column(Text, nullable=True)
     recorded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    # Link to nurse operational log (Option C); unique when set
+    nurse_visit_id = Column(
+        Integer,
+        ForeignKey("nurse_doctor_visits.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
+    is_voided = Column(Boolean, nullable=False, default=False, index=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
 
-    admission = relationship("IpdAdmission", back_populates="visits")
+    admission = orm_relationship("IpdAdmission", back_populates="visits")
 
 
 class IpdBill(Base):
@@ -99,9 +197,9 @@ class IpdBill(Base):
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
-    admission = relationship("IpdAdmission", back_populates="bills")
-    items = relationship("IpdBillItem", back_populates="bill", cascade="all, delete-orphan")
-    payments = relationship(
+    admission = orm_relationship("IpdAdmission", back_populates="bills")
+    items = orm_relationship("IpdBillItem", back_populates="bill", cascade="all, delete-orphan")
+    payments = orm_relationship(
         "IpdPaymentTransaction", back_populates="bill", cascade="all, delete-orphan"
     )
 
@@ -120,7 +218,7 @@ class IpdBillItem(Base):
     # bed | visit | misc
     item_type = Column(String, nullable=False, default="misc")
 
-    bill = relationship("IpdBill", back_populates="items")
+    bill = orm_relationship("IpdBill", back_populates="items")
 
 
 class IpdPaymentTransaction(Base):
@@ -136,4 +234,4 @@ class IpdPaymentTransaction(Base):
     paid_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     recorded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
-    bill = relationship("IpdBill", back_populates="payments")
+    bill = orm_relationship("IpdBill", back_populates="payments")

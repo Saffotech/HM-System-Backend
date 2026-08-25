@@ -1,4 +1,5 @@
 from datetime import date, datetime, time
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
 
 from fastapi import HTTPException
@@ -24,6 +25,8 @@ PRESCRIPTION_STATUS_PENDING = "pending"
 PRESCRIPTION_STATUS_PARTIALLY = "partially_dispensed"
 PRESCRIPTION_STATUS_DISPENSED = "dispensed"
 
+_MONEY_QUANT = Decimal("0.01")
+
 
 def _day_start(day: date) -> datetime:
     return datetime.combine(day, time.min, tzinfo=h.IST)
@@ -31,6 +34,23 @@ def _day_start(day: date) -> datetime:
 
 def _day_end(day: date) -> datetime:
     return datetime.combine(day, time.max, tzinfo=h.IST)
+
+
+def _money(value) -> Decimal:
+    """Round money to 2 decimal places (HALF_UP)."""
+    return Decimal(str(value if value is not None else 0)).quantize(
+        _MONEY_QUANT, rounding=ROUND_HALF_UP
+    )
+
+
+def _as_float(value: Decimal) -> float:
+    return float(_money(value))
+
+
+def _unit_price_from_amount(amount: Decimal, quantity: int) -> Decimal:
+    if quantity <= 0:
+        return _money(0)
+    return _money(amount / Decimal(quantity))
 
 
 def _doctor_name(doctor: Optional[User]) -> str:
@@ -52,24 +72,46 @@ def _quantity_prescribed(item: PrescriptionItem) -> int:
     return duration_to_supply_quantity(item.duration)
 
 
-def _dispensed_totals(db: Session, prescription_item_ids: list[int]) -> dict[int, int]:
+def _dispensed_aggregates(
+    db: Session, prescription_item_ids: list[int]
+) -> dict[int, dict[str, Decimal | int]]:
+    """
+    One query: qty + amount totals per prescription_item_id.
+    Returns {item_id: {"qty": int, "amount": Decimal}}.
+    """
     if not prescription_item_ids:
         return {}
     rows = (
         db.query(
             DispensingItem.prescription_item_id,
             func.coalesce(func.sum(DispensingItem.quantity_dispensed), 0),
+            func.coalesce(func.sum(DispensingItem.amount), 0),
         )
         .filter(DispensingItem.prescription_item_id.in_(prescription_item_ids))
         .group_by(DispensingItem.prescription_item_id)
         .all()
     )
-    return {int(item_id): int(total) for item_id, total in rows}
+    return {
+        int(item_id): {
+            "qty": int(qty or 0),
+            "amount": _money(amount or 0),
+        }
+        for item_id, qty, amount in rows
+    }
 
 
-def _item_out(item: PrescriptionItem, dispensed_so_far: int) -> PharmacyPrescriptionItemOut:
+def _item_out(
+    item: PrescriptionItem,
+    dispensed_qty: int,
+    amount_dispensed: Decimal = Decimal("0"),
+) -> PharmacyPrescriptionItemOut:
     prescribed = _quantity_prescribed(item)
-    remaining = max(prescribed - dispensed_so_far, 0)
+    remaining = max(prescribed - dispensed_qty, 0)
+    unit = (
+        _unit_price_from_amount(amount_dispensed, dispensed_qty)
+        if dispensed_qty > 0
+        else _money(0)
+    )
     return PharmacyPrescriptionItemOut(
         id=item.id,
         medicine_name=item.medicine_name,
@@ -78,8 +120,10 @@ def _item_out(item: PrescriptionItem, dispensed_so_far: int) -> PharmacyPrescrip
         duration=normalize_duration(item.duration),
         instructions=item.instructions,
         quantity_prescribed=prescribed,
-        quantity_dispensed=dispensed_so_far,
+        quantity_dispensed=dispensed_qty,
         quantity_remaining=remaining,
+        unit_price=_as_float(unit),
+        amount_dispensed=_as_float(amount_dispensed),
     )
 
 
@@ -184,7 +228,15 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
     patient = db.get(Patient, rx.patient_id) if rx.patient_id else None
     doctor = db.get(User, rx.doctor_id) if rx.doctor_id else None
     item_ids = [int(i.id) for i in rx.items]
-    dispensed_map = _dispensed_totals(db, item_ids)
+    aggregates = _dispensed_aggregates(db, item_ids)
+
+    items_out = []
+    total_amount = Decimal("0.00")
+    for item in rx.items:
+        agg = aggregates.get(int(item.id), {"qty": 0, "amount": Decimal("0.00")})
+        amount = _money(agg["amount"])
+        total_amount += amount
+        items_out.append(_item_out(item, int(agg["qty"]), amount))
 
     return PharmacyPrescriptionDetail(
         id=rx.id,
@@ -198,10 +250,8 @@ def get_prescription_detail(db: Session, prescription_id: int) -> PharmacyPrescr
         notes=rx.notes,
         status=rx.status or PRESCRIPTION_STATUS_PENDING,
         created_at=rx.created_at,
-        items=[
-            _item_out(item, dispensed_map.get(int(item.id), 0))
-            for item in rx.items
-        ],
+        total_amount_dispensed=_as_float(total_amount),
+        items=items_out,
     )
 
 
@@ -227,9 +277,13 @@ def dispense_prescription(
         raise HTTPException(status_code=400, detail="Prescription has no medicine items")
 
     seen_item_ids: set[int] = set()
-    dispensed_map = _dispensed_totals(db, list(rx_items.keys()))
+    aggregates = _dispensed_aggregates(db, list(rx_items.keys()))
+    dispensed_map = {item_id: int(agg["qty"]) for item_id, agg in aggregates.items()}
+
+    prepared_lines: list[dict] = []
     response_items: list[DispenseItemResponse] = []
     total_quantity = 0
+    total_amount = Decimal("0.00")
 
     for line in data.items:
         item_id = int(line.prescription_item_id)
@@ -247,6 +301,10 @@ def dispense_prescription(
                 detail=f"prescription_item_id {item_id} does not belong to this prescription",
             )
 
+        qty = int(line.quantity_dispensed)
+        amount = _money(line.amount)
+        unit_price = _unit_price_from_amount(amount, qty)
+
         prescribed = _quantity_prescribed(item)
         already = dispensed_map.get(item_id, 0)
         remaining = prescribed - already
@@ -255,7 +313,7 @@ def dispense_prescription(
                 status_code=400,
                 detail=f"Item {item_id} ({item.medicine_name}) is already fully dispensed",
             )
-        if line.quantity_dispensed > remaining:
+        if qty > remaining:
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -264,15 +322,29 @@ def dispense_prescription(
                 ),
             )
 
-        total_quantity += line.quantity_dispensed
-        dispensed_map[item_id] = already + line.quantity_dispensed
+        total_quantity += qty
+        total_amount += amount
+        next_dispensed = already + qty
+        dispensed_map[item_id] = next_dispensed
+
+        prepared_lines.append(
+            {
+                "item": item,
+                "item_id": item_id,
+                "qty": qty,
+                "amount": amount,
+                "unit_price": unit_price,
+            }
+        )
         response_items.append(
             DispenseItemResponse(
                 prescription_item_id=item_id,
                 medicine_name=item.medicine_name,
-                quantity_dispensed=line.quantity_dispensed,
+                quantity_dispensed=qty,
                 quantity_prescribed=prescribed,
-                quantity_remaining=max(prescribed - dispensed_map[item_id], 0),
+                quantity_remaining=max(prescribed - next_dispensed, 0),
+                unit_price=_as_float(unit_price),
+                amount=_as_float(amount),
             )
         )
 
@@ -281,6 +353,7 @@ def dispense_prescription(
         prescription_id=rx.id,
         dispensed_by=pharmacist_id,
         quantity_dispensed=total_quantity,
+        total_amount=total_amount,
         remarks=data.remarks,
         batch_number=data.batch_number,
         status=new_status,
@@ -288,17 +361,19 @@ def dispense_prescription(
     db.add(dispensing)
     db.flush()
 
-    for line in data.items:
-        item_id = int(line.prescription_item_id)
-        item = rx_items[item_id]
-        db.add(
+    db.add_all(
+        [
             DispensingItem(
                 dispensing_id=dispensing.id,
-                prescription_item_id=item_id,
-                medicine_name=item.medicine_name,
-                quantity_dispensed=line.quantity_dispensed,
+                prescription_item_id=row["item_id"],
+                medicine_name=row["item"].medicine_name,
+                quantity_dispensed=row["qty"],
+                unit_price=row["unit_price"],
+                amount=row["amount"],
             )
-        )
+            for row in prepared_lines
+        ]
+    )
 
     rx.status = new_status
     db.commit()
@@ -309,6 +384,7 @@ def dispense_prescription(
         "dispensing_id": dispensing.id,
         "prescription_id": rx.id,
         "status": rx.status,
+        "total_amount": _as_float(total_amount),
         "items": response_items,
     }
 
@@ -319,6 +395,7 @@ def get_dispense_history(
     limit: int = 20,
     date_from: Optional[date] = None,
     date_to: Optional[date] = None,
+    prescription_id: Optional[int] = None,
 ) -> dict:
     q = (
         db.query(DispensingItem, Dispensing, PrescriptionItem)
@@ -326,6 +403,8 @@ def get_dispense_history(
         .join(PrescriptionItem, PrescriptionItem.id == DispensingItem.prescription_item_id)
         .order_by(Dispensing.dispensed_at.desc(), DispensingItem.id.desc())
     )
+    if prescription_id is not None:
+        q = q.filter(Dispensing.prescription_id == prescription_id)
     if date_from is not None:
         q = q.filter(Dispensing.dispensed_at >= _day_start(date_from))
     if date_to is not None:
@@ -375,6 +454,8 @@ def get_dispense_history(
             if d.dispensed_by in pharmacists
             else "",
             quantity_dispensed=line.quantity_dispensed,
+            unit_price=_as_float(getattr(line, "unit_price", 0) or 0),
+            amount=_as_float(getattr(line, "amount", 0) or 0),
             status=d.status,
             dispensed_at=d.dispensed_at,
         )

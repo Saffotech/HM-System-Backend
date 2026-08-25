@@ -22,6 +22,30 @@ class IpdPatientRegisterResponse(BaseModel):
     patient: PatientOut
 
 
+class IpdAdmitInsuranceIn(BaseModel):
+    """Insurance profile captured at admit (cashless / copay)."""
+
+    claim_type: str = Field(..., description="cashless | pay_and_claim")
+    insurer: str = Field(..., min_length=1)
+    policy_no: str = Field(..., min_length=1)
+    policy_holder: str = Field(..., min_length=1)
+    relationship: str = Field(..., min_length=1)
+    member_id: Optional[str] = None
+    claimed_amount: float = Field(0, ge=0)
+    estimate_amount: Optional[float] = Field(None, ge=0)
+
+    @model_validator(mode="after")
+    def normalize_claim_type(self):
+        key = (self.claim_type or "").strip().lower().replace("-", "_")
+        if key in {"cashless", "insurance_cashless"}:
+            self.claim_type = "cashless"
+        elif key in {"pay_and_claim", "copay", "co_pay", "insurance_copay"}:
+            self.claim_type = "pay_and_claim"
+        else:
+            raise ValueError("claim_type must be cashless or pay_and_claim")
+        return self
+
+
 class IpdAdmitRequest(BaseModel):
     patient_id: int
     bed_id: int
@@ -30,6 +54,33 @@ class IpdAdmitRequest(BaseModel):
     admission_date: Optional[str] = None  # ISO datetime; default now
     diagnosis: Optional[str] = None
     notes: Optional[str] = None
+    # self | insurance (default self for backwards compatibility)
+    payment_mode: Optional[str] = "self"
+    self_pay_method: Optional[str] = None  # cash | card | upi
+    insurance: Optional[IpdAdmitInsuranceIn] = None
+
+    @model_validator(mode="after")
+    def validate_payment(self):
+        mode = (self.payment_mode or "self").strip().lower()
+        if mode in {"insurance", "cashless", "copay"}:
+            mode = "insurance"
+        elif mode in {"self", "self_pay", "self-pay"}:
+            mode = "self"
+        else:
+            raise ValueError("payment_mode must be self or insurance")
+        self.payment_mode = mode
+
+        if mode == "insurance":
+            if not self.insurance:
+                raise ValueError("insurance details are required when payment_mode is insurance")
+            self.self_pay_method = None
+        else:
+            self.insurance = None
+            method = (self.self_pay_method or "").strip().lower()
+            if method and method not in {"cash", "card", "upi"}:
+                raise ValueError("self_pay_method must be cash, card, or upi")
+            self.self_pay_method = method or None
+        return self
 
 
 class IpdAdmissionUpdate(BaseModel):
@@ -104,10 +155,43 @@ class IpdAdmissionOut(BaseModel):
     diagnosis: Optional[str] = None
     notes: Optional[str] = None
     status: str
+    payment_type: str = "self"
+    self_pay_method: Optional[str] = None
+    claim_id: Optional[int] = None
+    coverage: Optional[str] = None
+    insurer: Optional[str] = None
+    policy_no: Optional[str] = None
     admitted_at: Optional[str] = None
     discharged_at: Optional[str] = None
     length_of_stay_days: Optional[int] = None
 
+
+class IpdInsuranceClaimUpdate(BaseModel):
+    insurer: Optional[str] = Field(None, min_length=1)
+    policy_no: Optional[str] = Field(None, min_length=1, alias="policyNo")
+    policy_holder: Optional[str] = Field(None, min_length=1, alias="policyHolder")
+    relationship: Optional[str] = None
+    member_id: Optional[str] = Field(None, alias="memberId")
+    claimed_amount: Optional[float] = Field(None, ge=0, alias="claimedAmount")
+    # FE also sends claimed
+    claimed: Optional[float] = Field(None, ge=0)
+    estimate_amount: Optional[float] = Field(None, ge=0, alias="estimateAmount")
+    policy_status: Optional[str] = Field(None, alias="policyStatus")
+    claim_status: Optional[str] = Field(None, alias="claimStatus")
+    approved_amount: Optional[float] = Field(None, ge=0, alias="approvedAmount")
+    available_si: Optional[float] = Field(None, ge=0, alias="availableSi")
+
+    model_config = {"populate_by_name": True}
+
+
+class IpdInsurancePaymentIn(BaseModel):
+    amount: float = Field(..., gt=0)
+    paid_at: Optional[str] = Field(None, alias="paidAt")
+    reference: Optional[str] = None
+    notes: Optional[str] = None
+    mode: Optional[str] = None
+
+    model_config = {"populate_by_name": True}
 
 class IpdDoctorVisitOut(BaseModel):
     id: int
