@@ -1,7 +1,7 @@
 """Create the lab test catalog.
 
-Revision ID: b1c2d3e4f5b6
-Revises: a0b1c2d3e4f5
+Revision ID: labcat20260825
+Revises: k4l5m6n7o8p9
 Create Date: 2026-08-25
 """
 from typing import Sequence, Union
@@ -9,13 +9,17 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "b1c2d3e4f5b6"
-down_revision: Union[str, Sequence[str], None] = "a0b1c2d3e4f5"
+revision: str = "labcat20260825"
+down_revision: Union[str, Sequence[str], None] = "k4l5m6n7o8p9"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    bind = op.get_bind()
+    if "lab_tests" in sa.inspect(bind).get_table_names():
+        return
+
     op.create_table(
         "lab_tests",
         sa.Column("id", sa.Integer(), nullable=False),

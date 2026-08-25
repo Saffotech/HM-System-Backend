@@ -1,7 +1,7 @@
 """Add catalog linkage and price snapshots to lab orders.
 
-Revision ID: c1d2e3f4a5b6
-Revises: b1c2d3e4f5b6
+Revision ID: laborder20260825
+Revises: labcat20260825
 Create Date: 2026-08-25
 """
 from typing import Sequence, Union
@@ -9,8 +9,8 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-revision: str = "c1d2e3f4a5b6"
-down_revision: Union[str, Sequence[str], None] = "b1c2d3e4f5b6"
+revision: str = "laborder20260825"
+down_revision: Union[str, Sequence[str], None] = "labcat20260825"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
