@@ -352,26 +352,28 @@ DEPARTMENTS = [
     {"name": "Radiology", "code": "RAD"},
 ]
 
+# Names/departments only — prices are owned by Admin/Super Admin via PATCH /lab-catalog/{id}.
+# Seed must never overwrite lab_tests.price on existing rows.
 LAB_TEST_CATALOG = [
-    {"test_name": "Blood Test", "department_code": "LAB", "price": 500},
-    {"test_name": "Urine Test", "department_code": "LAB", "price": 150},
-    {"test_name": "Stool Test", "department_code": "LAB", "price": 150},
-    {"test_name": "Biochemistry", "department_code": "LAB", "price": 400},
-    {"test_name": "Hematology", "department_code": "LAB", "price": 350},
-    {"test_name": "Microbiology", "department_code": "LAB", "price": 450},
-    {"test_name": "Histopathology", "department_code": "LAB", "price": 800},
-    {"test_name": "CBC", "department_code": "LAB", "price": 300},
-    {"test_name": "Lipid Profile", "department_code": "LAB", "price": 500},
-    {"test_name": "Blood Sugar", "department_code": "LAB", "price": 120},
-    {"test_name": "Urine Routine", "department_code": "LAB", "price": 150},
-    {"test_name": "X-Ray", "department_code": "RAD", "price": 800},
-    {"test_name": "Ultrasound (USG)", "department_code": "RAD", "price": 1200},
-    {"test_name": "CT Scan", "department_code": "RAD", "price": 3500},
-    {"test_name": "MRI", "department_code": "RAD", "price": 5000},
-    {"test_name": "Mammography", "department_code": "RAD", "price": 2000},
-    {"test_name": "X-Ray Chest", "department_code": "RAD", "price": 800},
-    {"test_name": "MRI Brain", "department_code": "RAD", "price": 5500},
-    {"test_name": "CT Scan Abdomen", "department_code": "RAD", "price": 4000},
+    {"test_name": "Blood Test", "department_code": "LAB"},
+    {"test_name": "Urine Test", "department_code": "LAB"},
+    {"test_name": "Stool Test", "department_code": "LAB"},
+    {"test_name": "Biochemistry", "department_code": "LAB"},
+    {"test_name": "Hematology", "department_code": "LAB"},
+    {"test_name": "Microbiology", "department_code": "LAB"},
+    {"test_name": "Histopathology", "department_code": "LAB"},
+    {"test_name": "CBC", "department_code": "LAB"},
+    {"test_name": "Lipid Profile", "department_code": "LAB"},
+    {"test_name": "Blood Sugar", "department_code": "LAB"},
+    {"test_name": "Urine Routine", "department_code": "LAB"},
+    {"test_name": "X-Ray", "department_code": "RAD"},
+    {"test_name": "Ultrasound (USG)", "department_code": "RAD"},
+    {"test_name": "CT Scan", "department_code": "RAD"},
+    {"test_name": "MRI", "department_code": "RAD"},
+    {"test_name": "Mammography", "department_code": "RAD"},
+    {"test_name": "X-Ray Chest", "department_code": "RAD"},
+    {"test_name": "MRI Brain", "department_code": "RAD"},
+    {"test_name": "CT Scan Abdomen", "department_code": "RAD"},
 ]
 
 
@@ -492,11 +494,11 @@ def upsert_departments(db) -> dict[str, int]:
 
 
 def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
+    """Create missing catalog tests only. Never overwrite Admin-managed prices."""
     added = 0
-    updated = 0
+    reactivated = 0
     for item in LAB_TEST_CATALOG:
         department_id = department_ids[item["department_code"]]
-        price = Decimal(str(item["price"]))
         test = (
             db.query(LabTest)
             .filter(
@@ -506,31 +508,25 @@ def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
             .first()
         )
         if test:
-            changed = False
-            current_price = Decimal(str(test.price if test.price is not None else 0))
-            if current_price != price:
-                test.price = price
-                changed = True
+            # Existing row: keep test.price untouched (Admin / Super Admin owns it).
             if not test.active:
                 test.active = True
-                changed = True
-            if changed:
-                updated += 1
+                reactivated += 1
             continue
         db.add(
             LabTest(
                 test_name=item["test_name"],
                 department_id=department_id,
-                price=price,
+                price=Decimal("0.00"),
                 active=True,
             )
         )
         added += 1
-    if added or updated:
+    if added or reactivated:
         db.commit()
     print(
-        f"Lab test catalog synced: {added} new, {updated} updated "
-        f"({len(LAB_TEST_CATALOG)} defaults)"
+        f"Lab test catalog synced: {added} new, {reactivated} reactivated "
+        f"({len(LAB_TEST_CATALOG)} defaults; prices never overwritten)"
     )
 
 
