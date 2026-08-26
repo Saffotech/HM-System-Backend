@@ -6,6 +6,7 @@ from fastapi import (
     Query,
     Path,
     Request,
+    Response,
     status
 )
 from sqlalchemy.orm import Session
@@ -34,6 +35,7 @@ from Services.nurse_medication_administration_service import (
     get_patient_medication_history_service,
     get_medication_history_service
 )
+from Utils.pagination import set_pagination_headers
 
 router = APIRouter(
     prefix="/nurse/medications",
@@ -47,6 +49,8 @@ router = APIRouter(
 
 @router.get("/patients")
 def get_medication_patients(
+
+    response: Response,
 
     patient_id: int | None = Query(
         None,
@@ -88,7 +92,7 @@ def get_medication_patients(
     )
 ):
 
-    return get_medication_patients_service(
+    result = get_medication_patients_service(
         db=db,
         patient_id=patient_id,
         patient_name=patient_name,
@@ -99,6 +103,13 @@ def get_medication_patients(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -224,6 +235,8 @@ def update_medication_administration(
 @router.get("/history")
 def get_medication_history(
 
+    response: Response,
+
     patient_id: int | None = Query(
         None,
         ge=1
@@ -265,7 +278,7 @@ def get_medication_history(
     )
 ):
 
-    return get_medication_history_service(
+    result = get_medication_history_service(
         db=db,
         patient_id=patient_id,
         patient_name=patient_name,
@@ -277,6 +290,13 @@ def get_medication_history(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -286,10 +306,23 @@ def get_medication_history(
 @router.get("/history/{patient_id}")
 def get_patient_medication_history(
 
+    response: Response,
+
     patient_id: int = Path(
         ...,
         ge=1,
         description="Patient ID"
+    ),
+
+    page: int = Query(
+        1,
+        ge=1
+    ),
+
+    page_size: int = Query(
+        20,
+        ge=1,
+        le=100
     ),
 
     db: Session = Depends(get_db),
@@ -305,7 +338,16 @@ def get_patient_medication_history(
     )
 ):
 
-    return get_patient_medication_history_service(
+    result = get_patient_medication_history_service(
         db=db,
-        patient_id=patient_id
+        patient_id=patient_id,
+        page=page,
+        page_size=page_size,
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]

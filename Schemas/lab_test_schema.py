@@ -36,3 +36,5 @@ class LabTestResponse(BaseModel):
 class LabTestListResponse(BaseModel):
     total: int
     tests: List[LabTestResponse]
+    page: Optional[int] = None
+    page_size: Optional[int] = None

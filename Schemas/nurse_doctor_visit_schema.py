@@ -82,3 +82,6 @@ class DoctorPatientVisitsResponse(BaseModel):
     visit_date: date
     visit_count: int
     visits: List[NurseDoctorVisitResponse]
+    page: Optional[int] = None
+    page_size: Optional[int] = None
+    total: Optional[int] = None

@@ -7,6 +7,7 @@ from fastapi import (
     Query,
     Path,
     Request,
+    Response,
     status
 )
 
@@ -36,6 +37,7 @@ from Services.nurse_patient_vitals_service import (
     get_all_vitals_service,
     search_vitals_service
 )
+from Utils.pagination import set_pagination_headers
 
 router = APIRouter(
     prefix="/nurse/vitals",
@@ -144,6 +146,8 @@ def update_vital(
 )
 def search_vitals(
 
+    response: Response,
+
     patient_id: int | None = Query(
         None,
         ge=1
@@ -212,7 +216,7 @@ def search_vitals(
     )
 ):
 
-    return search_vitals_service(
+    result = search_vitals_service(
         db=db,
 
         patient_id=patient_id,
@@ -234,6 +238,13 @@ def search_vitals(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -245,6 +256,8 @@ def search_vitals(
     response_model=List[VitalResponse]
 )
 def get_all_vitals(
+
+    response: Response,
 
     page: int = Query(
         1,
@@ -277,13 +290,20 @@ def get_all_vitals(
     )
 ):
 
-    return get_all_vitals_service(
+    result = get_all_vitals_service(
         db=db,
         page=page,
         page_size=page_size,
         allocated_only=allocated_only,
         nurse_id=current_user.id if allocated_only else None,
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================

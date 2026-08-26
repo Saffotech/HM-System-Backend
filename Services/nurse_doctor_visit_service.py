@@ -29,6 +29,7 @@ from Services.doctor_helpers import day_bounds
 from Services.ipd_helpers import doctor_display
 from Services.nurse_nursing_notes_service import _resolve_patient_and_appointment
 from Services.notification_service import create_notification
+from Utils.pagination import paginate_sequence
 
 IST = ZoneInfo("Asia/Kolkata")
 logger = logging.getLogger(__name__)
@@ -598,6 +599,8 @@ def get_doctor_patient_visits_service(
     patient_id: int | None = None,
     patient_uid: str | None = None,
     visit_date: date | None = None,
+    page: int | None = None,
+    page_size: int | None = None,
 ) -> DoctorPatientVisitsResponse:
     if not patient_id and not patient_uid:
         raise HTTPException(
@@ -637,11 +640,19 @@ def get_doctor_patient_visits_service(
         for visit in visits
     ]
 
-    return DoctorPatientVisitsResponse(
+    items, total, page_n, size = paginate_sequence(
+        serialized, page=page, page_size=page_size
+    )
+    payload = DoctorPatientVisitsResponse(
         patient_id=patient.id,
         patient_uid=patient.patient_uid,
         patient_name=_patient_display_name(patient),
         visit_date=on_date,
-        visit_count=len(serialized),
-        visits=serialized,
+        visit_count=total,
+        visits=items,
     )
+    if page is not None:
+        payload.page = page_n
+        payload.page_size = size
+        payload.total = total
+    return payload

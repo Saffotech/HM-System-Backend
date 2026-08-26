@@ -31,8 +31,15 @@ def _paginate_vitals(
     Registry lists use latest_per_patient=True (one row per patient).
     Patient timeline / filtered history keep latest_per_patient=False (all rows).
     Detail payload includes full history across create recordings for the patient.
+
+    Returns {"items", "total", "page", "page_size"} — routers may still emit the
+    items array for existing clients and attach totals via response headers.
     """
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
     if not latest_per_patient:
+        total = query.order_by(None).count()
         vitals = (
             query.order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
             .offset((page - 1) * page_size)
@@ -40,7 +47,12 @@ def _paginate_vitals(
             .all()
         )
         enriched = _enrich_vitals_batch(db, vitals)
-        return [_serialize_vital(vital, db) for vital in enriched]
+        return {
+            "items": [_serialize_vital(vital, db) for vital in enriched],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
 
     latest_subq = (
         query.enable_eagerloads(False)
@@ -52,16 +64,23 @@ def _paginate_vitals(
         .group_by(PatientVitals.patient_id)
         .subquery()
     )
+    latest_query = _vital_query(db).join(
+        latest_subq, PatientVitals.id == latest_subq.c.max_id
+    )
+    total = latest_query.order_by(None).count()
     vitals = (
-        _vital_query(db)
-        .join(latest_subq, PatientVitals.id == latest_subq.c.max_id)
-        .order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
+        latest_query.order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
     )
     enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital, db) for vital in enriched]
+    return {
+        "items": [_serialize_vital(vital, db) for vital in enriched],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 def _user_display_name(user: User | None) -> str | None:
     if not user:

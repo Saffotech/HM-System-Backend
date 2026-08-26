@@ -24,6 +24,17 @@ def get_doctor_patient_visits(
     patient_id: int | None = Query(None, ge=1),
     patient_uid: str | None = Query(None),
     visit_date: date | None = Query(None),
+    page: int | None = Query(
+        None,
+        ge=1,
+        description="Optional page. Omit to return all visits for the day (legacy).",
+    ),
+    page_size: int | None = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Optional page size when page is provided.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("doctor_patient_visits:view")),
@@ -34,4 +45,6 @@ def get_doctor_patient_visits(
         patient_id=patient_id,
         patient_uid=patient_uid,
         visit_date=visit_date,
+        page=page,
+        page_size=page_size,
     )

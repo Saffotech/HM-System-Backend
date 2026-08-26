@@ -1,4 +1,3 @@
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -295,37 +294,22 @@ def _pending_medication_counts(
 
     counts = {patient_id: 0 for patient_id in patient_ids}
 
-    prescriptions = (
-        db.query(Prescription)
-        .filter(Prescription.patient_id.in_(patient_ids))
-        .order_by(
-            Prescription.patient_id.asc(),
-            Prescription.created_at.desc(),
+    # Count pending across *all* prescriptions for each patient (not latest-only),
+    # so dashboard badges stay consistent with the nurse medications list/detail.
+    item_rows = (
+        db.query(Prescription.patient_id, PrescriptionItem.id)
+        .join(
+            PrescriptionItem,
+            PrescriptionItem.prescription_id == Prescription.id,
         )
+        .filter(Prescription.patient_id.in_(patient_ids))
         .all()
     )
 
-    latest_rx_by_patient: dict[int, Prescription] = {}
-    for prescription in prescriptions:
-        if prescription.patient_id not in latest_rx_by_patient:
-            latest_rx_by_patient[prescription.patient_id] = prescription
-
-    if not latest_rx_by_patient:
+    if not item_rows:
         return counts
 
-    prescription_ids = [
-        prescription.id for prescription in latest_rx_by_patient.values()
-    ]
-    items = (
-        db.query(PrescriptionItem)
-        .filter(PrescriptionItem.prescription_id.in_(prescription_ids))
-        .all()
-    )
-
-    if not items:
-        return counts
-
-    item_ids = [item.id for item in items]
+    item_ids = [item_id for _, item_id in item_rows]
     given_rows = (
         db.query(
             MedicationAdministration.prescription_item_id,
@@ -343,16 +327,9 @@ def _pending_medication_counts(
         for prescription_item_id, total in given_rows
     }
 
-    items_by_prescription: dict[int, list[PrescriptionItem]] = defaultdict(list)
-    for item in items:
-        items_by_prescription[item.prescription_id].append(item)
-
-    for patient_id, prescription in latest_rx_by_patient.items():
-        pending = 0
-        for item in items_by_prescription.get(prescription.id, []):
-            if given_map.get(item.id, 0) == 0:
-                pending += 1
-        counts[patient_id] = pending
+    for patient_id, item_id in item_rows:
+        if given_map.get(item_id, 0) == 0:
+            counts[patient_id] += 1
 
     return counts
 

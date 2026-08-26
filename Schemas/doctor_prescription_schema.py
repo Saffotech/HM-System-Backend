@@ -63,7 +63,7 @@ class PrescriptionCreate(BaseModel):
     admission_id: Optional[int] = None
     diagnosis: str
     notes: Optional[str] = None
-    items: List[PrescriptionItemCreate]
+    items: List[PrescriptionItemCreate] = Field(..., min_length=1)
 
     @model_validator(mode="after")
     def require_one_parent(self):

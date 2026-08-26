@@ -12,6 +12,7 @@ from Schemas.lab_test_schema import (
     LabTestUpdate,
 )
 from Services import lab_test_catalog_service as service
+from Utils.pagination import paginate_sequence
 
 router = APIRouter(prefix="/lab-catalog", tags=["Lab Test Catalog"])
 
@@ -20,6 +21,17 @@ router = APIRouter(prefix="/lab-catalog", tags=["Lab Test Catalog"])
 def list_lab_catalog(
     active: bool | None = Query(None),
     department_id: int | None = Query(None, gt=0),
+    page: int | None = Query(
+        None,
+        ge=1,
+        description="Optional page. Omit to return the full catalog (legacy clients).",
+    ),
+    page_size: int | None = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Optional page size when page is provided.",
+    ),
     db: Session = Depends(get_db),
     _: bool = Depends(PermissionChecker("lab_catalog:view")),
 ):
@@ -28,7 +40,14 @@ def list_lab_catalog(
         active=active,
         department_id=department_id,
     )
-    return LabTestListResponse(total=len(tests), tests=tests)
+    items, total, page_n, size = paginate_sequence(
+        tests, page=page, page_size=page_size
+    )
+    payload = LabTestListResponse(total=total, tests=items)
+    if page is not None:
+        payload.page = page_n
+        payload.page_size = size
+    return payload
 
 
 @router.post("", response_model=LabTestResponse, status_code=status.HTTP_201_CREATED)
