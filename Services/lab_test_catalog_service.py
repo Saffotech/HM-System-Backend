@@ -1,5 +1,5 @@
 from fastapi import HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.department import Department
 from Models.lab_test import LabTest
@@ -80,7 +80,12 @@ def resolve_catalog_test(
     client-provided price.
     """
     if lab_test_id is not None:
-        test = db.query(LabTest).filter(LabTest.id == lab_test_id).first()
+        test = (
+            db.query(LabTest)
+            .options(joinedload(LabTest.department))
+            .filter(LabTest.id == lab_test_id)
+            .first()
+        )
         if not test:
             raise HTTPException(status_code=404, detail="Lab catalog test not found")
         if not test.active:
@@ -97,6 +102,7 @@ def resolve_catalog_test(
         raise HTTPException(status_code=400, detail="A lab catalog test is required")
     test = (
         db.query(LabTest)
+        .options(joinedload(LabTest.department))
         .filter(
             LabTest.test_name.ilike(normalized_name),
             LabTest.department_id == department_id,

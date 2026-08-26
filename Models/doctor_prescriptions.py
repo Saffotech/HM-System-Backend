@@ -199,6 +199,32 @@ class PrescriptionItem(Base):
         nullable=True
     )
 
+    # Optional medicine details (old clients omit these; columns are nullable)
+    form = Column(
+        String(50),
+        nullable=True
+    )
+    dose = Column(
+        String(50),
+        nullable=True
+    )
+    route = Column(
+        String(50),
+        nullable=True
+    )
+    timing = Column(
+        String(50),
+        nullable=True
+    )
+    quantity = Column(
+        Integer,
+        nullable=True
+    )
+    quantity_unit = Column(
+        String(50),
+        nullable=True
+    )
+
     # Medication Schedule
 
     start_date = Column(

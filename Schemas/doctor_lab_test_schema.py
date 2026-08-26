@@ -41,6 +41,10 @@ class LabTestCreate(BaseModel):
         max_length=500
     )
 
+    # Existing clients omit this and keep accidental-duplicate protection.
+    # True creates a new order (and price snapshot) even if one is in-flight.
+    is_repeat: bool = Field(default=False)
+
     @model_validator(mode="after")
     def require_one_parent(self):
         has_appointment = self.appointment_id is not None
@@ -55,6 +59,8 @@ class LabTestCreate(BaseModel):
 # ==========================================
 
 class LabTestUpdate(BaseModel):
+    lab_test_id: Optional[int] = Field(default=None, gt=0)
+
     test_name: Optional[str] = Field(
         default=None,
         max_length=255

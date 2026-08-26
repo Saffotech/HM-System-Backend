@@ -56,6 +56,7 @@ class DoctorIpdLabOrderPayload(BaseModel):
     department_id: Optional[int] = None
     priority: str = Field(default="Normal", max_length=50)
     clinical_notes: Optional[str] = Field(default=None, max_length=500)
+    is_repeat: bool = Field(default=False)
 
 
 class DoctorIpdConsultationSaveRequest(BaseModel):

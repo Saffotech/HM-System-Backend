@@ -1,4 +1,5 @@
 from datetime import date, datetime
+import logging
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -12,6 +13,7 @@ from Models.opd_billing import Appointment
 from Models.patient import Patient
 from Models.role import Role
 from Models.user import User
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Schemas.nurse_doctor_visit_schema import (
     DoctorPatientVisitsResponse,
     NurseDoctorListResponse,
@@ -26,8 +28,10 @@ from Services import opd_helpers as h
 from Services.doctor_helpers import day_bounds
 from Services.ipd_helpers import doctor_display
 from Services.nurse_nursing_notes_service import _resolve_patient_and_appointment
+from Services.notification_service import create_notification
 
 IST = ZoneInfo("Asia/Kolkata")
+logger = logging.getLogger(__name__)
 
 
 def _now() -> datetime:
@@ -38,6 +42,41 @@ def _user_display_name(user: User | None) -> str:
     if not user:
         return ""
     return f"{user.first_name} {user.last_name or ''}".strip()
+
+
+def _notify_doctor_visit(
+    db: Session,
+    visit: NurseDoctorVisit,
+    nurse: User,
+    *,
+    action: str,
+) -> None:
+    try:
+        patient_name = _patient_display_name(visit.patient) or f"Patient #{visit.patient_id}"
+        notification_type = {
+            "recorded": NotificationType.NURSE_DOCTOR_VISIT_CREATED,
+            "updated": NotificationType.NURSE_DOCTOR_VISIT_UPDATED,
+            "voided": NotificationType.NURSE_DOCTOR_VISIT_VOIDED,
+        }[action]
+        create_notification(
+            db,
+            user_id=visit.doctor_id,
+            title=f"Doctor visit {action}",
+            message=f"{nurse.first_name} {nurse.last_name or ''}".strip()
+            + f" {action} a doctor visit for {patient_name}.",
+            notification_type=notification_type,
+            source_module=SourceModule.NURSE,
+            reference_type=ReferenceType.PATIENT,
+            reference_id=visit.patient_id,
+            created_by=nurse.id,
+            created_by_name=_user_display_name(nurse),
+        )
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Failed to send doctor visit notification for visit %s",
+            visit.id,
+        )
 
 
 def _patient_display_name(patient: Patient | None) -> str | None:
@@ -255,6 +294,7 @@ def create_doctor_visit_service(
     db.refresh(visit)
 
     visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
+    _notify_doctor_visit(db, visit, nurse, action="recorded")
     day = visit.visited_at.astimezone(IST).date()
     same_day = (
         _visit_date_filter(
@@ -427,6 +467,7 @@ def update_doctor_visit_service(
     db.refresh(visit)
 
     visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
+    _notify_doctor_visit(db, visit, nurse, action="updated")
     day = visit.visited_at.astimezone(IST).date()
     same_day = (
         _visit_date_filter(
@@ -460,6 +501,7 @@ def void_doctor_visit_service(
 
     db.commit()
     db.refresh(visit)
+    _notify_doctor_visit(db, visit, nurse, action="voided")
     return _serialize_visit(visit, visit_number=None)
 
 

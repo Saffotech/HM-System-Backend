@@ -207,10 +207,14 @@ def save_doctor_ipd_consultation_service(
             test_name = (lab.test_name or "").strip()
             if not test_name and lab.lab_test_id is None:
                 continue
-            name_key = test_name.casefold()
-            if name_key in seen_lab_names:
+            if not lab.is_repeat:
+                name_key = test_name.casefold()
+            else:
+                name_key = ""
+            if name_key and name_key in seen_lab_names:
                 continue
-            seen_lab_names.add(name_key)
+            if name_key:
+                seen_lab_names.add(name_key)
             lab_payload = LabTestCreate(
                 admission_id=int(admission.id),
                 test_name=test_name,
@@ -219,6 +223,7 @@ def save_doctor_ipd_consultation_service(
                 department_id=lab.department_id,
                 priority=lab.priority,
                 clinical_notes=lab.clinical_notes,
+                is_repeat=lab.is_repeat,
             )
             try:
                 lab_out = create_lab_test_service(

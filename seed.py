@@ -7,6 +7,9 @@ Usage:
 """
 import argparse
 import sys
+from decimal import Decimal
+
+from sqlalchemy import text
 
 from database import SessionLocal
 from Models.department import Department
@@ -193,6 +196,7 @@ ROLES_DATA = {
             "prescriptions:delete",
             "lab:create",
             "lab:view",
+            "lab_catalog:view",
             "appointments:view",
             "appointments:update",
             "doctor_profile:view",
@@ -349,25 +353,25 @@ DEPARTMENTS = [
 ]
 
 LAB_TEST_CATALOG = [
-    {"test_name": "Blood Test", "department_code": "LAB", "price": 0},
-    {"test_name": "Urine Test", "department_code": "LAB", "price": 0},
-    {"test_name": "Stool Test", "department_code": "LAB", "price": 0},
-    {"test_name": "Biochemistry", "department_code": "LAB", "price": 0},
-    {"test_name": "Hematology", "department_code": "LAB", "price": 0},
-    {"test_name": "Microbiology", "department_code": "LAB", "price": 0},
-    {"test_name": "Histopathology", "department_code": "LAB", "price": 0},
-    {"test_name": "CBC", "department_code": "LAB", "price": 0},
-    {"test_name": "Lipid Profile", "department_code": "LAB", "price": 0},
-    {"test_name": "Blood Sugar", "department_code": "LAB", "price": 0},
-    {"test_name": "Urine Routine", "department_code": "LAB", "price": 0},
-    {"test_name": "X-Ray", "department_code": "RAD", "price": 0},
-    {"test_name": "Ultrasound (USG)", "department_code": "RAD", "price": 0},
-    {"test_name": "CT Scan", "department_code": "RAD", "price": 0},
-    {"test_name": "MRI", "department_code": "RAD", "price": 0},
-    {"test_name": "Mammography", "department_code": "RAD", "price": 0},
-    {"test_name": "X-Ray Chest", "department_code": "RAD", "price": 0},
-    {"test_name": "MRI Brain", "department_code": "RAD", "price": 0},
-    {"test_name": "CT Scan Abdomen", "department_code": "RAD", "price": 0},
+    {"test_name": "Blood Test", "department_code": "LAB", "price": 500},
+    {"test_name": "Urine Test", "department_code": "LAB", "price": 150},
+    {"test_name": "Stool Test", "department_code": "LAB", "price": 150},
+    {"test_name": "Biochemistry", "department_code": "LAB", "price": 400},
+    {"test_name": "Hematology", "department_code": "LAB", "price": 350},
+    {"test_name": "Microbiology", "department_code": "LAB", "price": 450},
+    {"test_name": "Histopathology", "department_code": "LAB", "price": 800},
+    {"test_name": "CBC", "department_code": "LAB", "price": 300},
+    {"test_name": "Lipid Profile", "department_code": "LAB", "price": 500},
+    {"test_name": "Blood Sugar", "department_code": "LAB", "price": 120},
+    {"test_name": "Urine Routine", "department_code": "LAB", "price": 150},
+    {"test_name": "X-Ray", "department_code": "RAD", "price": 800},
+    {"test_name": "Ultrasound (USG)", "department_code": "RAD", "price": 1200},
+    {"test_name": "CT Scan", "department_code": "RAD", "price": 3500},
+    {"test_name": "MRI", "department_code": "RAD", "price": 5000},
+    {"test_name": "Mammography", "department_code": "RAD", "price": 2000},
+    {"test_name": "X-Ray Chest", "department_code": "RAD", "price": 800},
+    {"test_name": "MRI Brain", "department_code": "RAD", "price": 5500},
+    {"test_name": "CT Scan Abdomen", "department_code": "RAD", "price": 4000},
 ]
 
 
@@ -489,8 +493,10 @@ def upsert_departments(db) -> dict[str, int]:
 
 def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
     added = 0
+    updated = 0
     for item in LAB_TEST_CATALOG:
         department_id = department_ids[item["department_code"]]
+        price = Decimal(str(item["price"]))
         test = (
             db.query(LabTest)
             .filter(
@@ -500,19 +506,58 @@ def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
             .first()
         )
         if test:
+            changed = False
+            current_price = Decimal(str(test.price if test.price is not None else 0))
+            if current_price != price:
+                test.price = price
+                changed = True
+            if not test.active:
+                test.active = True
+                changed = True
+            if changed:
+                updated += 1
             continue
         db.add(
             LabTest(
                 test_name=item["test_name"],
                 department_id=department_id,
-                price=item["price"],
+                price=price,
                 active=True,
             )
         )
         added += 1
-    if added:
+    if added or updated:
         db.commit()
-    print(f"Lab test catalog synced: {added} new ({len(LAB_TEST_CATALOG)} defaults)")
+    print(
+        f"Lab test catalog synced: {added} new, {updated} updated "
+        f"({len(LAB_TEST_CATALOG)} defaults)"
+    )
+
+
+def backfill_lab_order_prices(db) -> None:
+    """Copy current catalog prices onto orders that still have 0 / NULL."""
+    result = db.execute(
+        text(
+            """
+            UPDATE lab_test_orders AS orders
+            SET lab_test_id = COALESCE(orders.lab_test_id, tests.id),
+                price = tests.price
+            FROM lab_tests AS tests
+            WHERE (orders.price IS NULL OR orders.price = 0)
+              AND tests.price > 0
+              AND (
+                orders.lab_test_id = tests.id
+                OR (
+                  orders.lab_test_id IS NULL
+                  AND lower(trim(orders.test_name)) = lower(trim(tests.test_name))
+                  AND orders.department_id = tests.department_id
+                )
+              )
+            """
+        )
+    )
+    db.commit()
+    print(f"Lab order prices backfilled: {result.rowcount}")
 
 
 def ensure_hospital_settings(db) -> None:
@@ -972,6 +1017,7 @@ def main() -> None:
         role_ids = upsert_roles(db, perm_ids)
         department_ids = upsert_departments(db)
         upsert_lab_tests(db, department_ids)
+        backfill_lab_order_prices(db)
         ensure_hospital_settings(db)
         ensure_opd_settings(db)
         ensure_nurse_profiles(db, role_ids)
