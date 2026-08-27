@@ -22,6 +22,7 @@ from Schemas.ipd_schema import (
 from Services import ipd_billing_service
 from Services import ipd_service
 from Services import opd_service
+from Services import opd_settings_service
 from Services import patient_service
 
 router = APIRouter(prefix="/ipd", tags=["IPD"])
@@ -30,6 +31,21 @@ router = APIRouter(prefix="/ipd", tags=["IPD"])
 # ── Shared hospital reference data (departments & doctors) ─────
 # Mirrors the OPD endpoints but gated by IPD permissions so the module
 # stays isolated from `opd:view`.
+
+@router.get("/pricing")
+def get_pricing(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:pricing")),
+):
+    """
+    Read-only hospital pricing for IPD (bed tariff, consult fees, bill items).
+
+    Reuses the same pricing store as Admin/OPD settings without requiring `opd:view`.
+    """
+    pricing = opd_settings_service.get_pricing(db)
+    return {"pricing": pricing.model_dump()}
+
 
 @router.get("/reference/departments")
 def reference_departments(
