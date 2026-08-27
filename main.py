@@ -26,6 +26,7 @@ from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
 from Models.super_admin_profile import SuperAdminProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
+from Models.lab_test import LabTest  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
 from Models.doctor_prescriptions import Prescription, PrescriptionItem  # noqa: F401
 from Models.lab_result import LabResult, LabResultParameter  # noqa: F401
@@ -56,6 +57,7 @@ from Routers.doctor_appointment_router import router as appointments_router
 from Routers.doctor_ipd_router import router as doctor_ipd_router
 from Routers.doctor_consultation_router import router as consultation_router
 from Routers.doctor_lab_test_router import router as lab_test_router
+from Routers.lab_catalog_router import router as lab_catalog_router
 from Routers.doctor_notification_router import router as doctor_notification_router
 from Routers.doctor_patient_history_router import router as patient_router
 from Routers.doctor_patient_clinical_router import router as doctor_patient_clinical_router
@@ -78,6 +80,7 @@ from Routers.nurse_shift_bed_allocation_router import (
 from Routers.nurse_workforce_router import router as nurse_workforce_router
 from Routers.nurse_doctor_visit_router import router as nurse_doctor_visit_router
 from Routers.nurse_other_visit_router import router as nurse_other_visit_router
+from Routers.nurse_lab_report_router import router as nurse_lab_report_router
 from Routers.doctor_patient_visit_router import router as doctor_patient_visit_router
 from Routers.opd import router as opd_router
 from Routers.ipd import router as ipd_router
@@ -144,6 +147,7 @@ app.include_router(patient_router)
 app.include_router(doctor_patient_clinical_router)
 app.include_router(prescription_router)
 app.include_router(lab_test_router)
+app.include_router(lab_catalog_router)
 app.include_router(doctor_profile_router)
 app.include_router(doctor_notification_router)
 app.include_router(nurse_dashboard_router)
@@ -157,6 +161,7 @@ app.include_router(nurse_bed_allocation_router)
 app.include_router(nurse_workforce_router)
 app.include_router(nurse_doctor_visit_router)
 app.include_router(nurse_other_visit_router)
+app.include_router(nurse_lab_report_router)
 app.include_router(doctor_patient_visit_router)
 app.include_router(pharmacy_router)
 app.include_router(pharmacist_profile_router)

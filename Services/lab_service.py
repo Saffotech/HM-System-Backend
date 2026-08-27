@@ -380,6 +380,7 @@ def get_orders(
         items.append({
             "id": order.id,
             "appointment_id": order.appointment_id,
+            "lab_test_id": order.lab_test_id,
             "patient_name": order.patient_name,
             **_order_patient_fields(
                 order,
@@ -391,6 +392,7 @@ def get_orders(
             "doctor_name": doctor_name,
             "department_id": order.department_id,
             "test_name": order.test_name,
+            "price": order.price,
             "category": order.category,
             "priority": order.priority,
             "clinical_notes": order.clinical_notes,
@@ -447,6 +449,7 @@ def get_order_detail(db: Session, order_id: int, current_user: User):
     return {
         "id": order.id,
         "appointment_id": order.appointment_id,
+        "lab_test_id": order.lab_test_id,
         "patient_name": order.patient_name,
         **_order_patient_fields(
             order,
@@ -462,6 +465,7 @@ def get_order_detail(db: Session, order_id: int, current_user: User):
         "doctor_name": doctor_name,
         "department_id": order.department_id,
         "test_name": order.test_name,
+        "price": order.price,
         "category": order.category,
         "priority": order.priority,
         "clinical_notes": order.clinical_notes,
@@ -499,6 +503,8 @@ def mark_sample_collected(db: Session, order_id: int, current_user: User):
         "status": order.status.value,
         "patient_uid": order.patient_uhid,
         "test_name": order.test_name,
+        "lab_test_id": order.lab_test_id,
+        "price": order.price,
         "state_changed": True,
     }
 
@@ -587,6 +593,8 @@ def mark_completed(db: Session, order_id: int, current_user: User):
         "status": order.status.value,
         "patient_uid": order.patient_uhid,
         "test_name": order.test_name,
+        "lab_test_id": order.lab_test_id,
+        "price": order.price,
         "state_changed": True,
     }
 
@@ -688,6 +696,8 @@ def upload_report(
         "status": order.status.value,
         "patient_uid": order.patient_uhid,
         "test_name": order.test_name,
+        "lab_test_id": order.lab_test_id,
+        "price": order.price,
     }
 
 
@@ -964,6 +974,8 @@ def get_reports(
             "doctor_id": report.lab_order.doctor_id if report.lab_order else None,
             "doctor_name": doctor_name,
             "test_name": report.lab_order.test_name,
+            "lab_test_id": report.lab_order.lab_test_id,
+            "price": report.lab_order.price,
             "uploaded_by": report.uploaded_by,
             "uploaded_by_name": uploader_name,
             "report_file": report.report_file,
@@ -1064,6 +1076,8 @@ def get_report_detail(db: Session, report_id: int, current_user: User):
             "doctor_name": doctor_name,
             "department_id": report.lab_order.department_id,
             "test_name": report.lab_order.test_name,
+            "lab_test_id": report.lab_order.lab_test_id,
+            "price": report.lab_order.price,
             "category": report.lab_order.category,
             "priority": report.lab_order.priority,
             "status": report.lab_order.status.value,

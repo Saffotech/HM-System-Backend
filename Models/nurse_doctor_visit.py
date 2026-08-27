@@ -41,6 +41,15 @@ class NurseDoctorVisit(Base):
 
     doctor_name = Column(String(255), nullable=False)
 
+    department_id = Column(
+        Integer,
+        ForeignKey("departments.id"),
+        nullable=True,
+        index=True,
+    )
+
+    department_name = Column(String(255), nullable=True)
+
     visited_at = Column(
         DateTime(timezone=True),
         nullable=False,
@@ -102,4 +111,5 @@ class NurseDoctorVisit(Base):
 
     patient = relationship("Patient", foreign_keys=[patient_id])
     doctor = relationship("User", foreign_keys=[doctor_id])
+    department = relationship("Department", foreign_keys=[department_id])
     recorder = relationship("User", foreign_keys=[recorded_by])

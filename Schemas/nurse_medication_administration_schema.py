@@ -1,6 +1,6 @@
 from Models.nurse_medication_administration import MedicationStatus
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Union
 from pydantic import BaseModel
 
 
@@ -73,9 +73,15 @@ class PatientMedicationItem(BaseModel):
     dosage: str
     frequency: str
 
-    duration: int
+    duration: Union[int, str]
 
     instructions: Optional[str] = None
+    form: Optional[str] = None
+    dose: Optional[str] = None
+    route: Optional[str] = None
+    timing: Optional[str] = None
+    quantity: Optional[int] = None
+    quantity_unit: Optional[str] = None
 
 
 class PatientMedicationResponse(BaseModel):
@@ -87,6 +93,8 @@ class PatientMedicationResponse(BaseModel):
 
     bed_number: Optional[str] = None
     ward_name: Optional[str] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
 
     medications: List[PatientMedicationItem]
 

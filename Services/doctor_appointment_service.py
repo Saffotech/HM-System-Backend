@@ -100,7 +100,7 @@ def get_appointment_by_id_service(db: Session, appointment_id: int, doctor_id: i
     )
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    return h.appointment_to_dict(db, apt)
+    return h.with_nurse_names(db, [h.appointment_to_dict(db, apt)])[0]
 
 
 def _status_value(status) -> str:
@@ -151,7 +151,7 @@ def update_appointment_status_service(
 
     persist(db)
     db.refresh(apt)
-    return h.appointment_to_dict(db, apt), current
+    return h.with_nurse_names(db, [h.appointment_to_dict(db, apt)])[0], current
 
 
 def get_appointment_history_service(

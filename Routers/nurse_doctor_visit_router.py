@@ -1,6 +1,6 @@
 from datetime import date
 
-from fastapi import APIRouter, Depends, Path, Query, status
+from fastapi import APIRouter, Depends, Path, Query, Request, status
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -14,6 +14,8 @@ from Schemas.nurse_doctor_visit_schema import (
     NurseDoctorVisitUpdate,
     NurseDoctorVisitVoidRequest,
 )
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Services.nurse_doctor_visit_service import (
     create_doctor_visit_service,
     list_active_doctors_service,
@@ -35,11 +37,20 @@ router = APIRouter(
 )
 def create_doctor_visit(
     payload: NurseDoctorVisitCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("nurse_doctor_visits:create")),
 ):
-    return create_doctor_visit_service(db, payload, current_user)
+    result = create_doctor_visit_service(db, payload, current_user)
+    nurse_audit.log_doctor_visit_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 @router.get(
@@ -106,12 +117,22 @@ def list_active_doctors(
 )
 def update_doctor_visit(
     payload: NurseDoctorVisitUpdate,
+    request: Request,
     visit_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("nurse_doctor_visits:update")),
 ):
-    return update_doctor_visit_service(db, visit_id, payload, current_user)
+    result = update_doctor_visit_service(db, visit_id, payload, current_user)
+    nurse_audit.log_doctor_visit_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        visit_id=visit_id,
+        result=result,
+    )
+    return result
 
 
 @router.put(
@@ -120,9 +141,19 @@ def update_doctor_visit(
 )
 def void_doctor_visit(
     payload: NurseDoctorVisitVoidRequest,
+    request: Request,
     visit_id: int = Path(..., ge=1),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("nurse_doctor_visits:update")),
 ):
-    return void_doctor_visit_service(db, visit_id, payload, current_user)
+    result = void_doctor_visit_service(db, visit_id, payload, current_user)
+    nurse_audit.log_doctor_visit_void(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        visit_id=visit_id,
+        void_reason=payload.void_reason,
+    )
+    return result

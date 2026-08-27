@@ -130,7 +130,7 @@ def _history_items(db: Session, opd_rows, ipd_rows) -> list[dict]:
             )
         )
     paired.sort(key=lambda row: row[0], reverse=True)
-    return [item for _, item in paired]
+    return h.with_nurse_names(db, [item for _, item in paired])
 
 
 def _paginated(items: list[dict], page: int, page_size: int) -> dict:
@@ -190,7 +190,10 @@ def get_patients_service(
             "total": total,
             "page": page,
             "page_size": page_size,
-            "items": [h.appointment_to_dict(db, apt, patient) for apt, patient in rows],
+            "items": h.with_nurse_names(
+                db,
+                [h.appointment_to_dict(db, apt, patient) for apt, patient in rows],
+            ),
         }
 
     if kind == "ipd":
@@ -209,10 +212,15 @@ def get_patients_service(
             "total": total,
             "page": page,
             "page_size": page_size,
-            "items": [
-                h.admission_to_dict(db, admission, patient, use_dashboard_status=False)
-                for admission, patient in rows
-            ],
+            "items": h.with_nurse_names(
+                db,
+                [
+                    h.admission_to_dict(
+                        db, admission, patient, use_dashboard_status=False
+                    )
+                    for admission, patient in rows
+                ],
+            ),
         }
 
     opd_rows = opd_query.order_by(Appointment.scheduled_at.desc()).all()
@@ -243,7 +251,10 @@ def get_patient_details_service(
             .limit(page_size)
             .all()
         )
-        visits = [h.appointment_to_dict(db, apt, patient) for apt, patient in rows]
+        visits = h.with_nurse_names(
+            db,
+            [h.appointment_to_dict(db, apt, patient) for apt, patient in rows],
+        )
         return {
             "success": True,
             "total": total,
@@ -264,10 +275,15 @@ def get_patient_details_service(
             .limit(page_size)
             .all()
         )
-        visits = [
-            h.admission_to_dict(db, admission, patient, use_dashboard_status=False)
-            for admission, patient in rows
-        ]
+        visits = h.with_nurse_names(
+            db,
+            [
+                h.admission_to_dict(
+                    db, admission, patient, use_dashboard_status=False
+                )
+                for admission, patient in rows
+            ],
+        )
         return {
             "success": True,
             "total": total,

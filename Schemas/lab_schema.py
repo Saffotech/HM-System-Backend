@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from enum import Enum
 from typing import List, Optional
 
@@ -91,6 +92,8 @@ class LabReportCreate(BaseModel):
 
 class LabOrderListItem(BaseModel):
     id: int
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
     appointment_id: Optional[int] = None
 
     patient_id: int
@@ -147,6 +150,8 @@ class ReportSummary(BaseModel):
 
 class LabOrderDetailResponse(BaseModel):
     id: int
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
     appointment_id: Optional[int] = None
 
     patient_id: int
@@ -210,6 +215,8 @@ class LabReportListItem(BaseModel):
     doctor_name: Optional[str] = None
 
     test_name: str
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
 
     uploaded_by: int
     uploaded_by_name: Optional[str] = None
@@ -246,6 +253,8 @@ class LabReportOrderSummary(BaseModel):
     doctor_name: Optional[str] = None
     department_id: Optional[int] = None
     test_name: str
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
     category: str
     priority: str
     status: str

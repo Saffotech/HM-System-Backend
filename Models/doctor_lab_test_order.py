@@ -6,6 +6,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Enum,
+    Numeric,
 )
 from sqlalchemy.orm import relationship
 from database import Base
@@ -82,6 +83,15 @@ class LabTestOrder(Base):
         index=True,
     )
 
+    lab_test_id = Column(
+        Integer,
+        ForeignKey("lab_tests.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+
+    price = Column(Numeric(10, 2), nullable=True)
+
     test_name = Column(
         String(255),
         nullable=False
@@ -149,6 +159,11 @@ class LabTestOrder(Base):
     department = relationship(
         "Department",
         foreign_keys=[department_id],
+    )
+
+    catalog_test = relationship(
+        "LabTest",
+        foreign_keys=[lab_test_id],
     )
 
     lab_result = relationship(

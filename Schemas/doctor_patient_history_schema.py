@@ -35,6 +35,8 @@ class PatientHistoryItem(BaseModel):
     follow_up: Optional[str] = None
     admitted_at: Optional[str] = None
     discharged_at: Optional[str] = None
+    nurse_id: Optional[int] = None
+    nurse_name: Optional[str] = None
 
 
 class PatientHistoryListResponse(PaginatedResponse[PatientHistoryItem]):

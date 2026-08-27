@@ -7,9 +7,13 @@ Usage:
 """
 import argparse
 import sys
+from decimal import Decimal
+
+from sqlalchemy import text
 
 from database import SessionLocal
 from Models.department import Department
+from Models.lab_test import LabTest
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
 from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
 from Models.opd_settings import OPD_SETTINGS_ROW_ID, OpdSettings
@@ -45,6 +49,10 @@ PERMISSIONS_LIST = [
     "lab:create",
     "lab:update",
     "lab:upload_report",
+    "lab_catalog:view",
+    "lab_catalog:create",
+    "lab_catalog:update",
+    "lab_catalog:activate",
     "prescriptions:create",
     "prescriptions:view",
     "prescriptions:update",
@@ -62,6 +70,7 @@ PERMISSIONS_LIST = [
     "nurse_notes:view",
     "nurse_notes:create",
     "nurse_notes:update",
+    "nurse_lab_reports:view",
     "doctor_vitals:view",
     "doctor_notes:view",
     "nurse_profile:view",
@@ -137,6 +146,7 @@ PERMISSIONS_LIST = [
     "ipd:bill:generate",
     "ipd:bill:pay",
     "ipd:bill:history",
+    "ipd:pricing",
     "ipd_profile:view",
     "ipd_profile:update",
     "ipd_profile:upload_image",
@@ -187,6 +197,7 @@ ROLES_DATA = {
             "prescriptions:delete",
             "lab:create",
             "lab:view",
+            "lab_catalog:view",
             "appointments:view",
             "appointments:update",
             "doctor_profile:view",
@@ -205,13 +216,13 @@ ROLES_DATA = {
         "permissions": [
             "patients:view",
             "opd:view",
-            "lab:view",
             "nurse_vitals:view",
             "nurse_vitals:create",
             "nurse_vitals:update",
             "nurse_notes:view",
             "nurse_notes:create",
             "nurse_notes:update",
+            "nurse_lab_reports:view",
             "nurse_profile:view",
             "nurse_profile:update",
             "nurse_profile:upload_image",
@@ -231,7 +242,6 @@ ROLES_DATA = {
             "nurse_other_visits:view",
             "nurse_other_visits:create",
             "nurse_other_visits:update",
-            "ipd:patients:list",
         ],
     },
     "opd_billing": {
@@ -277,6 +287,7 @@ ROLES_DATA = {
             "ipd:bill:generate",
             "ipd:bill:pay",
             "ipd:bill:history",
+            "ipd:pricing",
             "ipd_profile:view",
             "ipd_profile:update",
             "ipd_profile:upload_image",
@@ -341,6 +352,30 @@ DEPARTMENTS = [
     {"name": "Ophthalmology", "code": "EYE"},
     {"name": "Laboratory", "code": "LAB"},
     {"name": "Radiology", "code": "RAD"},
+]
+
+# Names/departments only — prices are owned by Admin/Super Admin via PATCH /lab-catalog/{id}.
+# Seed must never overwrite lab_tests.price on existing rows.
+LAB_TEST_CATALOG = [
+    {"test_name": "Blood Test", "department_code": "LAB"},
+    {"test_name": "Urine Test", "department_code": "LAB"},
+    {"test_name": "Stool Test", "department_code": "LAB"},
+    {"test_name": "Biochemistry", "department_code": "LAB"},
+    {"test_name": "Hematology", "department_code": "LAB"},
+    {"test_name": "Microbiology", "department_code": "LAB"},
+    {"test_name": "Histopathology", "department_code": "LAB"},
+    {"test_name": "CBC", "department_code": "LAB"},
+    {"test_name": "Lipid Profile", "department_code": "LAB"},
+    {"test_name": "Blood Sugar", "department_code": "LAB"},
+    {"test_name": "Urine Routine", "department_code": "LAB"},
+    {"test_name": "X-Ray", "department_code": "RAD"},
+    {"test_name": "Ultrasound (USG)", "department_code": "RAD"},
+    {"test_name": "CT Scan", "department_code": "RAD"},
+    {"test_name": "MRI", "department_code": "RAD"},
+    {"test_name": "Mammography", "department_code": "RAD"},
+    {"test_name": "X-Ray Chest", "department_code": "RAD"},
+    {"test_name": "MRI Brain", "department_code": "RAD"},
+    {"test_name": "CT Scan Abdomen", "department_code": "RAD"},
 ]
 
 
@@ -458,6 +493,69 @@ def upsert_departments(db) -> dict[str, int]:
     db.commit()
     print(f"Departments synced: {len(dept_ids)} total ({added} new)")
     return dept_ids
+
+
+def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
+    """Create missing catalog tests only. Never overwrite Admin-managed prices."""
+    added = 0
+    reactivated = 0
+    for item in LAB_TEST_CATALOG:
+        department_id = department_ids[item["department_code"]]
+        test = (
+            db.query(LabTest)
+            .filter(
+                LabTest.test_name == item["test_name"],
+                LabTest.department_id == department_id,
+            )
+            .first()
+        )
+        if test:
+            # Existing row: keep test.price untouched (Admin / Super Admin owns it).
+            if not test.active:
+                test.active = True
+                reactivated += 1
+            continue
+        db.add(
+            LabTest(
+                test_name=item["test_name"],
+                department_id=department_id,
+                price=Decimal("0.00"),
+                active=True,
+            )
+        )
+        added += 1
+    if added or reactivated:
+        db.commit()
+    print(
+        f"Lab test catalog synced: {added} new, {reactivated} reactivated "
+        f"({len(LAB_TEST_CATALOG)} defaults; prices never overwritten)"
+    )
+
+
+def backfill_lab_order_prices(db) -> None:
+    """Copy current catalog prices onto orders that still have 0 / NULL."""
+    result = db.execute(
+        text(
+            """
+            UPDATE lab_test_orders AS orders
+            SET lab_test_id = COALESCE(orders.lab_test_id, tests.id),
+                price = tests.price
+            FROM lab_tests AS tests
+            WHERE (orders.price IS NULL OR orders.price = 0)
+              AND tests.price > 0
+              AND (
+                orders.lab_test_id = tests.id
+                OR (
+                  orders.lab_test_id IS NULL
+                  AND lower(trim(orders.test_name)) = lower(trim(tests.test_name))
+                  AND orders.department_id = tests.department_id
+                )
+              )
+            """
+        )
+    )
+    db.commit()
+    print(f"Lab order prices backfilled: {result.rowcount}")
 
 
 def ensure_hospital_settings(db) -> None:
@@ -915,7 +1013,9 @@ def main() -> None:
 
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
-        upsert_departments(db)
+        department_ids = upsert_departments(db)
+        upsert_lab_tests(db, department_ids)
+        backfill_lab_order_prices(db)
         ensure_hospital_settings(db)
         ensure_opd_settings(db)
         ensure_nurse_profiles(db, role_ids)

@@ -8,6 +8,7 @@ from Models.user import User
 from Models.opd_billing import Appointment, Bed
 from Models.patient import Patient
 from Models.nurse_patient_vitals import PatientVitals, VitalStatus
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 
 from Schemas.nurse_schema import (
     VitalCreate,
@@ -30,8 +31,15 @@ def _paginate_vitals(
     Registry lists use latest_per_patient=True (one row per patient).
     Patient timeline / filtered history keep latest_per_patient=False (all rows).
     Detail payload includes full history across create recordings for the patient.
+
+    Returns {"items", "total", "page", "page_size"} — routers may still emit the
+    items array for existing clients and attach totals via response headers.
     """
+    page = max(int(page or 1), 1)
+    page_size = min(max(int(page_size or 20), 1), 100)
+
     if not latest_per_patient:
+        total = query.order_by(None).count()
         vitals = (
             query.order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
             .offset((page - 1) * page_size)
@@ -39,7 +47,12 @@ def _paginate_vitals(
             .all()
         )
         enriched = _enrich_vitals_batch(db, vitals)
-        return [_serialize_vital(vital, db) for vital in enriched]
+        return {
+            "items": [_serialize_vital(vital, db) for vital in enriched],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
 
     latest_subq = (
         query.enable_eagerloads(False)
@@ -51,16 +64,23 @@ def _paginate_vitals(
         .group_by(PatientVitals.patient_id)
         .subquery()
     )
+    latest_query = _vital_query(db).join(
+        latest_subq, PatientVitals.id == latest_subq.c.max_id
+    )
+    total = latest_query.order_by(None).count()
     vitals = (
-        _vital_query(db)
-        .join(latest_subq, PatientVitals.id == latest_subq.c.max_id)
-        .order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
+        latest_query.order_by(PatientVitals.recorded_at.desc(), PatientVitals.id.desc())
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
     )
     enriched = _enrich_vitals_batch(db, vitals)
-    return [_serialize_vital(vital, db) for vital in enriched]
+    return {
+        "items": [_serialize_vital(vital, db) for vital in enriched],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 def _user_display_name(user: User | None) -> str | None:
     if not user:
@@ -72,6 +92,28 @@ def _patient_display_name(patient: Patient | None) -> str | None:
     if not patient:
         return None
     return f"{patient.first_name} {patient.last_name or ''}".strip()
+
+
+def _appointment_doctor_id(vital: PatientVitals) -> int | None:
+    appointment = getattr(vital, "appointment", None)
+    if appointment and appointment.doctor_id:
+        return appointment.doctor_id
+    return None
+
+
+def _attach_patient_doctor(
+    db: Session,
+    vital: PatientVitals,
+    extra_doctor_id: int | None = None,
+) -> None:
+    doctor_id, doctor_name = attending_doctors_for_patients(
+        db, [vital.patient_id]
+    ).get(vital.patient_id, (None, None))
+    if not doctor_id and extra_doctor_id:
+        doctor_id = extra_doctor_id
+        doctor_name = doctor_name_map(db, [extra_doctor_id]).get(extra_doctor_id)
+    vital.doctor_id = doctor_id
+    vital.doctor_name = doctor_name
 
 
 def _enrich_vital(db: Session, vital: PatientVitals) -> PatientVitals:
@@ -95,6 +137,9 @@ def _enrich_vital(db: Session, vital: PatientVitals) -> PatientVitals:
     )
     if bed:
         vital.bed_number = bed.bed_number
+        vital.ward_name = bed.ward_name
+
+    _attach_patient_doctor(db, vital, extra_doctor_id=_appointment_doctor_id(vital))
 
     nurse = (
         db.query(User)
@@ -142,6 +187,24 @@ def _enrich_vitals_batch(
         if bed.patient_id not in beds:
             beds[bed.patient_id] = bed
 
+    extra_doctor_ids: dict[int, int] = {}
+    appointment_ids = {v.appointment_id for v in vitals if v.appointment_id}
+    if appointment_ids:
+        for appointment in (
+            db.query(Appointment)
+            .filter(Appointment.id.in_(appointment_ids))
+            .all()
+        ):
+            extra_doctor_ids[appointment.id] = appointment.doctor_id
+
+    attending_map = attending_doctors_for_patients(db, patient_ids)
+    fallback_ids = [
+        extra_doctor_ids.get(v.appointment_id)
+        for v in vitals
+        if v.appointment_id and not attending_map.get(v.patient_id, (None, None))[0]
+    ]
+    fallback_names = doctor_name_map(db, fallback_ids)
+
     for vital in vitals:
         patient = patients.get(vital.patient_id)
         if patient:
@@ -151,6 +214,16 @@ def _enrich_vitals_batch(
         bed = beds.get(vital.patient_id)
         if bed:
             vital.bed_number = bed.bed_number
+            vital.ward_name = bed.ward_name
+
+        doctor_id, doctor_name = attending_map.get(vital.patient_id, (None, None))
+        if not doctor_id and vital.appointment_id:
+            extra_id = extra_doctor_ids.get(vital.appointment_id)
+            if extra_id:
+                doctor_id = extra_id
+                doctor_name = fallback_names.get(extra_id)
+        vital.doctor_id = doctor_id
+        vital.doctor_name = doctor_name
 
         nurse = nurses.get(vital.recorded_by)
         if nurse:
@@ -222,7 +295,11 @@ def _serialize_vital(vital: PatientVitals, db: Session | None = None) -> VitalRe
         "patient_name": getattr(vital, "patient_name", None)
         or _patient_display_name(patient),
         "bed_number": getattr(vital, "bed_number", None),
+        "ward_name": getattr(vital, "ward_name", None),
+        "doctor_id": getattr(vital, "doctor_id", None),
+        "doctor_name": getattr(vital, "doctor_name", None),
         "recorded_by_name": recorded_by_name,
+        "nurse_name": recorded_by_name,
         "status": _status_value(vital.status),
     }
     if history is not None:

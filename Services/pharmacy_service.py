@@ -68,7 +68,15 @@ def _patient_display_name(rx: Prescription, patient: Optional[Patient]) -> str:
 
 
 def _quantity_prescribed(item: PrescriptionItem) -> int:
-    """Use duration as prescribed supply quantity until a dedicated quantity column exists."""
+    """Prefer explicit quantity; old rows fall back to duration-based supply."""
+    quantity = getattr(item, "quantity", None)
+    if quantity is not None:
+        try:
+            parsed = int(quantity)
+        except (TypeError, ValueError):
+            parsed = 0
+        if parsed > 0:
+            return parsed
     return duration_to_supply_quantity(item.duration)
 
 
@@ -119,6 +127,12 @@ def _item_out(
         frequency=item.frequency,
         duration=normalize_duration(item.duration),
         instructions=item.instructions,
+        form=getattr(item, "form", None),
+        dose=getattr(item, "dose", None),
+        route=getattr(item, "route", None),
+        timing=getattr(item, "timing", None),
+        quantity=getattr(item, "quantity", None),
+        quantity_unit=getattr(item, "quantity_unit", None),
         quantity_prescribed=prescribed,
         quantity_dispensed=dispensed_qty,
         quantity_remaining=remaining,

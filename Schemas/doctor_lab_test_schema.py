@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field, ConfigDict, AliasChoices, model_validator
 from datetime import datetime
+from decimal import Decimal
 from typing import List, Optional
 
 from Schemas.common_schema import PaginatedResponse
@@ -13,15 +14,16 @@ from Schemas.lab_schema import ReportSource
 class LabTestCreate(BaseModel):
     appointment_id: Optional[int] = None
     admission_id: Optional[int] = None
+    lab_test_id: Optional[int] = Field(default=None, gt=0)
 
-    test_name: str = Field(
-        ...,
+    test_name: Optional[str] = Field(
+        default=None,
         min_length=1,
         max_length=255
     )
 
-    category: str = Field(
-        ...,
+    category: Optional[str] = Field(
+        default=None,
         min_length=1,
         max_length=100
     )
@@ -39,6 +41,10 @@ class LabTestCreate(BaseModel):
         max_length=500
     )
 
+    # Existing clients omit this and keep accidental-duplicate protection.
+    # True creates a new order (and price snapshot) even if one is in-flight.
+    is_repeat: bool = Field(default=False)
+
     @model_validator(mode="after")
     def require_one_parent(self):
         has_appointment = self.appointment_id is not None
@@ -53,6 +59,8 @@ class LabTestCreate(BaseModel):
 # ==========================================
 
 class LabTestUpdate(BaseModel):
+    lab_test_id: Optional[int] = Field(default=None, gt=0)
+
     test_name: Optional[str] = Field(
         default=None,
         max_length=255
@@ -94,6 +102,8 @@ class LabTestResponse(BaseModel):
 
     doctor_id: int
     department_id: int
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
 
     test_name: str
     category: str
@@ -125,6 +135,8 @@ class LabTestListResponse(BaseModel):
     admission_id: Optional[int] = None
 
     department_id: int
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
 
     test_name: str
     category: str
@@ -165,6 +177,8 @@ class DoctorLabReportDetailResponse(BaseModel):
     test_name: str
     category: str
     department_id: Optional[int] = None
+    lab_test_id: Optional[int] = None
+    price: Optional[Decimal] = None
     priority: str
     order_status: str
     source: str

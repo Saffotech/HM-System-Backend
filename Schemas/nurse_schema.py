@@ -66,8 +66,12 @@ class VitalResponse(BaseModel):
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
+    ward_name: Optional[str] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
     recorded_by: int
     recorded_by_name: Optional[str] = None
+    nurse_name: Optional[str] = None
 
     temperature: Optional[float]
     blood_pressure: Optional[str]
@@ -140,6 +144,9 @@ class NursingNoteResponse(BaseModel):
     patient_uid: Optional[str] = None
     patient_name: Optional[str] = None
     bed_number: Optional[str] = None
+    ward_name: Optional[str] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
     nurse_id: int
     nurse_name: Optional[str] = None
     created_by_name: Optional[str] = None
