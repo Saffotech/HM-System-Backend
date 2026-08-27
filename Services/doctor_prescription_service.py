@@ -55,11 +55,9 @@ def _item(rx_id: int, item: PrescriptionItemCreate) -> PrescriptionItem:
         duration=item.duration,
         instructions=item.instructions or "",
         form=_blank(item.form),
-        dose=_blank(item.dose),
         route=_blank(item.route),
         timing=_blank(item.timing),
         quantity=quantity,
-        quantity_unit=_blank(item.quantity_unit),
     )
 
 

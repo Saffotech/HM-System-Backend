@@ -77,11 +77,9 @@ class PatientMedicationItem(BaseModel):
 
     instructions: Optional[str] = None
     form: Optional[str] = None
-    dose: Optional[str] = None
     route: Optional[str] = None
     timing: Optional[str] = None
     quantity: Optional[int] = None
-    quantity_unit: Optional[str] = None
 
 
 class PatientMedicationResponse(BaseModel):

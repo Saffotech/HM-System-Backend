@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, Field, model_validator
+from pydantic import BaseModel, field_validator, Field, model_validator, ConfigDict
 from datetime import datetime
 from typing import Optional, List
 
@@ -18,6 +18,8 @@ def _blank_to_none(value):
 
 
 class PrescriptionItemCreate(BaseModel):
+    # Frontend may still send dose / quantity_unit; ignore so old clients keep working.
+    model_config = ConfigDict(extra="ignore")
 
     medicine_name: str
     dosage: str
@@ -25,11 +27,9 @@ class PrescriptionItemCreate(BaseModel):
     duration: str = Field(..., min_length=1, max_length=50)
     instructions: Optional[str] = None
     form: Optional[str] = Field(default=None, max_length=50)
-    dose: Optional[str] = Field(default=None, max_length=50)
     route: Optional[str] = Field(default=None, max_length=50)
     timing: Optional[str] = Field(default=None, max_length=50)
     quantity: Optional[int] = Field(default=None, ge=1)
-    quantity_unit: Optional[str] = Field(default=None, max_length=50)
 
     @field_validator("duration", mode="before")
     @classmethod
@@ -38,10 +38,8 @@ class PrescriptionItemCreate(BaseModel):
 
     @field_validator(
         "form",
-        "dose",
         "route",
         "timing",
-        "quantity_unit",
         "instructions",
         mode="before",
     )
@@ -83,11 +81,9 @@ class PrescriptionItemResponse(BaseModel):
     duration: str
     instructions: Optional[str] = None
     form: Optional[str] = None
-    dose: Optional[str] = None
     route: Optional[str] = None
     timing: Optional[str] = None
     quantity: Optional[int] = None
-    quantity_unit: Optional[str] = None
 
     @field_validator("duration", mode="before")
     @classmethod
