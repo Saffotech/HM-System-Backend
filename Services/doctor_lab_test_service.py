@@ -1,6 +1,8 @@
+from decimal import Decimal
+
 from fastapi import HTTPException
 from fastapi.responses import FileResponse
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
@@ -15,6 +17,7 @@ from Schemas.doctor_lab_test_schema import (
     LabTestResponse,
 )
 from Services import doctor_helpers as h
+from Services.lab_test_catalog_service import resolve_catalog_test
 from Services.lab_department_helpers import resolve_lab_department_id
 from Services.lab_notification_helpers import (
     notify_lab_techs_order_cancelled,
@@ -34,6 +37,15 @@ DOCTOR_VISIBLE_LAB_STATUSES = frozenset(
         LabTestStatus.ORDERED,
         LabTestStatus.COMPLETED,
         LabTestStatus.CANCELLED,
+    }
+)
+
+# Accidental duplicates are only blocked while work is still in progress.
+# Completed/cancelled orders do not block a later clinical repeat.
+IN_FLIGHT_LAB_STATUSES = frozenset(
+    {
+        LabTestStatus.ORDERED,
+        LabTestStatus.SAMPLE_COLLECTED,
     }
 )
 
@@ -61,6 +73,41 @@ def _lab_order_status_value(order: LabTestOrder) -> str:
     return order.status.value if hasattr(order.status, "value") else str(order.status)
 
 
+def _catalog_category(catalog_test, fallback: str | None = None) -> str:
+    if fallback:
+        return fallback
+    code = (getattr(getattr(catalog_test, "department", None), "code", None) or "").upper()
+    return "Radiology" if code == "RAD" else "Laboratory"
+
+
+def _apply_catalog_snapshot(order: LabTestOrder, catalog_test, category: str | None = None) -> None:
+    order.department_id = catalog_test.department_id
+    order.lab_test_id = catalog_test.id
+    order.test_name = catalog_test.test_name
+    order.price = Decimal(str(catalog_test.price if catalog_test.price is not None else 0))
+    order.category = _catalog_category(catalog_test, category)
+
+
+def _find_in_flight_duplicate(
+    db: Session,
+    *,
+    parent_filters: list,
+    catalog_test,
+    exclude_order_id: int | None = None,
+) -> LabTestOrder | None:
+    query = db.query(LabTestOrder).filter(
+        *parent_filters,
+        LabTestOrder.status.in_(tuple(IN_FLIGHT_LAB_STATUSES)),
+        or_(
+            LabTestOrder.lab_test_id == catalog_test.id,
+            func.lower(LabTestOrder.test_name) == catalog_test.test_name.lower(),
+        ),
+    )
+    if exclude_order_id is not None:
+        query = query.filter(LabTestOrder.id != exclude_order_id)
+    return query.first()
+
+
 def _serialize_lab_test(
     order: LabTestOrder,
     patient: Patient | None = None,
@@ -76,6 +123,8 @@ def _serialize_lab_test(
         appointment_id=order.appointment_id,
         admission_id=getattr(order, "admission_id", None),
         department_id=order.department_id,
+        lab_test_id=order.lab_test_id,
+        price=order.price,
         test_name=order.test_name,
         category=order.category,
         priority=order.priority,
@@ -101,6 +150,8 @@ def _serialize_lab_test_response(
         ),
         doctor_id=order.doctor_id,
         department_id=order.department_id,
+        lab_test_id=order.lab_test_id,
+        price=order.price,
         test_name=order.test_name,
         category=order.category,
         priority=order.priority,
@@ -167,27 +218,39 @@ def create_lab_test_service(
     if not patient:
         raise HTTPException(status_code=404, detail="Patient not found")
 
-    existing_test = (
-        db.query(LabTestOrder)
-        .filter(
-            *duplicate_filter,
-            LabTestOrder.test_name == payload.test_name,
-            LabTestOrder.status != LabTestStatus.CANCELLED,
+    if payload.lab_test_id is not None:
+        catalog_test = resolve_catalog_test(
+            db,
+            lab_test_id=payload.lab_test_id,
+            test_name=payload.test_name,
+            department_id=payload.department_id,
         )
-        .first()
-    )
-    if existing_test:
-        raise HTTPException(
-            status_code=400,
-            detail=duplicate_detail,
+        department_id = catalog_test.department_id
+    else:
+        department_id = resolve_lab_department_id(
+            db,
+            department_id=payload.department_id,
+            category=payload.category,
+            test_name=payload.test_name,
+        )
+        catalog_test = resolve_catalog_test(
+            db,
+            lab_test_id=None,
+            test_name=payload.test_name,
+            department_id=department_id,
         )
 
-    department_id = resolve_lab_department_id(
-        db,
-        department_id=payload.department_id,
-        category=payload.category,
-        test_name=payload.test_name,
-    )
+    if not payload.is_repeat:
+        existing_test = _find_in_flight_duplicate(
+            db,
+            parent_filters=duplicate_filter,
+            catalog_test=catalog_test,
+        )
+        if existing_test:
+            raise HTTPException(
+                status_code=400,
+                detail=f"{duplicate_detail}. Use Repeat Test to order again.",
+            )
 
     lab_test = LabTestOrder(
         appointment_id=appointment.id if appointment else None,
@@ -196,13 +259,11 @@ def create_lab_test_service(
         patient_name=h.display_name(patient.first_name, patient.last_name),
         patient_uhid=patient.patient_uid,
         doctor_id=doctor_id,
-        department_id=department_id,
-        test_name=payload.test_name,
-        category=payload.category,
         priority=payload.priority,
         clinical_notes=payload.clinical_notes,
         status=LabTestStatus.ORDERED,
     )
+    _apply_catalog_snapshot(lab_test, catalog_test, payload.category)
     db.add(lab_test)
     if commit:
         db.commit()
@@ -309,15 +370,56 @@ def update_lab_test_service(
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update")
 
-    next_category = update_data.get("category", test.category)
-    next_test_name = update_data.get("test_name", test.test_name)
-    if "department_id" in update_data or "category" in update_data or "test_name" in update_data:
-        update_data["department_id"] = resolve_lab_department_id(
-            db,
-            department_id=update_data.get("department_id"),
-            category=next_category,
-            test_name=next_test_name,
+    catalog_keys = {"lab_test_id", "test_name", "department_id", "category"}
+    if catalog_keys.intersection(update_data):
+        next_category = update_data.get("category", test.category)
+        next_test_name = update_data.get("test_name", test.test_name)
+        next_lab_test_id = update_data.get("lab_test_id", test.lab_test_id)
+        if "lab_test_id" in update_data:
+            catalog_test = resolve_catalog_test(
+                db,
+                lab_test_id=next_lab_test_id,
+                test_name=next_test_name,
+                department_id=update_data.get("department_id"),
+            )
+        else:
+            department_id = resolve_lab_department_id(
+                db,
+                department_id=update_data.get("department_id"),
+                category=next_category,
+                test_name=next_test_name,
+            )
+            catalog_test = resolve_catalog_test(
+                db,
+                lab_test_id=None,
+                test_name=next_test_name,
+                department_id=department_id,
+            )
+
+        parent_filter = (
+            [LabTestOrder.admission_id == test.admission_id]
+            if test.admission_id is not None
+            else [LabTestOrder.appointment_id == test.appointment_id]
         )
+        duplicate = _find_in_flight_duplicate(
+            db,
+            parent_filters=parent_filter,
+            catalog_test=catalog_test,
+            exclude_order_id=test.id,
+        )
+        if duplicate:
+            raise HTTPException(
+                status_code=400,
+                detail="This test has already been ordered for this visit",
+            )
+
+        _apply_catalog_snapshot(
+            test,
+            catalog_test,
+            update_data["category"] if "category" in update_data else None,
+        )
+        for key in catalog_keys:
+            update_data.pop(key, None)
 
     for field, value in update_data.items():
         setattr(test, field, value)
@@ -425,6 +527,8 @@ def get_doctor_lab_report_by_test_service(
             ),
         ),
         "test_name": order.test_name,
+        "lab_test_id": order.lab_test_id,
+        "price": order.price,
         "category": order.category,
         "department_id": order.department_id,
         "priority": order.priority,

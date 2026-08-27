@@ -6,6 +6,8 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
+    Response,
     status
 )
 
@@ -26,6 +28,8 @@ from Schemas.nurse_schema import (
     NursingNoteResponse
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Services.nurse_nursing_notes_service import (
     create_note_service,
     update_note_service,
@@ -33,6 +37,7 @@ from Services.nurse_nursing_notes_service import (
     get_all_notes_service,
     search_notes_service
 )
+from Utils.pagination import set_pagination_headers
 
 router = APIRouter(
     prefix="/nurse/notes",
@@ -52,6 +57,7 @@ router = APIRouter(
 def create_note(
 
     note_data: NursingNoteCreate,
+    request: Request,
 
     db: Session = Depends(get_db),
 
@@ -66,11 +72,19 @@ def create_note(
     )
 ):
 
-    return create_note_service(
+    result = create_note_service(
         db=db,
         note_data=note_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_notes_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -84,6 +98,7 @@ def create_note(
 def update_note(
 
     note_data: NursingNoteUpdate,
+    request: Request,
 
     note_id: int = Path(
         ...,
@@ -104,12 +119,21 @@ def update_note(
     )
 ):
 
-    return update_note_service(
+    result = update_note_service(
         db=db,
         note_id=note_id,
         note_data=note_data,
         nurse_id=current_user.id,
     )
+    nurse_audit.log_notes_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        note_id=note_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -121,6 +145,8 @@ def update_note(
     response_model=List[NursingNoteResponse]
 )
 def search_notes(
+
+    response: Response,
 
     patient_id: int | None = Query(
         None,
@@ -190,7 +216,7 @@ def search_notes(
     )
 ):
 
-    return search_notes_service(
+    result = search_notes_service(
         db=db,
 
         patient_id=patient_id,
@@ -212,6 +238,13 @@ def search_notes(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -223,6 +256,8 @@ def search_notes(
     response_model=List[NursingNoteResponse]
 )
 def get_all_notes(
+
+    response: Response,
 
     page: int = Query(
         1,
@@ -255,13 +290,20 @@ def get_all_notes(
     )
 ):
 
-    return get_all_notes_service(
+    result = get_all_notes_service(
         db=db,
         page=page,
         page_size=page_size,
         allocated_only=allocated_only,
         nurse_id=current_user.id if allocated_only else None,
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -273,6 +315,8 @@ def get_all_notes(
     response_model=NursingNoteResponse
 )
 def get_note(
+
+    request: Request,
 
     note_id: int = Path(
         ...,
@@ -293,7 +337,15 @@ def get_note(
     )
 ):
 
-    return get_note_by_id_service(
+    result = get_note_by_id_service(
         db=db,
         note_id=note_id
     )
+    nurse_audit.log_notes_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        note_id=note_id,
+    )
+    return result

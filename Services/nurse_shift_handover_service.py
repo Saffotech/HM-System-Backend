@@ -25,6 +25,7 @@ from Models.nurse_shift_handover import (
 from Models.opd_billing import Bed
 from Models.patient import Patient
 from Models.user import User
+from Services.ipd_helpers import attending_doctors_for_patients
 from Schemas.nurse_shift_handover_schema import (
     ShiftHandoverCreate,
     ShiftHandoverPatientsBulkCreate,
@@ -1060,9 +1061,15 @@ def get_handover_detail_service(
         .all()
     )
 
+    attending_map = attending_doctors_for_patients(
+        db,
+        [patient.patient_id for patient in patients],
+    )
+
     patient_data = []
 
     for patient in patients:
+        doctor_id, doctor_name = attending_map.get(patient.patient_id, (None, None))
 
         patient_data.append({
 
@@ -1081,6 +1088,12 @@ def get_handover_detail_service(
 
             "bed_number":
                 patient.bed_number,
+
+            "doctor_id":
+                doctor_id,
+
+            "doctor_name":
+                doctor_name,
 
             "patient_summary":
                 patient.patient_summary,

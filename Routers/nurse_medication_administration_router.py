@@ -5,6 +5,8 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
+    Response,
     status
 )
 from sqlalchemy.orm import Session
@@ -18,6 +20,8 @@ from dependencies import (
 
 from Models.user import User
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate
@@ -31,6 +35,7 @@ from Services.nurse_medication_administration_service import (
     get_patient_medication_history_service,
     get_medication_history_service
 )
+from Utils.pagination import set_pagination_headers
 
 router = APIRouter(
     prefix="/nurse/medications",
@@ -44,6 +49,8 @@ router = APIRouter(
 
 @router.get("/patients")
 def get_medication_patients(
+
+    response: Response,
 
     patient_id: int | None = Query(
         None,
@@ -85,7 +92,7 @@ def get_medication_patients(
     )
 ):
 
-    return get_medication_patients_service(
+    result = get_medication_patients_service(
         db=db,
         patient_id=patient_id,
         patient_name=patient_name,
@@ -96,6 +103,13 @@ def get_medication_patients(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -104,6 +118,8 @@ def get_medication_patients(
 
 @router.get("/patient/{patient_id}")
 def get_patient_medications(
+
+    request: Request,
 
     patient_id: int = Path(
         ...,
@@ -124,10 +140,18 @@ def get_patient_medications(
     )
 ):
 
-    return get_patient_medications_service(
+    result = get_patient_medications_service(
         db=db,
         patient_id=patient_id
     )
+    nurse_audit.log_medication_patient_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        patient_id=patient_id,
+    )
+    return result
 
 
 # ==========================================================
@@ -141,6 +165,7 @@ def get_patient_medications(
 def administer_medication(
 
     medication_data: MedicationAdministrationCreate,
+    request: Request,
 
     current_user: User = Depends(
         get_current_user
@@ -155,11 +180,19 @@ def administer_medication(
     db: Session = Depends(get_db)
 ):
 
-    return administer_medication_service(
+    result = administer_medication_service(
         db=db,
         medication_data=medication_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_medication_administer(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -169,6 +202,7 @@ def administer_medication(
 @router.put("/administer/{administration_id}")
 def update_medication_administration(
     medication_data: MedicationAdministrationUpdate,
+    request: Request,
     administration_id: int = Path(..., ge=1),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(
@@ -177,12 +211,21 @@ def update_medication_administration(
     db: Session = Depends(get_db)
 ):
 
-    return update_medication_administration_service(
+    result = update_medication_administration_service(
         db=db,
         administration_id=administration_id,
         medication_data=medication_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_medication_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        administration_id=administration_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -191,6 +234,8 @@ def update_medication_administration(
 
 @router.get("/history")
 def get_medication_history(
+
+    response: Response,
 
     patient_id: int | None = Query(
         None,
@@ -233,7 +278,7 @@ def get_medication_history(
     )
 ):
 
-    return get_medication_history_service(
+    result = get_medication_history_service(
         db=db,
         patient_id=patient_id,
         patient_name=patient_name,
@@ -245,6 +290,13 @@ def get_medication_history(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -254,10 +306,23 @@ def get_medication_history(
 @router.get("/history/{patient_id}")
 def get_patient_medication_history(
 
+    response: Response,
+
     patient_id: int = Path(
         ...,
         ge=1,
         description="Patient ID"
+    ),
+
+    page: int = Query(
+        1,
+        ge=1
+    ),
+
+    page_size: int = Query(
+        20,
+        ge=1,
+        le=100
     ),
 
     db: Session = Depends(get_db),
@@ -273,7 +338,16 @@ def get_patient_medication_history(
     )
 ):
 
-    return get_patient_medication_history_service(
+    result = get_patient_medication_history_service(
         db=db,
-        patient_id=patient_id
+        patient_id=patient_id,
+        page=page,
+        page_size=page_size,
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]

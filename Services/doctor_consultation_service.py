@@ -28,7 +28,9 @@ def _serialize_lab_order(order: LabTestOrder) -> dict:
     return {
         "id": order.id,
         "appointment_id": order.appointment_id,
+        "lab_test_id": order.lab_test_id,
         "test_name": order.test_name,
+        "price": order.price,
         "category": order.category,
         "priority": order.priority,
         "status": status_value(order.status),
@@ -207,7 +209,9 @@ def save_consultation_service(
                         db, notified_rx, doctor_id=doctor_id
                     )
 
-        appointment_dict = h.appointment_to_dict(db, appointment)
+        appointment_dict = h.with_nurse_names(
+            db, [h.appointment_to_dict(db, appointment)]
+        )[0]
         return {
             "success": True,
             "message": "Consultation saved",

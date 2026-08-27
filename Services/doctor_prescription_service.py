@@ -38,7 +38,15 @@ def _prescription_query(db: Session):
     )
 
 
+def _blank(value: str | None) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def _item(rx_id: int, item: PrescriptionItemCreate) -> PrescriptionItem:
+    quantity = item.quantity if item.quantity and item.quantity > 0 else None
     return PrescriptionItem(
         prescription_id=rx_id,
         medicine_name=item.medicine_name,
@@ -46,6 +54,12 @@ def _item(rx_id: int, item: PrescriptionItemCreate) -> PrescriptionItem:
         frequency=item.frequency,
         duration=item.duration,
         instructions=item.instructions or "",
+        form=_blank(item.form),
+        dose=_blank(item.dose),
+        route=_blank(item.route),
+        timing=_blank(item.timing),
+        quantity=quantity,
+        quantity_unit=_blank(item.quantity_unit),
     )
 
 

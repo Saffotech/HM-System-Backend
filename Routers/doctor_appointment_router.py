@@ -26,6 +26,7 @@ from Services.doctor_appointment_service import (
     get_appointment_history_service,
     get_appointments_by_date_service,
 )
+from Utils.pagination import paginate_sequence
 
 router = APIRouter(
     prefix="/appointments",
@@ -42,6 +43,17 @@ router = APIRouter(
     status_code=status.HTTP_200_OK,
 )
 def get_today_appointments(
+    page: int | None = Query(
+        None,
+        ge=1,
+        description="Optional page. Omit to return the full list (legacy clients).",
+    ),
+    page_size: int | None = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Optional page size when page is provided.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:view")),
@@ -50,13 +62,20 @@ def get_today_appointments(
         db=db,
         doctor_id=current_user.id,
     )
-
-    return {
+    items, total, page_n, size = paginate_sequence(
+        appointments, page=page, page_size=page_size
+    )
+    payload = {
         "success": True,
         "message": "Today's appointments fetched successfully",
-        "appointment": len(appointments),
-        "appointments": appointments,
+        "appointment": total,
+        "appointments": items,
     }
+    if page is not None:
+        payload["page"] = page_n
+        payload["page_size"] = size
+        payload["total"] = total
+    return payload
 
 
 # ==========================================================
@@ -92,6 +111,17 @@ def get_appointment_history(
 )
 def get_appointments_by_date(
     appointment_date: date,
+    page: int | None = Query(
+        None,
+        ge=1,
+        description="Optional page. Omit to return the full list (legacy clients).",
+    ),
+    page_size: int | None = Query(
+        None,
+        ge=1,
+        le=100,
+        description="Optional page size when page is provided.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("appointments:view")),
@@ -101,13 +131,20 @@ def get_appointments_by_date(
         doctor_id=current_user.id,
         appointment_date=appointment_date,
     )
-
-    return {
+    items, total, page_n, size = paginate_sequence(
+        appointments, page=page, page_size=page_size
+    )
+    payload = {
         "success": True,
         "message": "Appointments fetched successfully",
-        "total_appointments": len(appointments),
-        "appointments": appointments,
+        "total_appointments": total,
+        "appointments": items,
     }
+    if page is not None:
+        payload["page"] = page_n
+        payload["page_size"] = size
+        payload["total"] = total
+    return payload
 
 
 # ==========================================================

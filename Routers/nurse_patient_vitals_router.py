@@ -6,6 +6,8 @@ from fastapi import (
     Depends,
     Query,
     Path,
+    Request,
+    Response,
     status
 )
 
@@ -26,6 +28,8 @@ from Schemas.nurse_schema import (
     VitalResponse
 )
 
+from Services.audit_helpers import client_ip, user_agent
+from Services import nurse_audit_service as nurse_audit
 from Services.nurse_patient_vitals_service import (
     create_vital_service,
     update_vital_service,
@@ -33,6 +37,7 @@ from Services.nurse_patient_vitals_service import (
     get_all_vitals_service,
     search_vitals_service
 )
+from Utils.pagination import set_pagination_headers
 
 router = APIRouter(
     prefix="/nurse/vitals",
@@ -52,6 +57,7 @@ router = APIRouter(
 def create_vital(
 
     vital_data: VitalCreate,
+    request: Request,
 
     db: Session = Depends(get_db),
 
@@ -66,11 +72,19 @@ def create_vital(
     )
 ):
 
-    return create_vital_service(
+    result = create_vital_service(
         db=db,
         vital_data=vital_data,
         nurse_id=current_user.id
     )
+    nurse_audit.log_vitals_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -84,6 +98,7 @@ def create_vital(
 def update_vital(
 
     vital_data: VitalUpdate,
+    request: Request,
 
     vital_id: int = Path(
         ...,
@@ -104,12 +119,21 @@ def update_vital(
     )
 ):
 
-    return update_vital_service(
+    result = update_vital_service(
         db=db,
         vital_id=vital_id,
         vital_data=vital_data,
         nurse_id=current_user.id,
     )
+    nurse_audit.log_vitals_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        vital_id=vital_id,
+        result=result,
+    )
+    return result
 
 
 # ==========================================================
@@ -121,6 +145,8 @@ def update_vital(
     response_model=List[VitalResponse]
 )
 def search_vitals(
+
+    response: Response,
 
     patient_id: int | None = Query(
         None,
@@ -190,7 +216,7 @@ def search_vitals(
     )
 ):
 
-    return search_vitals_service(
+    result = search_vitals_service(
         db=db,
 
         patient_id=patient_id,
@@ -212,6 +238,13 @@ def search_vitals(
         page=page,
         page_size=page_size
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -223,6 +256,8 @@ def search_vitals(
     response_model=List[VitalResponse]
 )
 def get_all_vitals(
+
+    response: Response,
 
     page: int = Query(
         1,
@@ -255,13 +290,20 @@ def get_all_vitals(
     )
 ):
 
-    return get_all_vitals_service(
+    result = get_all_vitals_service(
         db=db,
         page=page,
         page_size=page_size,
         allocated_only=allocated_only,
         nurse_id=current_user.id if allocated_only else None,
     )
+    set_pagination_headers(
+        response,
+        total=result["total"],
+        page=result["page"],
+        page_size=result["page_size"],
+    )
+    return result["items"]
 
 
 # ==========================================================
@@ -273,6 +315,8 @@ def get_all_vitals(
     response_model=VitalResponse
 )
 def get_vital(
+
+    request: Request,
 
     vital_id: int = Path(
         ...,
@@ -293,7 +337,15 @@ def get_vital(
     )
 ):
 
-    return get_vital_by_id_service(
+    result = get_vital_by_id_service(
         db=db,
         vital_id=vital_id
     )
+    nurse_audit.log_vitals_view(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        vital_id=vital_id,
+    )
+    return result

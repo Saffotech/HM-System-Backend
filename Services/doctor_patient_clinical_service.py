@@ -14,8 +14,14 @@ from Models.ipd import IpdAdmission
 from Models.nurse_patient_vitals import PatientVitals
 from Models.nurse_nursing_notes import NursingNote
 
-from Services.nurse_patient_vitals_service import _serialize_vital
-from Services.nurse_nursing_notes_service import _serialize_note
+from Services.nurse_patient_vitals_service import (
+    _enrich_vitals_batch,
+    _serialize_vital,
+)
+from Services.nurse_nursing_notes_service import (
+    _enrich_notes_batch,
+    _serialize_note,
+)
 
 
 def get_assigned_patient_ids(db: Session, doctor_id: int) -> set[int]:
@@ -86,7 +92,7 @@ def get_patient_vitals_service(
     )
 
     total, rows = _paginate(query, page, page_size)
-    items = [_serialize_vital(vital, db) for vital in rows]
+    items = [_serialize_vital(vital, db) for vital in _enrich_vitals_batch(db, rows)]
 
     return {
         "success": True,
@@ -130,7 +136,7 @@ def get_patient_notes_service(
     )
 
     total, rows = _paginate(query, page, page_size)
-    items = [_serialize_note(note, db) for note in rows]
+    items = [_serialize_note(note, db) for note in _enrich_notes_batch(db, rows)]
 
     return {
         "success": True,

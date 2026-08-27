@@ -8,6 +8,7 @@ from Models.opd_billing import Bed
 from Models.doctor_prescriptions import Prescription,PrescriptionItem
 from Models.nurse_medication_administration import MedicationAdministration, _now
 from Models.user import User
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationCreate,
     MedicationAdministrationUpdate,
@@ -189,6 +190,7 @@ def get_medication_patients_service(
     # PAGINATION
     # ======================================================
 
+    total = query.order_by(None).count()
     records = (
         query
         .order_by(
@@ -203,6 +205,15 @@ def get_medication_patients_service(
         .all()
     )
 
+    attending_map = attending_doctors_for_patients(
+        db,
+        [patient.id for _, patient, _ in records],
+    )
+    prescription_doctor_names = doctor_name_map(
+        db,
+        [prescription.doctor_id for prescription, _, _ in records],
+    )
+
     result = []
 
     for prescription, patient, bed in records:
@@ -215,7 +226,11 @@ def get_medication_patients_service(
             )
             .count()
         )
- 
+        doctor_id, doctor_name = attending_map.get(patient.id, (None, None))
+        if not doctor_id and prescription.doctor_id:
+            doctor_id = prescription.doctor_id
+            doctor_name = prescription_doctor_names.get(prescription.doctor_id)
+
         result.append({
 
             "patient_id": patient.id,
@@ -233,11 +248,20 @@ def get_medication_patients_service(
             "ward_name":
                 bed.ward_name,
 
+            "doctor_id": doctor_id,
+
+            "doctor_name": doctor_name,
+
             "medicine_count":
                 medicine_count
         })
 
-    return result
+    return {
+        "items": result,
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def get_patient_medications_service(
@@ -256,16 +280,28 @@ def get_patient_medications_service(
             detail="Patient not found"
         )
 
-    prescription = (
+    # Prefer the newest Rx that still has items for doctor metadata fallback.
+    # Detail must include items from *all* of the patient's prescriptions so it
+    # matches the nurse list (which sums medicine_count across every Rx).
+    latest_with_items = (
         db.query(Prescription)
-        .filter(
-            Prescription.patient_id == patient_id
+        .join(
+            PrescriptionItem,
+            PrescriptionItem.prescription_id == Prescription.id,
         )
+        .filter(Prescription.patient_id == patient_id)
         .order_by(Prescription.created_at.desc())
         .first()
     )
 
-    if not prescription:
+    any_prescription = latest_with_items or (
+        db.query(Prescription)
+        .filter(Prescription.patient_id == patient_id)
+        .order_by(Prescription.created_at.desc())
+        .first()
+    )
+
+    if not any_prescription:
         raise HTTPException(
             status_code=404,
             detail="Prescription not found"
@@ -273,9 +309,14 @@ def get_patient_medications_service(
 
     medications = (
         db.query(PrescriptionItem)
-        .filter(
-            PrescriptionItem.prescription_id
-            == prescription.id
+        .join(
+            Prescription,
+            PrescriptionItem.prescription_id == Prescription.id,
+        )
+        .filter(Prescription.patient_id == patient_id)
+        .order_by(
+            Prescription.created_at.desc(),
+            PrescriptionItem.id.asc(),
         )
         .all()
     )
@@ -288,6 +329,15 @@ def get_patient_medications_service(
         ).order_by(Bed.admitted_at.desc())
          .first()
     )
+    doctor_id, doctor_name = attending_doctors_for_patients(
+        db, [patient_id]
+    ).get(patient_id, (None, None))
+    meta_rx = latest_with_items or any_prescription
+    if not doctor_id and meta_rx.doctor_id:
+        doctor_id = meta_rx.doctor_id
+        doctor_name = doctor_name_map(db, [meta_rx.doctor_id]).get(
+            meta_rx.doctor_id
+        )
     return {
         "patient_id": patient.id,
         "patient_uid": patient.patient_uid,
@@ -304,13 +354,22 @@ def get_patient_medications_service(
         "ward_name":
             bed.ward_name if bed else None,
 
+        "doctor_id": doctor_id,
+        "doctor_name": doctor_name,
+
         "medications": [
             {
                 "prescription_item_id": item.id,
                 "medicine_name": item.medicine_name,
                 "dosage": item.dosage,
+                "dose": getattr(item, "dose", None),
+                "form": getattr(item, "form", None),
+                "route": getattr(item, "route", None),
+                "timing": getattr(item, "timing", None),
                 "frequency": item.frequency,
                 "duration": item.duration,
+                "quantity": getattr(item, "quantity", None),
+                "quantity_unit": getattr(item, "quantity_unit", None),
                 "instructions": item.instructions,
             }
             for item in medications
@@ -517,12 +576,16 @@ def get_patient_medication_history_service(
             detail="Patient not found"
         )
 
-    history = (
+    history_query = (
         _administration_query(db)
         .filter(
             MedicationAdministration.patient_id == patient_id,
             MedicationAdministration.is_active == True
         )
+    )
+    total = history_query.order_by(None).count()
+    history = (
+        history_query
         .order_by(
             MedicationAdministration.administered_at.desc()
         )
@@ -536,10 +599,15 @@ def get_patient_medication_history_service(
     )
 
     enriched = _enrich_administrations_batch(db, history)
-    return [
-        _serialize_administration(record)
-        for record in enriched
-    ]
+    return {
+        "items": [
+            _serialize_administration(record)
+            for record in enriched
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 def get_medication_history_service(
@@ -640,6 +708,7 @@ def get_medication_history_service(
             )
         )
 
+    total = query.order_by(None).count()
     records = (
         query
         .order_by(
@@ -656,7 +725,12 @@ def get_medication_history_service(
     )
 
     enriched = _enrich_administrations_batch(db, records)
-    return [
-        _serialize_administration(record)
-        for record in enriched
-    ]
+    return {
+        "items": [
+            _serialize_administration(record)
+            for record in enriched
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }

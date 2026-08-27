@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 from Models.opd_billing import Appointment
 from Models.ipd import IpdAdmission
 from Models.patient import Patient, registration_source_value
+from Services.ipd_helpers import allocated_nurses_for_patients
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -45,6 +46,21 @@ def admitted_between(from_date: Optional[date] = None, to_date: Optional[date] =
 
 def display_name(first: str, last: Optional[str] = None) -> str:
     return f"{first} {last or ''}".strip()
+
+
+def with_nurse_names(db: Session, items: List[dict]) -> List[dict]:
+    """Attach assigned nurse_id / nurse_name onto doctor patient rows."""
+    if not items:
+        return items
+    mapping = allocated_nurses_for_patients(
+        db,
+        [item.get("patient_id") for item in items],
+    )
+    for item in items:
+        nurse_id, nurse_name = mapping.get(item.get("patient_id"), (None, None))
+        item["nurse_id"] = nurse_id
+        item["nurse_name"] = nurse_name
+    return items
 
 
 def patient_age(date_of_birth: Optional[date]) -> Optional[int]:
@@ -216,6 +232,8 @@ def appointment_to_dict(
         "admitted_at": None,
         "discharged_at": None,
         "created_at": apt.created_at.isoformat() if apt.created_at else None,
+        "nurse_id": None,
+        "nurse_name": None,
     }
 
 
@@ -227,7 +245,7 @@ def appointments_to_dicts(db: Session, rows: List[Appointment]) -> List[dict]:
         if pid not in patient_cache:
             patient_cache[pid] = get_patient(db, pid)
         out.append(appointment_to_dict(db, apt, patient_cache.get(pid)))
-    return out
+    return with_nurse_names(db, out)
 
 
 def admission_to_dict(
@@ -292,6 +310,8 @@ def admission_to_dict(
         "admitted_at": admitted.isoformat() if admitted else None,
         "discharged_at": discharged.isoformat() if discharged else None,
         "created_at": admission.created_at.isoformat() if admission.created_at else None,
+        "nurse_id": None,
+        "nurse_name": None,
     }
 
 
@@ -315,4 +335,4 @@ def admissions_to_dicts(
                 use_dashboard_status=use_dashboard_status,
             )
         )
-    return out
+    return with_nurse_names(db, out)

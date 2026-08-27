@@ -1,4 +1,3 @@
-from collections import defaultdict
 from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -14,6 +13,7 @@ def _today_ist() -> date:
 from Models.department import Department
 from Models.doctor_patient_queue import PatientQueue
 from Models.doctor_prescriptions import Prescription, PrescriptionItem
+from Models.ipd import IpdAdmission
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
 from Models.nurse_medication_administration import (
@@ -24,6 +24,7 @@ from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Bed
 from Models.patient import Patient
 from Services import doctor_helpers as h
+from Services.ipd_helpers import attending_doctors_for_patients, doctor_name_map
 
 
 def get_nurse_today_queue_service(
@@ -78,8 +79,7 @@ def get_nurse_today_queue_service(
 
     total = query.count()
 
-    items = []
-    for row in (
+    rows = (
         query
         .order_by(
             PatientQueue.priority.desc(),
@@ -88,7 +88,11 @@ def get_nurse_today_queue_service(
         .offset((page - 1) * page_size)
         .limit(page_size)
         .all()
-    ):
+    )
+    names = doctor_name_map(db, [row.doctor_id for row in rows])
+
+    items = []
+    for row in rows:
         items.append({
             "id": row.id,
             "appointment_id": row.appointment_id,
@@ -98,6 +102,7 @@ def get_nurse_today_queue_service(
             "patient_phone": row.patient_phone,
             "appointment_uid": row.appointment_uid,
             "doctor_id": row.doctor_id,
+            "doctor_name": names.get(row.doctor_id),
             "token_number": row.token_number,
             "queue_date": row.queue_date,
             "status": row.status.value if hasattr(row.status, "value") else row.status,
@@ -149,7 +154,22 @@ def _base_bed_patients_query(
         )
 
     if department_id:
-        query = query.filter(Bed.department_id == department_id)
+        admitted_in_dept = db.query(IpdAdmission.patient_id).filter(
+            IpdAdmission.status == "admitted",
+            IpdAdmission.department_id == department_id,
+        )
+        currently_admitted = db.query(IpdAdmission.patient_id).filter(
+            IpdAdmission.status == "admitted",
+        )
+        query = query.filter(
+            or_(
+                Patient.id.in_(admitted_in_dept),
+                and_(
+                    Bed.department_id == department_id,
+                    ~Patient.id.in_(currently_admitted),
+                ),
+            )
+        )
 
     if patient_id:
         query = query.filter(Patient.id == patient_id)
@@ -174,6 +194,64 @@ def _base_bed_patients_query(
         query = query.filter(or_(*filters))
 
     return query
+
+
+def _attending_care_team_for_patients(
+    db: Session,
+    patient_ids: list[int],
+) -> dict[int, tuple[int | None, str | None, int | None, str | None]]:
+    """Latest admitted IPD care team: patient_id -> (doctor_id, doctor_name, department_id, department_name).
+
+    Admission is the source of truth after doctor/department reassignment.
+    Bed.department_id is not updated by IPD care-team edits.
+    """
+    unique = {patient_id for patient_id in patient_ids if patient_id}
+    if not unique:
+        return {}
+
+    admissions = (
+        db.query(IpdAdmission)
+        .filter(
+            IpdAdmission.patient_id.in_(unique),
+            IpdAdmission.status == "admitted",
+        )
+        .order_by(IpdAdmission.admitted_at.desc(), IpdAdmission.id.desc())
+        .all()
+    )
+    latest: dict[int, IpdAdmission] = {}
+    for admission in admissions:
+        if admission.patient_id not in latest:
+            latest[admission.patient_id] = admission
+
+    doctor_names = doctor_name_map(
+        db,
+        [admission.doctor_id for admission in latest.values() if admission.doctor_id],
+    )
+    department_ids = {
+        admission.department_id
+        for admission in latest.values()
+        if admission.department_id
+    }
+    department_names = {}
+    if department_ids:
+        department_names = {
+            row.id: row.name
+            for row in db.query(Department)
+            .filter(Department.id.in_(department_ids))
+            .all()
+        }
+
+    return {
+        patient_id: (
+            admission.doctor_id,
+            doctor_names.get(admission.doctor_id) if admission.doctor_id else None,
+            admission.department_id,
+            department_names.get(admission.department_id)
+            if admission.department_id
+            else None,
+        )
+        for patient_id, admission in latest.items()
+    }
 
 
 def _latest_vitals_map(
@@ -216,37 +294,22 @@ def _pending_medication_counts(
 
     counts = {patient_id: 0 for patient_id in patient_ids}
 
-    prescriptions = (
-        db.query(Prescription)
-        .filter(Prescription.patient_id.in_(patient_ids))
-        .order_by(
-            Prescription.patient_id.asc(),
-            Prescription.created_at.desc(),
+    # Count pending across *all* prescriptions for each patient (not latest-only),
+    # so dashboard badges stay consistent with the nurse medications list/detail.
+    item_rows = (
+        db.query(Prescription.patient_id, PrescriptionItem.id)
+        .join(
+            PrescriptionItem,
+            PrescriptionItem.prescription_id == Prescription.id,
         )
+        .filter(Prescription.patient_id.in_(patient_ids))
         .all()
     )
 
-    latest_rx_by_patient: dict[int, Prescription] = {}
-    for prescription in prescriptions:
-        if prescription.patient_id not in latest_rx_by_patient:
-            latest_rx_by_patient[prescription.patient_id] = prescription
-
-    if not latest_rx_by_patient:
+    if not item_rows:
         return counts
 
-    prescription_ids = [
-        prescription.id for prescription in latest_rx_by_patient.values()
-    ]
-    items = (
-        db.query(PrescriptionItem)
-        .filter(PrescriptionItem.prescription_id.in_(prescription_ids))
-        .all()
-    )
-
-    if not items:
-        return counts
-
-    item_ids = [item.id for item in items]
+    item_ids = [item_id for _, item_id in item_rows]
     given_rows = (
         db.query(
             MedicationAdministration.prescription_item_id,
@@ -264,16 +327,9 @@ def _pending_medication_counts(
         for prescription_item_id, total in given_rows
     }
 
-    items_by_prescription: dict[int, list[PrescriptionItem]] = defaultdict(list)
-    for item in items:
-        items_by_prescription[item.prescription_id].append(item)
-
-    for patient_id, prescription in latest_rx_by_patient.items():
-        pending = 0
-        for item in items_by_prescription.get(prescription.id, []):
-            if given_map.get(item.id, 0) == 0:
-                pending += 1
-        counts[patient_id] = pending
+    for patient_id, item_id in item_rows:
+        if given_map.get(item_id, 0) == 0:
+            counts[patient_id] += 1
 
     return counts
 
@@ -374,9 +430,17 @@ def get_nurse_bed_patients_service(
     patient_ids = [patient.id for _, patient, _ in rows]
     vitals_map = _latest_vitals_map(db, patient_ids)
     pending_map = _pending_medication_counts(db, patient_ids)
+    care_team_map = _attending_care_team_for_patients(db, patient_ids)
 
     items = []
     for bed, patient, department in rows:
+        doctor_id, doctor_name, dept_id, dept_name = care_team_map.get(
+            patient.id,
+            (None, None, None, None),
+        )
+        if dept_id is None:
+            dept_id = bed.department_id
+            dept_name = department.name if department else None
         items.append({
             "patient_id": patient.id,
             "patient_name": h.display_name(
@@ -388,8 +452,10 @@ def get_nurse_bed_patients_service(
             "bed_id": bed.id,
             "bed_number": bed.bed_number,
             "ward_name": bed.ward_name,
-            "department_id": bed.department_id,
-            "department_name": department.name if department else None,
+            "doctor_id": doctor_id,
+            "doctor_name": doctor_name,
+            "department_id": dept_id,
+            "department_name": dept_name,
             "admitted_at": bed.admitted_at,
             "last_vitals": _vital_summary(vitals_map.get(patient.id)),
             "pending_medication_count": pending_map.get(patient.id, 0),
@@ -552,11 +618,21 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         .all()
     )
 
+    occupied_patient_ids = [
+        r.patient_id
+        for r in allocation_rows
+        if r.bed_status == "occupied" and r.patient_id is not None
+    ]
+    attending_map = attending_doctors_for_patients(db, occupied_patient_ids)
+
     my_beds = []
     for r in allocation_rows:
         is_occupied = r.bed_status == "occupied" and r.patient_id is not None
         patient_name = (
             h.display_name(r.patient_first_name, r.patient_last_name) if is_occupied else None
+        )
+        doctor_id, doctor_name = (
+            attending_map.get(r.patient_id, (None, None)) if is_occupied else (None, None)
         )
 
         my_beds.append(
@@ -566,6 +642,8 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
                 "ward_name": r.ward_name,
                 "patient_id": r.patient_id,
                 "patient_name": patient_name,
+                "doctor_id": doctor_id,
+                "doctor_name": doctor_name,
                 "assigned_from": r.shift_date,
                 "assigned_until": r.assigned_until,
                 "shift_name": r.shift_name,
