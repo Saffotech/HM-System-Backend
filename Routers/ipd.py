@@ -1,7 +1,7 @@
 """IPD API routes — admissions, beds, billing, discharge, dashboard."""
-from typing import Optional
+from typing import Any, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -19,6 +19,7 @@ from Schemas.ipd_schema import (
     IpdPatientRegisterResponse,
     IpdTransferBedRequest,
 )
+from Services import ipd_billing_service
 from Services import ipd_service
 from Services import opd_service
 from Services import patient_service
@@ -228,6 +229,63 @@ def running_bills(
     _: bool = Depends(PermissionChecker("ipd:bill:view")),
 ):
     return ipd_service.list_running_bills(db, page=page, limit=limit)
+
+
+@router.get("/admissions/{admission_id}/billing")
+def admission_billing_bundle(
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:bill:view")),
+):
+    """Unified billing bundle: auto bed/visit/pharmacy + saved daily/final charges."""
+    return ipd_billing_service.get_billing_bundle(db, admission_id)
+
+
+@router.get("/admissions/{admission_id}/billing/daily")
+def admission_daily_billing(
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:bill:view")),
+):
+    return ipd_billing_service.get_daily_billing(db, admission_id)
+
+
+@router.put("/admissions/{admission_id}/billing/daily")
+def update_admission_daily_billing(
+    admission_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:bill:generate")),
+):
+    return ipd_billing_service.update_daily_billing(
+        db, admission_id, payload, updated_by=current_user.id
+    )
+
+
+@router.get("/admissions/{admission_id}/billing/final")
+def admission_final_billing(
+    admission_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:bill:view")),
+):
+    return ipd_billing_service.get_final_billing(db, admission_id)
+
+
+@router.put("/admissions/{admission_id}/billing/final")
+def update_admission_final_billing(
+    admission_id: int,
+    payload: dict[str, Any] = Body(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:bill:generate")),
+):
+    return ipd_billing_service.update_final_billing(
+        db, admission_id, payload, updated_by=current_user.id
+    )
 
 
 @router.get("/billing/preview/{admission_id}")

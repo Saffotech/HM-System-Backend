@@ -1,7 +1,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -18,6 +18,7 @@ class Dispensing(Base):
     prescription_id = Column(Integer, ForeignKey("prescriptions.id"), nullable=False, index=True)
     dispensed_by = Column(Integer, ForeignKey("users.id"), nullable=False)
     quantity_dispensed = Column(Integer, nullable=False)
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
     remarks = Column(String, nullable=True)
     batch_number = Column(String, nullable=True)
     status = Column(String, default="dispensed")
@@ -45,6 +46,8 @@ class DispensingItem(Base):
     )
     medicine_name = Column(String(255), nullable=False, default="")
     quantity_dispensed = Column(Integer, nullable=False)
+    unit_price = Column(Numeric(12, 2), nullable=False, default=0)
+    amount = Column(Numeric(12, 2), nullable=False, default=0)
     created_at = Column(DateTime(timezone=True), default=_now)
 
     dispensing = relationship("Dispensing", back_populates="items")

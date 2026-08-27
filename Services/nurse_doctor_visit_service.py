@@ -2,11 +2,11 @@ from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import Date, cast, func, or_
+from sqlalchemy import Date, and_, cast, func, or_
 from sqlalchemy.orm import Session, joinedload
 
 from Models.department import Department
-from Models.ipd import IpdAdmission
+from Models.ipd import IpdAdmission, IpdDoctorVisit
 from Models.nurse_doctor_visit import NurseDoctorVisit
 from Models.opd_billing import Appointment
 from Models.patient import Patient
@@ -22,6 +22,7 @@ from Schemas.nurse_doctor_visit_schema import (
     NurseDoctorVisitUpdate,
     NurseDoctorVisitVoidRequest,
 )
+from Services import ipd_doctor_visit_billing as visit_billing
 from Services import opd_helpers as h
 from Services.doctor_helpers import day_bounds
 from Services.ipd_helpers import doctor_display
@@ -121,10 +122,74 @@ def _apply_allocated_only_filter(
     return query.filter(NurseDoctorVisit.patient_id.in_(patient_ids))
 
 
+def _visit_number_sql(
+    db: Session,
+    *,
+    patient_id: int,
+    visited_at: datetime,
+    visit_id: int,
+) -> int:
+    """1-based ordinal for one visit (index-friendly; no full-day row load)."""
+    day = visited_at.astimezone(IST).date()
+    start, end = day_bounds(day)
+    return int(
+        db.query(func.count(NurseDoctorVisit.id))
+        .filter(
+            NurseDoctorVisit.patient_id == patient_id,
+            NurseDoctorVisit.is_voided.is_(False),
+            NurseDoctorVisit.visited_at >= start,
+            NurseDoctorVisit.visited_at <= end,
+            or_(
+                NurseDoctorVisit.visited_at < visited_at,
+                and_(
+                    NurseDoctorVisit.visited_at == visited_at,
+                    NurseDoctorVisit.id <= visit_id,
+                ),
+            ),
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _day_visit_count_sql(
+    db: Session,
+    *,
+    patient_id: int,
+    visited_at: datetime,
+) -> int:
+    day = visited_at.astimezone(IST).date()
+    start, end = day_bounds(day)
+    return int(
+        db.query(func.count(NurseDoctorVisit.id))
+        .filter(
+            NurseDoctorVisit.patient_id == patient_id,
+            NurseDoctorVisit.is_voided.is_(False),
+            NurseDoctorVisit.visited_at >= start,
+            NurseDoctorVisit.visited_at <= end,
+        )
+        .scalar()
+        or 0
+    )
+
+
+def _billing_map(
+    db: Session, nurse_visit_ids: list[int]
+) -> dict[int, IpdDoctorVisit]:
+    if not nurse_visit_ids:
+        return {}
+    rows = (
+        db.query(IpdDoctorVisit)
+        .filter(IpdDoctorVisit.nurse_visit_id.in_(nurse_visit_ids))
+        .all()
+    )
+    return {r.nurse_visit_id: r for r in rows if r.nurse_visit_id is not None}
+
+
 def _assign_visit_numbers(
     visits: list[NurseDoctorVisit],
 ) -> dict[int, int]:
-    """visit_number keyed by visit id — same patient/date batches only."""
+    """In-memory numbering for small same-day batches only."""
     ordered = sorted(visits, key=lambda row: (row.visited_at, row.id))
     return {row.id: index for index, row in enumerate(ordered, start=1)}
 
@@ -133,8 +198,11 @@ def _serialize_visit(
     visit: NurseDoctorVisit,
     *,
     visit_number: int | None = None,
+    day_visit_count: int | None = None,
+    ipd_visit: IpdDoctorVisit | None = None,
 ) -> NurseDoctorVisitResponse:
     patient = visit.patient
+    billable = ipd_visit if ipd_visit and not ipd_visit.is_voided else None
     return NurseDoctorVisitResponse(
         id=visit.id,
         patient_id=visit.patient_id,
@@ -145,6 +213,9 @@ def _serialize_visit(
         visited_at=visit.visited_at,
         notes=visit.notes,
         visit_number=visit_number,
+        day_visit_count=day_visit_count,
+        admission_id=billable.admission_id if billable else None,
+        charge=float(billable.charge) if billable else None,
         recorded_by=visit.recorded_by,
         recorded_by_name=visit.recorded_by_name,
         created_at=visit.created_at,
@@ -153,16 +224,6 @@ def _serialize_visit(
         updated_at=visit.updated_at,
         is_voided=visit.is_voided,
     )
-
-
-def _serialize_visits_with_numbers(
-    visits: list[NurseDoctorVisit],
-) -> list[NurseDoctorVisitResponse]:
-    numbers = _assign_visit_numbers(visits)
-    return [
-        _serialize_visit(visit, visit_number=numbers.get(visit.id))
-        for visit in visits
-    ]
 
 
 def create_doctor_visit_service(
@@ -187,21 +248,35 @@ def create_doctor_visit_service(
         recorded_by_name=_user_display_name(nurse),
     )
     db.add(visit)
+    db.flush()
+    visit_billing.upsert_ipd_visit_from_nurse(
+        db,
+        nurse_visit=visit,
+        doctor=doctor,
+        recorded_by=nurse.id,
+    )
     db.commit()
     db.refresh(visit)
 
     visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
-    day = visit.visited_at.astimezone(IST).date()
-    same_day = (
-        _visit_date_filter(
-            _visit_query(db).filter(NurseDoctorVisit.patient_id == visit.patient_id),
-            day,
-        )
-        .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
-        .all()
+    visit_number = _visit_number_sql(
+        db,
+        patient_id=visit.patient_id,
+        visited_at=visit.visited_at,
+        visit_id=visit.id,
     )
-    numbers = _assign_visit_numbers(same_day)
-    return _serialize_visit(visit, visit_number=numbers.get(visit.id))
+    day_visit_count = _day_visit_count_sql(
+        db,
+        patient_id=visit.patient_id,
+        visited_at=visit.visited_at,
+    )
+    ipd_visit = _billing_map(db, [visit.id]).get(visit.id)
+    return _serialize_visit(
+        visit,
+        visit_number=visit_number,
+        day_visit_count=day_visit_count,
+        ipd_visit=ipd_visit,
+    )
 
 
 def list_doctor_visits_service(
@@ -233,14 +308,25 @@ def list_doctor_visits_service(
             NurseDoctorVisit.id.asc(),
         ),
     ).label("visit_number")
+    day_count = func.count(NurseDoctorVisit.id).over(
+        partition_by=(NurseDoctorVisit.patient_id, ist_day),
+    ).label("day_visit_count")
     numbered = (
-        db.query(NurseDoctorVisit.id.label("id"), row_number)
+        db.query(
+            NurseDoctorVisit.id.label("id"),
+            row_number,
+            day_count,
+        )
         .filter(NurseDoctorVisit.is_voided.is_(False))
         .subquery()
     )
 
     query = (
-        db.query(NurseDoctorVisit, numbered.c.visit_number)
+        db.query(
+            NurseDoctorVisit,
+            numbered.c.visit_number,
+            numbered.c.day_visit_count,
+        )
         .join(numbered, numbered.c.id == NurseDoctorVisit.id)
         .options(
             joinedload(NurseDoctorVisit.patient),
@@ -300,9 +386,15 @@ def list_doctor_visits_service(
         .all()
     )
 
+    billing = _billing_map(db, [visit.id for visit, _, _ in rows])
     items = [
-        _serialize_visit(visit, visit_number=visit_number)
-        for visit, visit_number in rows
+        _serialize_visit(
+            visit,
+            visit_number=int(visit_number),
+            day_visit_count=int(day_visit_count),
+            ipd_visit=billing.get(visit.id),
+        )
+        for visit, visit_number, day_visit_count in rows
     ]
 
     return NurseDoctorVisitListResponse(
@@ -329,6 +421,7 @@ def update_doctor_visit_service(
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    doctor = None
     if "doctor_id" in update_data:
         doctor = _active_doctor(db, update_data["doctor_id"])
         visit.doctor_id = doctor.id
@@ -344,21 +437,37 @@ def update_doctor_visit_service(
     visit.updated_by_name = _user_display_name(nurse)
     visit.updated_at = _now()
 
+    if doctor is None:
+        doctor = _active_doctor(db, visit.doctor_id)
+
+    visit_billing.upsert_ipd_visit_from_nurse(
+        db,
+        nurse_visit=visit,
+        doctor=doctor,
+        recorded_by=nurse.id,
+    )
     db.commit()
     db.refresh(visit)
 
     visit = _visit_query(db).filter(NurseDoctorVisit.id == visit.id).first()
-    day = visit.visited_at.astimezone(IST).date()
-    same_day = (
-        _visit_date_filter(
-            _visit_query(db).filter(NurseDoctorVisit.patient_id == visit.patient_id),
-            day,
-        )
-        .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
-        .all()
+    visit_number = _visit_number_sql(
+        db,
+        patient_id=visit.patient_id,
+        visited_at=visit.visited_at,
+        visit_id=visit.id,
     )
-    numbers = _assign_visit_numbers(same_day)
-    return _serialize_visit(visit, visit_number=numbers.get(visit.id))
+    day_visit_count = _day_visit_count_sql(
+        db,
+        patient_id=visit.patient_id,
+        visited_at=visit.visited_at,
+    )
+    ipd_visit = _billing_map(db, [visit.id]).get(visit.id)
+    return _serialize_visit(
+        visit,
+        visit_number=visit_number,
+        day_visit_count=day_visit_count,
+        ipd_visit=ipd_visit,
+    )
 
 
 def void_doctor_visit_service(
@@ -379,6 +488,7 @@ def void_doctor_visit_service(
     visit.voided_at = _now()
     visit.void_reason = payload.void_reason.strip()
 
+    visit_billing.void_ipd_visit_from_nurse(db, visit.id)
     db.commit()
     db.refresh(visit)
     return _serialize_visit(visit, visit_number=None)
@@ -509,8 +619,15 @@ def get_doctor_patient_visits_service(
         .all()
     )
     numbers = _assign_visit_numbers(visits)
+    billing = _billing_map(db, [v.id for v in visits])
+    day_count = len(visits)
     serialized = [
-        _serialize_visit(visit, visit_number=numbers.get(visit.id))
+        _serialize_visit(
+            visit,
+            visit_number=numbers.get(visit.id),
+            day_visit_count=day_count,
+            ipd_visit=billing.get(visit.id),
+        )
         for visit in visits
     ]
 
@@ -519,6 +636,6 @@ def get_doctor_patient_visits_service(
         patient_uid=patient.patient_uid,
         patient_name=_patient_display_name(patient),
         visit_date=on_date,
-        visit_count=len(serialized),
+        visit_count=day_count,
         visits=serialized,
     )

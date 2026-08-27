@@ -11,6 +11,7 @@ from Models.ipd import (
     IpdBill,
     IpdBillItem,
     IpdDoctorVisit,
+    IpdInsuranceClaim,
     IpdPaymentTransaction,
 )
 from Models.patient import Patient
@@ -60,7 +61,10 @@ def _admission_doctor_name(db: Session, row: IpdAdmission) -> Optional[str]:
         return h.doctor_display(db, row.doctor_id)
     visit = (
         db.query(IpdDoctorVisit)
-        .filter(IpdDoctorVisit.admission_id == row.id)
+        .filter(
+            IpdDoctorVisit.admission_id == row.id,
+            IpdDoctorVisit.is_voided.is_(False),
+        )
         .order_by(IpdDoctorVisit.visited_at.desc())
         .first()
     )
@@ -77,6 +81,29 @@ def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
         else None
     )
     days = opd_settings_service.calculate_bed_days(row.admitted_at)
+    claim = (
+        db.query(IpdInsuranceClaim)
+        .filter(IpdInsuranceClaim.admission_id == row.id)
+        .first()
+    )
+    payment_type = getattr(row, "payment_type", None) or "self"
+    coverage = None
+    insurer = None
+    policy_no = None
+    claim_id = None
+    if claim:
+        claim_id = claim.id
+        insurer = claim.insurer
+        policy_no = claim.policy_no
+        coverage = (
+            "Cashless Insurance" if claim.claim_type == "cashless" else "Copay"
+        )
+        if payment_type == "self":
+            payment_type = (
+                "insurance_cashless"
+                if claim.claim_type == "cashless"
+                else "insurance_copay"
+            )
     return IpdAdmissionOut(
         id=row.id,
         admission_no=row.admission_no,
@@ -93,6 +120,12 @@ def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
         diagnosis=row.diagnosis,
         notes=row.notes,
         status=row.status,
+        payment_type=payment_type,
+        self_pay_method=getattr(row, "self_pay_method", None),
+        claim_id=claim_id,
+        coverage=coverage,
+        insurer=insurer,
+        policy_no=policy_no,
         admitted_at=_iso(row.admitted_at),
         discharged_at=_iso(row.discharged_at),
         length_of_stay_days=days,
@@ -100,6 +133,8 @@ def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
 
 
 def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAdmissionOut:
+    from Services import ipd_insurance_service as ins
+
     patient = h.get_patient(db, data.patient_id)
     existing = h.get_active_admission_for_patient(db, patient.id)
     if existing:
@@ -114,6 +149,12 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
     elif data.department_id:
         oh.get_department(db, data.department_id)
 
+    payment_type, self_pay_method = ins.resolve_admit_payment(
+        data.payment_mode,
+        data.self_pay_method,
+        data.insurance,
+    )
+
     h.occupy_bed(db, bed, patient.id, data.department_id)
 
     admission = IpdAdmission(
@@ -127,6 +168,8 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
         diagnosis=data.diagnosis,
         notes=data.notes,
         status="admitted",
+        payment_type=payment_type,
+        self_pay_method=self_pay_method,
         admitted_at=_parse_dt(data.admission_date),
         admitted_by=admitted_by,
     )
@@ -134,6 +177,16 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
     bed.admitted_at = admission.admitted_at
 
     db.add(admission)
+    db.flush()
+
+    if data.insurance:
+        ins.create_claim_for_admission(
+            db,
+            admission=admission,
+            insurance=data.insurance,
+            created_by=admitted_by,
+        )
+
     db.commit()
     db.refresh(admission)
     notify_doctor_ipd_admitted(db, admission, created_by=admitted_by)
@@ -270,7 +323,10 @@ def get_admission_detail(db: Session, admission_id: int) -> dict:
     admission = h.get_admission(db, admission_id)
     visits = (
         db.query(IpdDoctorVisit)
-        .filter(IpdDoctorVisit.admission_id == admission.id)
+        .filter(
+            IpdDoctorVisit.admission_id == admission.id,
+            IpdDoctorVisit.is_voided.is_(False),
+        )
         .order_by(IpdDoctorVisit.visited_at.desc())
         .all()
     )
@@ -360,7 +416,10 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
 
     visits = (
         db.query(IpdDoctorVisit)
-        .filter(IpdDoctorVisit.admission_id == admission.id)
+        .filter(
+            IpdDoctorVisit.admission_id == admission.id,
+            IpdDoctorVisit.is_voided.is_(False),
+        )
         .order_by(IpdDoctorVisit.visited_at.asc())
         .all()
     )
@@ -375,6 +434,36 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
                 "item_type": "visit",
             }
         )
+
+    # Pharmacy dispensings linked via IPD prescriptions
+    try:
+        from Models.doctor_prescriptions import Prescription
+        from Models.pharmacy_dispensing import Dispensing, DispensingItem
+
+        pharmacy_rows = (
+            db.query(DispensingItem, Dispensing)
+            .join(Dispensing, Dispensing.id == DispensingItem.dispensing_id)
+            .join(Prescription, Prescription.id == Dispensing.prescription_id)
+            .filter(Prescription.admission_id == admission.id)
+            .all()
+        )
+        for item, _disp in pharmacy_rows:
+            amount = round(float(item.amount or 0), 2)
+            if amount <= 0:
+                continue
+            qty = max(int(item.quantity_dispensed or 1), 1)
+            unit = float(item.unit_price or 0) or round(amount / qty, 2)
+            items.append(
+                {
+                    "description": f"Pharmacy — {item.medicine_name or 'Medicine'}",
+                    "qty": qty,
+                    "unit_price": unit,
+                    "amount": amount,
+                    "item_type": "pharmacy",
+                }
+            )
+    except Exception:
+        pass
 
     subtotal = round(sum(i["amount"] for i in items), 2)
     return items, subtotal, days

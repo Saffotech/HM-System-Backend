@@ -25,6 +25,9 @@ def dispense_history(
     limit: int = Query(20, ge=1, le=100),
     date_from: Optional[date] = Query(None, description="Inclusive start date (YYYY-MM-DD)"),
     date_to: Optional[date] = Query(None, description="Inclusive end date (YYYY-MM-DD)"),
+    prescription_id: Optional[int] = Query(
+        None, ge=1, description="Filter history to one prescription"
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("prescriptions:view")),
@@ -35,6 +38,7 @@ def dispense_history(
         limit=limit,
         date_from=date_from,
         date_to=date_to,
+        prescription_id=prescription_id,
     )
 
 

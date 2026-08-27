@@ -33,6 +33,9 @@ class PharmacyPrescriptionItemOut(BaseModel):
     quantity_prescribed: int = 0
     quantity_dispensed: int = 0
     quantity_remaining: int = 0
+    # Aggregated across all dispenses for this line
+    unit_price: float = 0.0
+    amount_dispensed: float = 0.0
 
     @field_validator("duration", mode="before")
     @classmethod
@@ -55,12 +58,15 @@ class PharmacyPrescriptionDetail(BaseModel):
     notes: Optional[str] = None
     status: str
     created_at: datetime
+    total_amount_dispensed: float = 0.0
     items: List[PharmacyPrescriptionItemOut]
 
 
 class DispenseItemRequest(BaseModel):
     prescription_item_id: int
     quantity_dispensed: int = Field(..., gt=0)
+    # Line total ₹ entered by pharmacist (source of truth for pricing)
+    amount: float = Field(..., ge=0)
 
 
 class DispenseRequest(BaseModel):
@@ -75,6 +81,8 @@ class DispenseItemResponse(BaseModel):
     quantity_dispensed: int
     quantity_prescribed: int
     quantity_remaining: int
+    unit_price: float
+    amount: float
 
 
 class DispenseResponse(BaseModel):
@@ -82,6 +90,7 @@ class DispenseResponse(BaseModel):
     dispensing_id: int
     prescription_id: int
     status: str
+    total_amount: float
     items: List[DispenseItemResponse]
 
 
@@ -95,6 +104,8 @@ class DispenseHistoryItem(BaseModel):
     patient_name: str
     pharmacist_name: str
     quantity_dispensed: int
+    unit_price: float = 0.0
+    amount: float = 0.0
     status: str
     dispensed_at: datetime
 

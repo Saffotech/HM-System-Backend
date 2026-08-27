@@ -15,9 +15,11 @@ from Models.patient import Patient, OpdVisit
 from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
 from Models.ipd import (
     IpdAdmission,
+    IpdAdmissionBilling,
     IpdBill,
     IpdBillItem,
     IpdDoctorVisit,
+    IpdInsuranceClaim,
     IpdPaymentTransaction,
 )
 from Models.ipd_profile import IpdProfile  # noqa: F401
