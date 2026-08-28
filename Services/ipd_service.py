@@ -463,7 +463,7 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
                 }
             )
     except Exception:
-        pass
+        db.rollback()
 
     subtotal = round(sum(i["amount"] for i in items), 2)
     return items, subtotal, days
