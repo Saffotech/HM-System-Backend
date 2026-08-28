@@ -34,7 +34,10 @@ from Services import bed_service
 from Services import ipd_helpers as h
 from Services import opd_helpers as oh
 from Services import opd_settings_service
-from Services.ipd_notification_helpers import notify_doctor_ipd_admitted
+from Services.ipd_notification_helpers import (
+    notify_doctor_ipd_admitted,
+    notify_nurses_ipd_bed_patient,
+)
 
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
@@ -190,6 +193,12 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
     db.commit()
     db.refresh(admission)
     notify_doctor_ipd_admitted(db, admission, created_by=admitted_by)
+    notify_nurses_ipd_bed_patient(
+        db,
+        admission,
+        created_by=admitted_by,
+        exclude_user_ids={admission.doctor_id} if admission.doctor_id else None,
+    )
     return _admission_out(db, admission)
 
 
@@ -245,6 +254,7 @@ def transfer_bed(
 
     new_bed = h.get_bed(db, data.new_bed_id)
     old_bed = h.get_bed(db, admission.bed_id) if admission.bed_id else None
+    old_bed_id = old_bed.id if old_bed else None
 
     h.occupy_bed(db, new_bed, admission.patient_id, admission.department_id)
     # Keep stay start for billing; occupancy timestamp on new bed is now
@@ -257,6 +267,23 @@ def transfer_bed(
 
     db.commit()
     db.refresh(admission)
+    notify_nurses_ipd_bed_patient(
+        db,
+        admission,
+        created_by=transferred_by,
+        intro="A patient was transferred to your allocated bed.",
+    )
+    if old_bed_id:
+        dest = f"{admission.ward_name or '—'} / {admission.bed_number or '—'}"
+        notify_nurses_ipd_bed_patient(
+            db,
+            admission,
+            created_by=transferred_by,
+            bed_id=old_bed_id,
+            exclude_user_ids=set(h.allocated_nurse_ids_for_bed(db, admission.bed_id)),
+            title="Patient transferred from your bed",
+            intro=f"A patient on your allocated bed was transferred to {dest}.",
+        )
     return _admission_out(db, admission)
 
 

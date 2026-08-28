@@ -1,4 +1,4 @@
-"""Notify the assigned doctor when an IPD patient is admitted to them."""
+"""Notify assigned doctor and allocated bed nurse(s) on IPD admit/transfer."""
 import logging
 from typing import Optional
 
@@ -76,3 +76,56 @@ def notify_doctor_ipd_admitted(
             admission.id,
         )
         db.rollback()
+
+
+def notify_nurses_ipd_bed_patient(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    created_by: Optional[int] = None,
+    bed_id: Optional[int] = None,
+    exclude_user_ids: Optional[set[int]] = None,
+    title: str = "Patient assigned to your bed",
+    intro: str = "A patient was assigned to your allocated bed.",
+) -> None:
+    """Inbox alert for nurses allocated to the patient's bed. No-op if none."""
+    target_bed_id = bed_id if bed_id is not None else admission.bed_id
+    nurse_ids = h.allocated_nurse_ids_for_bed(db, target_bed_id)
+    skip = {uid for uid in (exclude_user_ids or set()) if uid}
+
+    patient_name = _patient_label(db, admission.patient_id)
+    bed = admission.bed_number or "—"
+    ward = admission.ward_name or "—"
+    admission_no = admission.admission_no or f"#{admission.id}"
+    message = (
+        f"{intro}\n"
+        f"Patient: {patient_name}\n"
+        f"Admission: {admission_no}\n"
+        f"Ward: {ward}  Bed: {bed}"
+    )
+
+    for nurse_id in nurse_ids:
+        if nurse_id in skip:
+            continue
+        try:
+            create_notification(
+                db,
+                user_id=nurse_id,
+                title=title,
+                message=message,
+                notification_type=NotificationType.IPD_ADMITTED,
+                source_module=SourceModule.IPD,
+                reference_type=ReferenceType.ADMISSION,
+                reference_id=admission.id,
+                created_by=created_by,
+                created_by_name=_staff_name(db, created_by),
+                priority=NotificationPriority.HIGH,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to notify nurse %s of IPD admission %s on bed %s",
+                nurse_id,
+                admission.id,
+                target_bed_id,
+            )
+            db.rollback()

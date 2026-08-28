@@ -241,6 +241,31 @@ def _pick_allocation_for_bed(
     return rows[0]
 
 
+def allocated_nurse_ids_for_bed(db: Session, bed_id: Optional[int]) -> list[int]:
+    """Active nurse(s) responsible for this bed today. Empty if none assigned."""
+    if not bed_id:
+        return []
+    today = now_ist().date()
+    rows = (
+        db.query(NurseShiftBedAllocation.nurse_id)
+        .filter(
+            NurseShiftBedAllocation.bed_id == bed_id,
+            NurseShiftBedAllocation.is_active.is_(True),
+            NurseShiftBedAllocation.shift_date <= today,
+            or_(
+                NurseShiftBedAllocation.assigned_until.is_(None),
+                NurseShiftBedAllocation.assigned_until >= today,
+            ),
+        )
+        .all()
+    )
+    seen: list[int] = []
+    for (nurse_id,) in rows:
+        if nurse_id and nurse_id not in seen:
+            seen.append(nurse_id)
+    return seen
+
+
 def allocated_nurses_for_patients(
     db: Session,
     patient_ids: list[int] | set[int],
