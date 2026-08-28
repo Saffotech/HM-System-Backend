@@ -81,6 +81,7 @@ MODULE_CARD_PERMISSION_KEYS: dict[str, frozenset[str]] = {
         {
             "receptionist:view_queues",
             "receptionist:view_doctor_schedule",
+            "receptionist:pricing",
             "notifications:view",
             "notifications:update",
         }

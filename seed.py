@@ -133,6 +133,7 @@ PERMISSIONS_LIST = [
     "roster:manage",
     "receptionist:view_queues",
     "receptionist:view_doctor_schedule",
+    "receptionist:pricing",
     "ipd:dashboard",
     "ipd:patients:list",
     "ipd:patients:view",
@@ -330,6 +331,7 @@ ROLES_DATA = {
         "permissions": [
             "receptionist:view_queues",
             "receptionist:view_doctor_schedule",
+            "receptionist:pricing",
             "receptionist_profile:view",
             "receptionist_profile:update",
             "receptionist_profile:upload_image",
