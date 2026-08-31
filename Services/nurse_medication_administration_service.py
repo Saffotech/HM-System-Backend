@@ -15,6 +15,13 @@ from Schemas.nurse_medication_administration_schema import (
     MedicationAdministrationResponse,
 )
 
+
+def _prescription_source(prescription: Prescription) -> str:
+    """OPD if appointment-linked; IPD if admission-linked."""
+    if getattr(prescription, "admission_id", None) is not None:
+        return "IPD"
+    return "OPD"
+
 def _user_display_name(user: User | None) -> str | None:
     if not user:
         return None
@@ -307,8 +314,8 @@ def get_patient_medications_service(
             detail="Prescription not found"
         )
 
-    medications = (
-        db.query(PrescriptionItem)
+    medication_rows = (
+        db.query(PrescriptionItem, Prescription)
         .join(
             Prescription,
             PrescriptionItem.prescription_id == Prescription.id,
@@ -319,6 +326,11 @@ def get_patient_medications_service(
             PrescriptionItem.id.asc(),
         )
         .all()
+    )
+
+    prescribing_names = doctor_name_map(
+        db,
+        {rx.doctor_id for _, rx in medication_rows if rx.doctor_id},
     )
 
     bed = (
@@ -360,6 +372,7 @@ def get_patient_medications_service(
         "medications": [
             {
                 "prescription_item_id": item.id,
+                "prescription_id": rx.id,
                 "medicine_name": item.medicine_name,
                 "dosage": item.dosage,
                 "form": getattr(item, "form", None),
@@ -369,8 +382,17 @@ def get_patient_medications_service(
                 "duration": item.duration,
                 "quantity": getattr(item, "quantity", None),
                 "instructions": item.instructions,
+                "source": _prescription_source(rx),
+                "appointment_id": rx.appointment_id,
+                "admission_id": rx.admission_id,
+                "doctor_id": rx.doctor_id,
+                "doctor_name": (
+                    prescribing_names.get(rx.doctor_id)
+                    if rx.doctor_id
+                    else None
+                ),
             }
-            for item in medications
+            for item, rx in medication_rows
         ],
     }
 
