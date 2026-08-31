@@ -102,7 +102,7 @@ def notify_opd_payment_pending(
         f"{status_label} — collect payment.\n"
         f"Patient: {patient_name}\n"
         f"Bill: {visit.bill_number}\n"
-        f"Balance due: ₹{balance:.2f}"
+        f"Balance due: ${balance:.2f}"
     )
     _broadcast_to_opd_staff(
         db,
