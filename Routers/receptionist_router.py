@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from database import get_db
 from dependencies import PermissionChecker, get_current_user
+from Models.department import Department
 from Models.user import User
 from Schemas.receptionist_schema import (
     DashboardResponse,
@@ -15,10 +16,47 @@ from Schemas.receptionist_schema import (
     ReceptionistAppointmentStatus,
     TodayQueueResponse,
 )
+from Services import opd_service
+from Services import opd_settings_service
 from Services import receptionist_service
 from Services.queue_helpers import receptionist_payment_filter_from_query
 
 router = APIRouter(prefix="/receptionist", tags=["Receptionist"])
+
+
+@router.get("/pricing")
+def get_pricing(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("receptionist:pricing")),
+):
+    """
+    Read-only hospital OPD pricing for reception (consult fees, bill items).
+
+    Reuses Admin/OPD settings without requiring `opd:view`.
+    """
+    pricing = opd_settings_service.get_pricing(db)
+    return {"pricing": pricing.model_dump()}
+
+
+@router.get("/reference/departments")
+def reference_departments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("receptionist:pricing")),
+):
+    depts = db.query(Department).filter(Department.is_active.is_(True)).all()
+    return [{"id": d.id, "name": d.name, "code": d.code} for d in depts]
+
+
+@router.get("/reference/doctors/{department_id}")
+def reference_doctors(
+    department_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("receptionist:pricing")),
+):
+    return opd_service.list_department_doctors_with_fees(db, department_id)
 
 
 @router.get(

@@ -204,10 +204,6 @@ class PrescriptionItem(Base):
         String(50),
         nullable=True
     )
-    dose = Column(
-        String(50),
-        nullable=True
-    )
     route = Column(
         String(50),
         nullable=True
@@ -218,10 +214,6 @@ class PrescriptionItem(Base):
     )
     quantity = Column(
         Integer,
-        nullable=True
-    )
-    quantity_unit = Column(
-        String(50),
         nullable=True
     )
 

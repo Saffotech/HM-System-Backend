@@ -31,11 +31,9 @@ class PharmacyPrescriptionItemOut(BaseModel):
     duration: str
     instructions: Optional[str] = None
     form: Optional[str] = None
-    dose: Optional[str] = None
     route: Optional[str] = None
     timing: Optional[str] = None
     quantity: Optional[int] = None
-    quantity_unit: Optional[str] = None
     quantity_prescribed: int = 0
     quantity_dispensed: int = 0
     quantity_remaining: int = 0
@@ -71,7 +69,7 @@ class PharmacyPrescriptionDetail(BaseModel):
 class DispenseItemRequest(BaseModel):
     prescription_item_id: int
     quantity_dispensed: int = Field(..., gt=0)
-    # Line total ₹ entered by pharmacist (source of truth for pricing)
+    # Line total $ entered by pharmacist (source of truth for pricing)
     amount: float = Field(..., ge=0)
 
 

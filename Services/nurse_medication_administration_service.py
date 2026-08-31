@@ -362,14 +362,12 @@ def get_patient_medications_service(
                 "prescription_item_id": item.id,
                 "medicine_name": item.medicine_name,
                 "dosage": item.dosage,
-                "dose": getattr(item, "dose", None),
                 "form": getattr(item, "form", None),
                 "route": getattr(item, "route", None),
                 "timing": getattr(item, "timing", None),
                 "frequency": item.frequency,
                 "duration": item.duration,
                 "quantity": getattr(item, "quantity", None),
-                "quantity_unit": getattr(item, "quantity_unit", None),
                 "instructions": item.instructions,
             }
             for item in medications

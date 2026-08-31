@@ -1,18 +1,17 @@
 """Add department snapshot to nurse_doctor_visits.
 
-Revision ID: n4r5s6t7u8v9
+Revision ID: n4o5p6q7r8s9
 Revises: 91445aa645ea
 Create Date: 2026-08-24
 
-Note: revision id was renamed from k4l5m6n7o8p9 to avoid colliding with
-k4l5m6n7o8p9_pharmacy_dispense_pricing.
+Was previously duplicated as k4l5m6n7o8p9 (same id as pharmacy dispense pricing).
 """
 from typing import Sequence, Union
 
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "n4r5s6t7u8v9"
+revision: str = "n4o5p6q7r8s9"
 down_revision: Union[str, Sequence[str], None] = "91445aa645ea"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
