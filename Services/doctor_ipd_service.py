@@ -177,6 +177,7 @@ def save_doctor_ipd_consultation_service(
     created_rx = None
     lab_outs = []
     created_lab_ids: list[int] = []
+    created_lab_repeat_by_id: dict[int, bool] = {}
     seen_lab_names: set[str] = set()
 
     try:
@@ -238,6 +239,7 @@ def save_doctor_ipd_consultation_service(
                 raise
             lab_outs.append(lab_out.model_dump(mode="json"))
             created_lab_ids.append(lab_out.id)
+            created_lab_repeat_by_id[lab_out.id] = bool(lab.is_repeat)
 
         db.commit()
     except HTTPException:
@@ -274,7 +276,12 @@ def save_doctor_ipd_consultation_service(
             .filter(LabTestOrder.id.in_(created_lab_ids))
             .all()
         ):
-            notify_lab_techs_order_created(db, order, doctor_id=doctor_id)
+            notify_lab_techs_order_created(
+                db,
+                order,
+                doctor_id=doctor_id,
+                is_repeat=created_lab_repeat_by_id.get(order.id, False),
+            )
 
     visited_at = visit.visited_at
     return {
