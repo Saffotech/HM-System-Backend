@@ -47,6 +47,7 @@ class NurseWorkforceRoster(Base):
     """Monthly/daily nurse roster assignment."""
 
     __tablename__ = "nurse_workforce_rosters"
+
     __table_args__ = (
         UniqueConstraint(
             "nurse_id",

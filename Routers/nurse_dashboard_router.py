@@ -10,13 +10,11 @@ from Schemas.nurse_dashboard_schema import (
     NurseDashboardQueueResponse,
     NurseDashboardBedPatientListResponse,
     NurseBedAllocationSummaryResponse,
-    NurseMyDutyResponse,
-)
+    NurseMyDutyResponse,)
 from Services.nurse_dashboard_service import (
     get_nurse_today_queue_service,
     get_nurse_bed_patients_service,
-    get_nurse_my_duty_service,
-)
+    get_nurse_my_duty_service,)
 from Services.nurse_shift_bed_allocation_service import (
     get_nurse_allocation_summary_service,
 )
@@ -25,7 +23,6 @@ router = APIRouter(
     prefix="/nurse",
     tags=["Nurse Dashboard"],
 )
-
 
 def _bed_patient_filters(
     search: str | None = Query(
