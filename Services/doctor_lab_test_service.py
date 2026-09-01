@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -94,6 +95,7 @@ def _find_in_flight_duplicate(
     parent_filters: list,
     catalog_test,
     exclude_order_id: int | None = None,
+    same_calendar_day: bool = False,
 ) -> LabTestOrder | None:
     query = db.query(LabTestOrder).filter(
         *parent_filters,
@@ -105,6 +107,15 @@ def _find_in_flight_duplicate(
     )
     if exclude_order_id is not None:
         query = query.filter(LabTestOrder.id != exclude_order_id)
+    # Edit has no is_repeat flag; only block accidental same-day collisions.
+    # A prior-day in-flight order (e.g. Blood Test on 27th during a long IPD
+    # stay) must not stop renaming CBC → Blood Test on a later day.
+    if same_calendar_day:
+        start, end = h.day_bounds(datetime.now(h.IST).date())
+        query = query.filter(
+            LabTestOrder.created_at >= start,
+            LabTestOrder.created_at <= end,
+        )
     return query.first()
 
 
@@ -406,6 +417,7 @@ def update_lab_test_service(
             parent_filters=parent_filter,
             catalog_test=catalog_test,
             exclude_order_id=test.id,
+            same_calendar_day=True,
         )
         if duplicate:
             raise HTTPException(
