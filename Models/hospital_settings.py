@@ -29,7 +29,7 @@ class HospitalSettings(Base):
     default_registration_fee = Column(Float, nullable=False, default=0.0)
     default_consultation_fee = Column(Float, nullable=False, default=0.0)
     default_gst_percent = Column(Float, nullable=False, default=0.0)
-    currency = Column(String(10), nullable=False, default="INR")
+    currency = Column(String(10), nullable=False, default="USD")
     timezone = Column(String(64), nullable=False, default="Asia/Kolkata")
     updated_at = Column(
         DateTime(timezone=True),

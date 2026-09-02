@@ -582,7 +582,7 @@ def validate_extra_bill_items(
                         status_code=400,
                         detail=(
                             f"Custom prices are disabled. "
-                            f"'{description}' must use master price ₹{expected:.2f}."
+                            f"'{description}' must use master price ${expected:.2f}."
                         ),
                     )
                 unit_price = expected

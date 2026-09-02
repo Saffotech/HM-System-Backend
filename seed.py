@@ -563,7 +563,12 @@ def backfill_lab_order_prices(db) -> None:
 def ensure_hospital_settings(db) -> None:
     row = db.query(HospitalSettings).filter(HospitalSettings.id == SETTINGS_ROW_ID).first()
     if row:
-        print("Hospital settings row already exists")
+        if row.currency == "INR":
+            row.currency = "USD"
+            db.commit()
+            print("Hospital settings currency updated INR -> USD")
+        else:
+            print("Hospital settings row already exists")
         return
 
     db.add(
@@ -573,7 +578,7 @@ def ensure_hospital_settings(db) -> None:
             default_registration_fee=0.0,
             default_consultation_fee=0.0,
             default_gst_percent=0.0,
-            currency="INR",
+            currency="USD",
             timezone="Asia/Kolkata",
         )
     )

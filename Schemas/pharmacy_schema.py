@@ -69,7 +69,7 @@ class PharmacyPrescriptionDetail(BaseModel):
 class DispenseItemRequest(BaseModel):
     prescription_item_id: int
     quantity_dispensed: int = Field(..., gt=0)
-    # Line total ₹ entered by pharmacist (source of truth for pricing)
+    # Line total $ entered by pharmacist (source of truth for pricing)
     amount: float = Field(..., ge=0)
 
 
