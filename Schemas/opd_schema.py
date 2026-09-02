@@ -1,6 +1,6 @@
 """OPD visit, billing, and API response schemas."""
 from datetime import datetime
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
@@ -303,6 +303,7 @@ class BedOut(BaseModel):
     id: int
     bed_number: str
     ward_name: str
+    bed_type: str = "single"
     department_id: Optional[int]
     department_name: Optional[str]
     patient_id: Optional[int]
@@ -316,6 +317,7 @@ class BedCreate(BaseModel):
     bed_number: str
     ward_name: str
     department_id: Optional[int] = None
+    bed_type: Literal["single", "double"] = "single"
 
 
 class BedBulkCreate(BaseModel):
@@ -326,12 +328,14 @@ class BedBulkCreate(BaseModel):
     count: int = 1
     pad_width: int = 0
     department_id: Optional[int] = None
+    bed_type: Literal["single", "double"] = "single"
 
 
 class BedUpdate(BaseModel):
     bed_number: Optional[str] = None
     ward_name: Optional[str] = None
     department_id: Optional[int] = None
+    bed_type: Optional[Literal["single", "double"]] = None
 
 
 class AssignBedRequest(BaseModel):

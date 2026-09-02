@@ -84,5 +84,6 @@ class Bed(Base):
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)
     status = Column(String, default="available")  # available / occupied
+    bed_type = Column(String, nullable=False, default="single")  # single / double
     admitted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now)
