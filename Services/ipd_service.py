@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from Models.department import Department
 from Models.ipd import (
     IpdAdmission,
+    IpdAdmissionCareTeam,
     IpdBill,
     IpdBillItem,
     IpdDoctorVisit,
@@ -23,6 +24,8 @@ from Schemas.ipd_schema import (
     IpdBillItemOut,
     IpdBillOut,
     IpdBillPreviewOut,
+    IpdCareTeamAddRequest,
+    IpdCareTeamMemberOut,
     IpdCollectPaymentRequest,
     IpdDischargeRequest,
     IpdDoctorVisitCreate,
@@ -34,8 +37,10 @@ from Services import bed_service
 from Services import ipd_helpers as h
 from Services import opd_helpers as oh
 from Services import opd_settings_service
-from Services.ipd_notification_helpers import notify_doctor_ipd_admitted
-
+from Services.ipd_notification_helpers import (
+    notify_doctor_ipd_admitted,
+    notify_doctor_ipd_care_team_added,
+)
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
@@ -342,7 +347,133 @@ def get_admission_detail(db: Session, admission_id: int) -> dict:
         "doctor_visits": [_visit_out(db, v) for v in visits],
         "bills": [_bill_out(db, b) for b in bills],
         "running_bill": preview.model_dump(),
+        "care_team": list_care_team(db, admission.id),
     }
+
+
+def _care_team_member_out(db: Session, row: IpdAdmissionCareTeam) -> IpdCareTeamMemberOut:
+    dept = (
+        db.query(Department).filter(Department.id == row.department_id).first()
+        if row.department_id
+        else None
+    )
+    return IpdCareTeamMemberOut(
+        id=row.id,
+        admission_id=row.admission_id,
+        doctor_id=row.doctor_id,
+        doctor_name=h.doctor_display(db, row.doctor_id),
+        department_id=row.department_id,
+        department_name=dept.name if dept else None,
+        role="associated",
+        created_at=_iso(row.created_at),
+    )
+
+
+def list_care_team(db: Session, admission_id: int) -> list[dict]:
+    rows = (
+        db.query(IpdAdmissionCareTeam)
+        .filter(IpdAdmissionCareTeam.admission_id == admission_id)
+        .order_by(IpdAdmissionCareTeam.id.asc())
+        .all()
+    )
+    return [_care_team_member_out(db, row).model_dump() for row in rows]
+
+
+def add_care_team_doctor(
+    db: Session,
+    admission_id: int,
+    data: IpdCareTeamAddRequest,
+    *,
+    added_by: Optional[int] = None,
+) -> dict:
+    admission = h.get_admission(db, admission_id)
+    if admission.status != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot update care team for a closed admission",
+        )
+
+    oh.get_doctor_in_department(db, data.doctor_id, data.department_id)
+
+    if admission.doctor_id and int(admission.doctor_id) == int(data.doctor_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Doctor is already the primary doctor for this admission",
+        )
+
+    existing = (
+        db.query(IpdAdmissionCareTeam)
+        .filter(
+            IpdAdmissionCareTeam.admission_id == admission.id,
+            IpdAdmissionCareTeam.doctor_id == data.doctor_id,
+        )
+        .first()
+    )
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail="Doctor is already on this admission care team",
+        )
+
+    row = IpdAdmissionCareTeam(
+        admission_id=admission.id,
+        doctor_id=data.doctor_id,
+        department_id=data.department_id,
+        added_by=added_by,
+    )
+    db.add(row)
+    db.commit()
+    db.refresh(row)
+    notify_doctor_ipd_care_team_added(
+        db, admission, doctor_id=data.doctor_id, created_by=added_by
+    )
+    return _care_team_member_out(db, row).model_dump()
+
+
+def remove_care_team_doctor(
+    db: Session,
+    admission_id: int,
+    doctor_id: int,
+) -> dict:
+    admission = h.get_admission(db, admission_id)
+    if admission.status != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot update care team for a closed admission",
+        )
+    row = (
+        db.query(IpdAdmissionCareTeam)
+        .filter(
+            IpdAdmissionCareTeam.admission_id == admission.id,
+            IpdAdmissionCareTeam.doctor_id == doctor_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Care team doctor not found")
+    db.delete(row)
+    db.commit()
+    return {
+        "message": "Doctor removed from care team",
+        "admission_id": admission.id,
+        "doctor_id": doctor_id,
+    }
+
+
+def doctor_has_admission_access(
+    db: Session, admission: IpdAdmission, doctor_id: int
+) -> bool:
+    if admission.doctor_id and int(admission.doctor_id) == int(doctor_id):
+        return True
+    linked = (
+        db.query(IpdAdmissionCareTeam.id)
+        .filter(
+            IpdAdmissionCareTeam.admission_id == admission.id,
+            IpdAdmissionCareTeam.doctor_id == doctor_id,
+        )
+        .first()
+    )
+    return linked is not None
 
 
 def _visit_out(db: Session, visit: IpdDoctorVisit) -> IpdDoctorVisitOut:

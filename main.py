@@ -16,6 +16,7 @@ from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401
 from Models.opd_billing_profile import OpdBillingProfile  # noqa: F401
 from Models.ipd import (  # noqa: F401
     IpdAdmission,
+    IpdAdmissionCareTeam,
     IpdBill,
     IpdBillItem,
     IpdDoctorVisit,

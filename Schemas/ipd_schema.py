@@ -166,6 +166,22 @@ class IpdAdmissionOut(BaseModel):
     length_of_stay_days: Optional[int] = None
 
 
+class IpdCareTeamAddRequest(BaseModel):
+    doctor_id: int
+    department_id: int
+
+
+class IpdCareTeamMemberOut(BaseModel):
+    id: int
+    admission_id: int
+    doctor_id: int
+    doctor_name: Optional[str] = None
+    department_id: Optional[int] = None
+    department_name: Optional[str] = None
+    role: str = "associated"
+    created_at: Optional[str] = None
+
+
 class IpdInsuranceClaimUpdate(BaseModel):
     insurer: Optional[str] = Field(None, min_length=1)
     policy_no: Optional[str] = Field(None, min_length=1, alias="policyNo")
