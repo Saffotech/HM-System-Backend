@@ -21,9 +21,11 @@ from Schemas.ipd_schema import (
 )
 from Services import ipd_billing_service
 from Services import ipd_service
+from Services import lab_test_catalog_service
 from Services import opd_service
 from Services import opd_settings_service
 from Services import patient_service
+from Schemas.lab_test_schema import LabTestListResponse
 
 router = APIRouter(prefix="/ipd", tags=["IPD"])
 
@@ -42,9 +44,16 @@ def get_pricing(
     Read-only hospital pricing for IPD (bed tariff, consult fees, bill items).
 
     Reuses the same pricing store as Admin/OPD settings without requiring `opd:view`.
+    Includes active lab catalog tests so IPD Pricing can show lab charges without
+    `lab_catalog:view` on GET /lab-catalog.
     """
     pricing = opd_settings_service.get_pricing(db)
-    return {"pricing": pricing.model_dump()}
+    tests = lab_test_catalog_service.list_lab_tests(db, active=True)
+    lab_catalog = LabTestListResponse(total=len(tests), tests=tests)
+    return {
+        "pricing": pricing.model_dump(mode="json"),
+        "lab_catalog_tests": lab_catalog.model_dump(mode="json"),
+    }
 
 
 @router.get("/reference/departments")

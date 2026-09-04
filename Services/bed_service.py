@@ -15,6 +15,13 @@ from Schemas.opd_schema import AssignBedRequest, BedOut
 from Services import opd_helpers as h
 
 
+def _normalize_bed_type(bed_type: Optional[str]) -> str:
+    value = (bed_type or "single").strip().lower()
+    if value not in ("single", "double"):
+        raise HTTPException(status_code=400, detail="bed_type must be 'single' or 'double'")
+    return value
+
+
 def _bed_out(db: Session, bed: Bed) -> BedOut:
     patient = db.query(Patient).filter(Patient.id == bed.patient_id).first() if bed.patient_id else None
     dept = db.query(Department).filter(Department.id == bed.department_id).first()
@@ -22,6 +29,7 @@ def _bed_out(db: Session, bed: Bed) -> BedOut:
         id=bed.id,
         bed_number=bed.bed_number,
         ward_name=bed.ward_name,
+        bed_type=_normalize_bed_type(getattr(bed, "bed_type", None)),
         department_id=bed.department_id,
         department_name=dept.name if dept else None,
         patient_id=bed.patient_id,
@@ -169,6 +177,7 @@ def create_bed(db: Session, data) -> BedOut:
         bed_number=number,
         ward_name=ward,
         department_id=data.department_id,
+        bed_type=_normalize_bed_type(getattr(data, "bed_type", None)),
         status="available",
     )
     db.add(bed)
@@ -193,6 +202,8 @@ def create_beds_bulk(db: Session, data) -> dict:
         if not dept:
             raise HTTPException(status_code=404, detail="Department not found")
 
+    bed_type = _normalize_bed_type(getattr(data, "bed_type", None))
+
     created = []
     for i in range(count):
         n = start + i
@@ -203,6 +214,7 @@ def create_beds_bulk(db: Session, data) -> dict:
             bed_number=number,
             ward_name=ward,
             department_id=data.department_id,
+            bed_type=bed_type,
             status="available",
         )
         db.add(bed)
@@ -243,6 +255,8 @@ def update_bed(db: Session, bed_id: int, data) -> BedOut:
             if not dept:
                 raise HTTPException(status_code=404, detail="Department not found")
             bed.department_id = data.department_id
+    if getattr(data, "bed_type", None) is not None:
+        bed.bed_type = _normalize_bed_type(data.bed_type)
 
     db.commit()
     db.refresh(bed)
