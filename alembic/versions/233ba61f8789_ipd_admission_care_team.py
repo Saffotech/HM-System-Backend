@@ -1,6 +1,6 @@
 """Create ipd_admission_care_team for associated doctors.
 
-Revision ID: r1s2t3u4v5w6
+Revision ID: 233ba61f8789
 Revises: q0r1s2t3u4v5
 Create Date: 2026-09-04
 """
@@ -9,7 +9,7 @@ from typing import Sequence, Union
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "r1s2t3u4v5w6"
+revision: str = "233ba61f8789"
 down_revision: Union[str, Sequence[str], None] = "q0r1s2t3u4v5"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

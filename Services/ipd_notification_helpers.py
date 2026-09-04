@@ -131,33 +131,41 @@ def notify_nurses_ipd_bed_patient(
             db.rollback()
 
 
-def notify_doctor_ipd_care_team_added(
+def _notify_doctor_care_team(
     db: Session,
     admission: IpdAdmission,
     *,
-    doctor_id: int,
+    user_id: int,
+    title: str,
+    intro: str,
     created_by: Optional[int] = None,
+    extra_line: Optional[str] = None,
+    log_action: str = "care-team update",
 ) -> None:
-    """Inbox alert when a doctor is added to an admission care team."""
-    if not doctor_id:
+    """Send one IPD care-team inbox row. No-op if user_id is empty."""
+    if not user_id:
         return
 
     patient_name = _patient_label(db, admission.patient_id)
     bed = admission.bed_number or "—"
     ward = admission.ward_name or "—"
     admission_no = admission.admission_no or f"#{admission.id}"
-    message = (
-        f"You were added to an IPD care team.\n"
-        f"Patient: {patient_name}\n"
-        f"Admission: {admission_no}\n"
-        f"Ward: {ward}  Bed: {bed}"
+    lines = [intro]
+    if extra_line:
+        lines.append(extra_line)
+    lines.extend(
+        [
+            f"Patient: {patient_name}",
+            f"Admission: {admission_no}",
+            f"Ward: {ward}  Bed: {bed}",
+        ]
     )
     try:
         create_notification(
             db,
-            user_id=doctor_id,
-            title="IPD Care Team Assignment",
-            message=message,
+            user_id=user_id,
+            title=title,
+            message="\n".join(lines),
             notification_type=NotificationType.IPD_ADMITTED,
             source_module=SourceModule.IPD,
             reference_type=ReferenceType.ADMISSION,
@@ -168,8 +176,88 @@ def notify_doctor_ipd_care_team_added(
         )
     except Exception:
         logger.exception(
-            "Failed to notify doctor %s of care-team add on admission %s",
-            doctor_id,
+            "Failed to notify doctor %s of %s on admission %s",
+            user_id,
+            log_action,
             admission.id,
         )
         db.rollback()
+
+
+def notify_doctor_ipd_care_team_added(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    doctor_id: int,
+    created_by: Optional[int] = None,
+) -> None:
+    """Inbox alert for the doctor being added to an admission care team."""
+    _notify_doctor_care_team(
+        db,
+        admission,
+        user_id=doctor_id,
+        title="IPD Care Team Assignment",
+        intro="You were added to an IPD care team.",
+        created_by=created_by,
+        log_action="care-team add",
+    )
+
+
+def notify_doctors_ipd_care_team_added(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    associated_doctor_id: int,
+    created_by: Optional[int] = None,
+) -> None:
+    """Notify the new associated doctor and the primary attending doctor."""
+    notify_doctor_ipd_care_team_added(
+        db, admission, doctor_id=associated_doctor_id, created_by=created_by
+    )
+    primary_id = admission.doctor_id
+    if not primary_id or int(primary_id) == int(associated_doctor_id):
+        return
+    doctor_name = h.doctor_display(db, associated_doctor_id) or "A doctor"
+    _notify_doctor_care_team(
+        db,
+        admission,
+        user_id=primary_id,
+        title="IPD Care Team Updated",
+        intro="A doctor was added to your patient's care team.",
+        extra_line=f"Doctor: {doctor_name}",
+        created_by=created_by,
+        log_action="care-team add (primary)",
+    )
+
+
+def notify_doctors_ipd_care_team_removed(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    associated_doctor_id: int,
+    created_by: Optional[int] = None,
+) -> None:
+    """Notify the removed associated doctor and the primary attending doctor."""
+    _notify_doctor_care_team(
+        db,
+        admission,
+        user_id=associated_doctor_id,
+        title="Removed from IPD Care Team",
+        intro="You were removed from an IPD care team.",
+        created_by=created_by,
+        log_action="care-team remove",
+    )
+    primary_id = admission.doctor_id
+    if not primary_id or int(primary_id) == int(associated_doctor_id):
+        return
+    doctor_name = h.doctor_display(db, associated_doctor_id) or "A doctor"
+    _notify_doctor_care_team(
+        db,
+        admission,
+        user_id=primary_id,
+        title="IPD Care Team Updated",
+        intro="A doctor was removed from your patient's care team.",
+        extra_line=f"Doctor: {doctor_name}",
+        created_by=created_by,
+        log_action="care-team remove (primary)",
+    )

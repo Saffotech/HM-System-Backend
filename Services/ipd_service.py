@@ -39,13 +39,11 @@ from Services import opd_helpers as oh
 from Services import opd_settings_service
 from Services.ipd_notification_helpers import (
     notify_doctor_ipd_admitted,
+    notify_doctors_ipd_care_team_added,
+    notify_doctors_ipd_care_team_removed,
     notify_nurses_ipd_bed_patient,
 )
 
-from Services.ipd_notification_helpers import (
-    notify_doctor_ipd_admitted,
-    notify_doctor_ipd_care_team_added,
-)
 
 def _iso(dt: Optional[datetime]) -> Optional[str]:
     return dt.isoformat() if dt else None
@@ -453,8 +451,8 @@ def add_care_team_doctor(
     db.add(row)
     db.commit()
     db.refresh(row)
-    notify_doctor_ipd_care_team_added(
-        db, admission, doctor_id=data.doctor_id, created_by=added_by
+    notify_doctors_ipd_care_team_added(
+        db, admission, associated_doctor_id=data.doctor_id, created_by=added_by
     )
     return _care_team_member_out(db, row).model_dump()
 
@@ -463,6 +461,8 @@ def remove_care_team_doctor(
     db: Session,
     admission_id: int,
     doctor_id: int,
+    *,
+    removed_by: Optional[int] = None,
 ) -> dict:
     admission = h.get_admission(db, admission_id)
     if admission.status != "admitted":
@@ -482,6 +482,9 @@ def remove_care_team_doctor(
         raise HTTPException(status_code=404, detail="Care team doctor not found")
     db.delete(row)
     db.commit()
+    notify_doctors_ipd_care_team_removed(
+        db, admission, associated_doctor_id=doctor_id, created_by=removed_by
+    )
     return {
         "message": "Doctor removed from care team",
         "admission_id": admission.id,
