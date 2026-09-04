@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship as orm_relationship
@@ -74,6 +75,38 @@ class IpdAdmission(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    care_team = orm_relationship(
+        "IpdAdmissionCareTeam",
+        back_populates="admission",
+        cascade="all, delete-orphan",
+    )
+
+
+class IpdAdmissionCareTeam(Base):
+    """Extra doctors associated with an admission (primary remains ipd_admissions.doctor_id)."""
+
+    __tablename__ = "ipd_admission_care_team"
+    __table_args__ = (
+        UniqueConstraint(
+            "admission_id",
+            "doctor_id",
+            name="uq_ipd_admission_care_team_admission_doctor",
+        ),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    admission_id = Column(
+        Integer,
+        ForeignKey("ipd_admissions.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    doctor_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
+    added_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
+
+    admission = orm_relationship("IpdAdmission", back_populates="care_team")
 
 
 class IpdAdmissionBilling(Base):

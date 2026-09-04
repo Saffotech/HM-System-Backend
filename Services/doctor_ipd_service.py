@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session, joinedload
 
 from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_prescriptions import Prescription
-from Models.ipd import IpdAdmission, IpdDoctorVisit
+from Models.ipd import IpdAdmission, IpdAdmissionCareTeam, IpdDoctorVisit
 from Models.patient import Patient
 from Schemas.doctor_ipd_schema import DoctorIpdConsultationSaveRequest
 from Schemas.doctor_lab_test_schema import LabTestCreate
@@ -17,6 +17,7 @@ from Services.doctor_prescription_service import (
     create_prescription_for_admission,
     serialize_prescription,
 )
+from Services.ipd_service import doctor_has_admission_access
 
 
 _STATUS_ALIASES = {
@@ -65,7 +66,14 @@ def list_doctor_ipd_admissions_service(
         db.query(IpdAdmission)
         .join(Patient, IpdAdmission.patient_id == Patient.id)
         .filter(
-            IpdAdmission.doctor_id == doctor_id,
+            or_(
+                IpdAdmission.doctor_id == doctor_id,
+                IpdAdmission.id.in_(
+                    db.query(IpdAdmissionCareTeam.admission_id).filter(
+                        IpdAdmissionCareTeam.doctor_id == doctor_id
+                    )
+                ),
+            ),
             Patient.is_active.is_(True),
         )
     )
@@ -135,14 +143,11 @@ def save_doctor_ipd_consultation_service(
 
     admission = (
         db.query(IpdAdmission)
-        .filter(
-            IpdAdmission.id == admission_id,
-            IpdAdmission.doctor_id == doctor_id,
-        )
+        .filter(IpdAdmission.id == admission_id)
         .with_for_update()
         .first()
     )
-    if not admission:
+    if not admission or not doctor_has_admission_access(db, admission, doctor_id):
         raise HTTPException(status_code=404, detail="IPD admission not found")
     if str(admission.status or "").strip().lower() != "admitted":
         raise HTTPException(

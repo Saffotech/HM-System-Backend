@@ -1,4 +1,4 @@
-"""Notify assigned doctor and allocated bed nurse(s) on IPD admit/transfer."""
+"""Notify the assigned doctor when an IPD patient is admitted to them."""
 import logging
 from typing import Optional
 
@@ -129,3 +129,47 @@ def notify_nurses_ipd_bed_patient(
                 target_bed_id,
             )
             db.rollback()
+
+
+def notify_doctor_ipd_care_team_added(
+    db: Session,
+    admission: IpdAdmission,
+    *,
+    doctor_id: int,
+    created_by: Optional[int] = None,
+) -> None:
+    """Inbox alert when a doctor is added to an admission care team."""
+    if not doctor_id:
+        return
+
+    patient_name = _patient_label(db, admission.patient_id)
+    bed = admission.bed_number or "—"
+    ward = admission.ward_name or "—"
+    admission_no = admission.admission_no or f"#{admission.id}"
+    message = (
+        f"You were added to an IPD care team.\n"
+        f"Patient: {patient_name}\n"
+        f"Admission: {admission_no}\n"
+        f"Ward: {ward}  Bed: {bed}"
+    )
+    try:
+        create_notification(
+            db,
+            user_id=doctor_id,
+            title="IPD Care Team Assignment",
+            message=message,
+            notification_type=NotificationType.IPD_ADMITTED,
+            source_module=SourceModule.IPD,
+            reference_type=ReferenceType.ADMISSION,
+            reference_id=admission.id,
+            created_by=created_by,
+            created_by_name=_staff_name(db, created_by),
+            priority=NotificationPriority.HIGH,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to notify doctor %s of care-team add on admission %s",
+            doctor_id,
+            admission.id,
+        )
+        db.rollback()

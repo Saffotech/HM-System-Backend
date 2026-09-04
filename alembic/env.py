@@ -16,6 +16,7 @@ from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
 from Models.ipd import (
     IpdAdmission,
     IpdAdmissionBilling,
+    IpdAdmissionCareTeam,
     IpdBill,
     IpdBillItem,
     IpdDoctorVisit,

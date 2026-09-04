@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -14,7 +14,9 @@ from Schemas.pharmacy_schema import (
     PharmacyPrescriptionDetail,
     PharmacyPrescriptionListResponse,
 )
+from Services import pharmacy_audit_service as pharmacy_audit
 from Services import pharmacy_service
+from Services.audit_helpers import client_ip, user_agent
 
 router = APIRouter(prefix="/pharmacy", tags=["Pharmacy"])
 
@@ -71,10 +73,22 @@ def get_pharmacy_prescription(
 def dispense_prescription(
     prescription_id: int,
     data: DispenseRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("prescriptions:dispense")),
 ):
-    return pharmacy_service.dispense_prescription(
+    result = pharmacy_service.dispense_prescription(
         db, prescription_id, data, current_user.id
     )
+    pharmacy_audit.log_dispense(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        prescription_id=prescription_id,
+        result=result,
+        batch_number=data.batch_number,
+        remarks=data.remarks,
+    )
+    return result

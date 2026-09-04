@@ -1,7 +1,7 @@
 """IPD API routes — admissions, beds, billing, discharge, dashboard."""
 from typing import Any, Optional
 
-from fastapi import APIRouter, Body, Depends, Query
+from fastapi import APIRouter, Body, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -11,6 +11,7 @@ from Models.user import User
 from Schemas.ipd_schema import (
     IpdAdmitRequest,
     IpdAdmissionUpdate,
+    IpdCareTeamAddRequest,
     IpdCollectPaymentRequest,
     IpdDischargeRequest,
     IpdDoctorVisitCreate,
@@ -19,12 +20,14 @@ from Schemas.ipd_schema import (
     IpdPatientRegisterResponse,
     IpdTransferBedRequest,
 )
+from Services import ipd_audit_service as ipd_audit
 from Services import ipd_billing_service
 from Services import ipd_service
 from Services import lab_test_catalog_service
 from Services import opd_service
 from Services import opd_settings_service
 from Services import patient_service
+from Services.audit_helpers import client_ip, user_agent
 from Schemas.lab_test_schema import LabTestListResponse
 
 router = APIRouter(prefix="/ipd", tags=["IPD"])
@@ -123,46 +126,124 @@ def admission_detail(
 @router.post("/admissions", status_code=201)
 def admit(
     data: IpdAdmitRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:create")),
 ):
-    return ipd_service.admit_patient(db, data, admitted_by=current_user.id)
+    result = ipd_service.admit_patient(db, data, admitted_by=current_user.id)
+    ipd_audit.log_admission_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 @router.put("/admissions/{admission_id}")
 def update_admission(
     admission_id: int,
     data: IpdAdmissionUpdate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:create")),
 ):
-    return ipd_service.update_admission(
+    result = ipd_service.update_admission(
         db, admission_id, data, updated_by=current_user.id
     )
+    ipd_audit.log_admission_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        result=result,
+        changes=data.model_dump(exclude_unset=True),
+    )
+    return result
+
+
+@router.post("/admissions/{admission_id}/care-team", status_code=201)
+def add_care_team_doctor(
+    admission_id: int,
+    data: IpdCareTeamAddRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:admission:create")),
+):
+    return ipd_service.add_care_team_doctor(
+        db, admission_id, data, added_by=current_user.id
+    )
+
+
+@router.delete("/admissions/{admission_id}/care-team/{doctor_id}")
+def remove_care_team_doctor(
+    admission_id: int,
+    doctor_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("ipd:admission:create")),
+):
+    return ipd_service.remove_care_team_doctor(db, admission_id, doctor_id)
 
 
 @router.post("/admissions/{admission_id}/visits", status_code=201)
 def add_visit(
     admission_id: int,
     data: IpdDoctorVisitCreate,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:visits:create")),
 ):
-    return ipd_service.add_doctor_visit(db, admission_id, data, recorded_by=current_user.id)
+    result = ipd_service.add_doctor_visit(
+        db, admission_id, data, recorded_by=current_user.id
+    )
+    ipd_audit.log_visit_create(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        result=result,
+    )
+    return result
 
 
 @router.post("/admissions/{admission_id}/discharge")
 def discharge(
     admission_id: int,
     data: IpdDischargeRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:discharge")),
 ):
-    return ipd_service.discharge_patient(db, admission_id, data, discharged_by=current_user.id)
+    result = ipd_service.discharge_patient(
+        db, admission_id, data, discharged_by=current_user.id
+    )
+    ipd_audit.log_admission_discharge(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        result=result,
+    )
+    # If discharge auto-generated an unpaid bill, record bill.generate too.
+    bill = result.get("bill") if isinstance(result, dict) else None
+    if bill:
+        ipd_audit.log_bill_generate(
+            db,
+            actor=current_user,
+            ip_address=client_ip(request),
+            user_agent=user_agent(request),
+            result=bill,
+        )
+    return result
 
 
 @router.post(
@@ -238,11 +319,22 @@ def bed_wards(
 @router.post("/beds/transfer")
 def transfer_bed(
     data: IpdTransferBedRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:beds:transfer")),
 ):
-    return ipd_service.transfer_bed(db, data, transferred_by=current_user.id)
+    result = ipd_service.transfer_bed(db, data, transferred_by=current_user.id)
+    ipd_audit.log_bed_transfer(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+        from_bed_id=getattr(data, "from_bed_id", None),
+        to_bed_id=data.new_bed_id,
+    )
+    return result
 
 
 @router.get("/billing/running")
@@ -280,14 +372,24 @@ def admission_daily_billing(
 @router.put("/admissions/{admission_id}/billing/daily")
 def update_admission_daily_billing(
     admission_id: int,
+    request: Request,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:bill:generate")),
 ):
-    return ipd_billing_service.update_daily_billing(
+    result = ipd_billing_service.update_daily_billing(
         db, admission_id, payload, updated_by=current_user.id
     )
+    ipd_audit.log_billing_daily_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        result=result,
+    )
+    return result
 
 
 @router.get("/admissions/{admission_id}/billing/final")
@@ -303,14 +405,24 @@ def admission_final_billing(
 @router.put("/admissions/{admission_id}/billing/final")
 def update_admission_final_billing(
     admission_id: int,
+    request: Request,
     payload: dict[str, Any] = Body(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:bill:generate")),
 ):
-    return ipd_billing_service.update_final_billing(
+    result = ipd_billing_service.update_final_billing(
         db, admission_id, payload, updated_by=current_user.id
     )
+    ipd_audit.log_billing_final_update(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        admission_id=admission_id,
+        result=result,
+    )
+    return result
 
 
 @router.get("/billing/preview/{admission_id}")
@@ -326,11 +438,20 @@ def bill_preview(
 @router.post("/billing/generate", status_code=201)
 def generate_bill(
     data: IpdGenerateBillRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:bill:generate")),
 ):
-    return ipd_service.generate_bill(db, data, generated_by=current_user.id)
+    result = ipd_service.generate_bill(db, data, generated_by=current_user.id)
+    ipd_audit.log_bill_generate(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        result=result,
+    )
+    return result
 
 
 @router.get("/billing/{bill_id}/invoice")
@@ -347,11 +468,25 @@ def get_bill_invoice(
 def pay_bill(
     bill_id: int,
     data: IpdCollectPaymentRequest,
+    request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:bill:pay")),
 ):
-    return ipd_service.collect_payment(db, bill_id, data, recorded_by=current_user.id)
+    result = ipd_service.collect_payment(
+        db, bill_id, data, recorded_by=current_user.id
+    )
+    ipd_audit.log_bill_pay(
+        db,
+        actor=current_user,
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+        bill_id=bill_id,
+        result=result,
+        amount=float(data.amount) if data.amount is not None else None,
+        payment_mode=data.payment_mode,
+    )
+    return result
 
 
 @router.get("/payments/history")
