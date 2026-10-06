@@ -1,9 +1,10 @@
 """OPD & billing — patients, visits, bills, payments, dashboard."""
+import re
 from datetime import timedelta
 from typing import List, Optional
 
 from fastapi import HTTPException
-from sqlalchemy import case, func
+from sqlalchemy import String, case, cast, func
 from sqlalchemy.orm import Session
 
 from Models.department import Department
@@ -40,6 +41,7 @@ from Services.opd_notification_helpers import notify_opd_payment_pending
 
 # Re-export helpers used by router
 get_patient = h.get_patient
+get_patient_record = h.get_patient_record
 list_doctors_in_department = h.list_doctors_in_department
 display_name = h.display_name
 
@@ -142,6 +144,49 @@ def patient_to_model(data: PatientRegisterRequest, patient_uid: str, registered_
     )
 
 
+def _money_close(left: float, right: float) -> bool:
+    return abs(round(float(left), 2) - round(float(right), 2)) <= 0.01
+
+
+def _extra_items_subtotal(extra_items: Optional[List[dict]]) -> float:
+    total = 0.0
+    for item in extra_items or []:
+        total += round(float(item["qty"]) * float(item["unit_price"]), 2)
+    return round(total, 2)
+
+
+def _consultation_fee_for_generated_bill(
+    pricing,
+    *,
+    requested: float,
+    resolved: float,
+    registration_fee: float,
+    extra_items: Optional[List[dict]],
+    gst_percent: float,
+    pay_later: bool,
+    amount_received: Optional[float],
+) -> float:
+    """Consultation on Generate Bill is only the row still on the form.
+
+    An explicit 0 is kept. The screen still sends the configured fee after that
+    row is removed, while Amount Received is the on-screen grand total of the
+    remaining items. When that payment matches those items and not the total
+    that includes consultation, the removed charge is not billed.
+    """
+    if requested <= 0:
+        return 0.0
+    fee = requested if bool(pricing.allow_manual_price_entry) else resolved
+    base = float(registration_fee) + _extra_items_subtotal(extra_items)
+    _, _, total_without = h.bill_totals_from_subtotal(base, gst_percent)
+    _, _, total_with = h.bill_totals_from_subtotal(base + fee, gst_percent)
+    if pay_later or amount_received is None:
+        return fee
+    paid_now = float(amount_received)
+    if _money_close(paid_now, total_without) and not _money_close(paid_now, total_with):
+        return 0.0
+    return fee
+
+
 def create_visit(
     db: Session,
     patient: Patient,
@@ -152,7 +197,8 @@ def create_visit(
     payment_mode: str = "cash",
     amount_received: Optional[float] = None,
     extra_items: Optional[List[dict]] = None,
-    transaction_reference: Optional[str] = None
+    transaction_reference: Optional[str] = None,
+    bill_from_selection: bool = False,
 ) -> OpdVisit:
     h.get_department(db, billing.department_id)
     doctor = h.get_doctor_in_department(db, billing.doctor_id, billing.department_id)
@@ -166,6 +212,18 @@ def create_visit(
         registration_fee=billing.registration_fee,
     )
     extra_items = opd_settings_service.validate_extra_bill_items(pricing, extra_items)
+
+    if bill_from_selection:
+        consultation_fee = _consultation_fee_for_generated_bill(
+            pricing,
+            requested=float(billing.consultation_fee or 0),
+            resolved=consultation_fee,
+            registration_fee=registration_fee,
+            extra_items=extra_items,
+            gst_percent=gst_percent,
+            pay_later=pay_later,
+            amount_received=amount_received,
+        )
 
     subtotal = registration_fee + consultation_fee
     if extra_items:
@@ -349,6 +407,7 @@ def generate_bill(
         amount_received=data.amount_received,
         extra_items=extra or None,
         transaction_reference=data.transaction_reference,
+        bill_from_selection=True,
     )
     # Prefer explicit appointment link (book-then-bill); else same-day orphan match.
     # If still missing, resolve/create the canonical walk-in appointment using the
@@ -506,7 +565,13 @@ def ensure_pending_appointment_bills(db: Session, registered_by: int) -> int:
 
 
 def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limit: int = 20) -> dict:
-    q = db.query(Patient).filter(Patient.is_active.is_(True))
+    # Bill view resolves a patient by UID (P-1042). That lookup must still find a
+    # deactivated profile. Name, phone, and the default list stay active-only.
+    term_raw = (search or "").strip()
+    include_inactive = bool(re.fullmatch(r"P-\d+", term_raw, flags=re.IGNORECASE))
+    q = db.query(Patient)
+    if not include_inactive:
+        q = q.filter(Patient.is_active.is_(True))
     if search:
         term = f"%{search.strip()}%"
         q = q.filter(
@@ -521,7 +586,7 @@ def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limi
 
 
 def get_patient_profile(db: Session, patient_id: int) -> dict:
-    patient = h.get_patient(db, patient_id)
+    patient = h.get_patient_record(db, patient_id)
     visits = (
         db.query(OpdVisit)
         .filter(OpdVisit.patient_id == patient_id)
@@ -964,10 +1029,19 @@ def list_payment_history(
         .filter(OpdVisit.status != "cancelled")
         .order_by(PaymentTransaction.paid_at.desc())
     )
-    if search:
+    if search and search.strip():
         term = f"%{search.strip()}%"
+        full_name = func.concat(
+            Patient.first_name,
+            " ",
+            func.coalesce(Patient.last_name, ""),
+        )
         q = q.filter(
-            (Patient.patient_uid.ilike(term))
+            (Patient.first_name.ilike(term))
+            | (Patient.last_name.ilike(term))
+            | (full_name.ilike(term))
+            | (Patient.patient_uid.ilike(term))
+            | (cast(Patient.id, String).ilike(term))
             | (OpdVisit.bill_number.ilike(term))
             | (PaymentTransaction.transaction_reference.ilike(term))
         )

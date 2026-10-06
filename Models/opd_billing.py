@@ -73,6 +73,7 @@ class Appointment(Base):
     )
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now)
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
 
 
 class Bed(Base):

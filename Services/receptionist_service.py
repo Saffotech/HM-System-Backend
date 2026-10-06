@@ -98,6 +98,12 @@ def _appointment_row_to_dict(
         if department_id is not None
         else getattr(appointment, "department_id", None)
     )
+    display_status = _receptionist_display_status(appointment)
+    # Queue History shows checked_in_at as the cancel time. Use the stored
+    # doctor cancel timestamp so that column matches when the appointment was cancelled.
+    checked_in_at = queue.queue_entered_at if queue else None
+    if display_status == "cancelled" and appointment.cancelled_at is not None:
+        checked_in_at = appointment.cancelled_at
     data = {
         "appointment_id": appointment.id,
         "appointment_uid": appointment.appointment_uid,
@@ -108,10 +114,10 @@ def _appointment_row_to_dict(
         "doctor_id": appointment.doctor_id,
         "department_id": resolved_department_id,
         "department": department,
-        "status": _receptionist_display_status(appointment),
+        "status": display_status,
         "payment_status": _resolve_payment_status(visit),
         "scheduled_at": appointment.scheduled_at,
-        "checked_in_at": queue.queue_entered_at if queue else None,
+        "checked_in_at": checked_in_at,
         "consultation_started_at": queue.consultation_started_at if queue else None,
         "consultation_completed_at": queue.consultation_completed_at if queue else None,
         "queue_date": queue.queue_date if queue else queue_date,
@@ -609,19 +615,55 @@ def _load_canonical_rows(
     )
     return filtered
 
+def _today_patient_count(
+    db: Session,
+    status: str,
+    *,
+    doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    search: Optional[str] = None,
+) -> int:
+    """One row per patient for today, same rules as the dashboard list."""
+    q, Visit = _todays_appointments_query(
+        db,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        payment_filter=None,
+        include_cancelled=(status == "cancelled"),
+    )
+    q = _apply_receptionist_status_filter(q, status)
+    if search and search.strip():
+        q = q.filter(_appointment_search_filter(search, include_doctor=True))
+    _, total, _, _ = _page_canonical_board(
+        db,
+        q,
+        Visit,
+        partition="patient",
+        page=1,
+        limit=1,
+        payment_filter=None,
+    )
+    return total
 
-def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
-    """KPI cards — SQL aggregates on canonical (patient, doctor) rows for today."""
+def get_dashboard(
+    db: Session,
+    *,
+    doctor_id: Optional[int] = None,
+    department_id: Optional[int] = None,
+    search: Optional[str] = None,
+) -> dict:
+    """KPI cards for today, using the same doctor, department, and search as the list."""
     _maybe_mark_past_appointments(db)
-    today = _today()
-    day_start, day_end = _today_range()
 
     q, Visit = _todays_appointments_query(
         db,
         doctor_id=doctor_id,
+        department_id=department_id,
         payment_filter=None,
         include_cancelled=False,
     )
+    if search and search.strip():
+        q = q.filter(_appointment_search_filter(search, include_doctor=True))
     # DISTINCT ON (patient_id, doctor_id) then aggregate — same paid/unpaid rules.
     canonical = (
         q.order_by(
@@ -652,14 +694,9 @@ def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
             if visit is not None and is_visit_paid(visit):
                 orphan_paid.add(apt_id)
 
-    total = len(canonical)
-    completed = 0
     paid = 0
     unpaid = 0
     for row in canonical:
-        st = status_value(row.status)
-        if st == AppointmentStatus.completed.value:
-            completed += 1
         is_paid = False
         if row.visit_id is not None:
             if (row.payment_status or "") == "paid" or float(row.grand_total or 0) <= 0:
@@ -671,20 +708,22 @@ def get_dashboard(db: Session, *, doctor_id: Optional[int] = None) -> dict:
         else:
             unpaid += 1
 
-    cancelled_q = db.query(func.count(Appointment.id)).filter(
-        Appointment.scheduled_at >= day_start,
-        Appointment.scheduled_at < day_end,
-        Appointment.status == AppointmentStatus.cancelled,
-    )
-    if doctor_id:
-        cancelled_q = cancelled_q.filter(Appointment.doctor_id == doctor_id)
+    count_kwargs = {
+        "doctor_id": doctor_id,
+        "department_id": department_id,
+        "search": search,
+    }
+    scheduled = _today_patient_count(db, "scheduled", **count_kwargs)
+    completed = _today_patient_count(db, "completed", **count_kwargs)
+    cancelled = _today_patient_count(db, "cancelled", **count_kwargs)
 
     return {
-        "total_patients": total,
+        "total_patients": scheduled + completed + cancelled,
+        "scheduled": scheduled,
         "completed": completed,
         "todays_paid_appointments": paid,
         "todays_unpaid_appointments": unpaid,
-        "todays_cancelled": int(cancelled_q.scalar() or 0),
+        "todays_cancelled": cancelled,
     }
 
 

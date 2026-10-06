@@ -19,6 +19,7 @@ from Models.user import User
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
 from Services import opd_settings_service as opd_settings_svc
+from Services.ipd_helpers import get_active_admission_for_patient
 from Services.queue_helpers import appointment_status_value
 
 LIST_FILTERS = frozenset({"all", "scheduled", "pending", "completed", "cancelled"})
@@ -98,6 +99,29 @@ def iso_scheduled_at(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
     return _to_ist(dt).isoformat()
+
+
+def find_patient_appointment_on_day(
+    db: Session,
+    *,
+    patient_id: int,
+    scheduled_at: datetime,
+) -> Optional[Appointment]:
+    """Any scheduled or completed appointment for this patient on that IST day."""
+    start, end = _day_window(scheduled_at)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.patient_id == patient_id,
+            Appointment.scheduled_at >= start,
+            Appointment.scheduled_at < end,
+            Appointment.status.in_(
+                [AppointmentStatus.scheduled, AppointmentStatus.completed]
+            ),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
 
 
 def find_active_appointment_same_day(
@@ -718,8 +742,36 @@ def preview_today_appointments(db: Session, *, limit: int = 8) -> list[Appointme
     return _appointments_out_list(db, rows, visit_map)
 
 
+def _slot_has_passed(slot_time: datetime) -> bool:
+    """True when the slot start is already at or before the current India time."""
+    return _to_ist(slot_time) <= h.now_ist()
+
+
 def create_appointment(db: Session, data: AppointmentCreate, created_by: int) -> AppointmentOut:
-    """Create or reuse one active appointment for the patient+doctor+dept+day."""
+    """Create one appointment. A patient cannot be booked twice on the same IST day."""
+    if _slot_has_passed(data.scheduled_at):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot book a time that has already passed",
+        )
+
+    if get_active_admission_for_patient(db, data.patient_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Patient is currently admitted in IPD",
+        )
+
+    existing = find_patient_appointment_on_day(
+        db,
+        patient_id=data.patient_id,
+        scheduled_at=data.scheduled_at,
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Patient already has an appointment on this date",
+        )
+
     apt = resolve_appointment_for_visit(
         db,
         patient_id=data.patient_id,
@@ -865,6 +917,9 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
     for key, value in updates.items():
         setattr(apt, key, value)
 
+    if updates.get("status") == AppointmentStatus.cancelled and apt.cancelled_at is None:
+        apt.cancelled_at = h.now_ist()
+
     db.commit()
     db.refresh(apt)
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
@@ -954,6 +1009,8 @@ def doctor_availability(db: Session, doctor_id: int, department_id: int, date_st
 
     slots = []
     for slot_time in opd_settings_svc.iter_slot_datetimes(day, config):
+        if _slot_has_passed(slot_time):
+            continue
         taken = _slot_taken(slot_time)
         slots.append({
             "time": slot_time.strftime("%H:%M"),
