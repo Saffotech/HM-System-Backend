@@ -5,7 +5,8 @@ import sys, os
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from database import Base, DATABASE_URL
+from config import settings
+from database import Base
 
 
 from Models.role import Role, Permission, RolePermission
@@ -45,7 +46,7 @@ if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
 # Keep Alembic on the same database as the FastAPI app (database.py).
-config.set_main_option("sqlalchemy.url", DATABASE_URL.replace("%", "%%"))
+config.set_main_option("sqlalchemy.url", settings.DATABASE_URL.replace("%", "%%"))
 
 target_metadata = Base.metadata
 
