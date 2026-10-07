@@ -43,6 +43,11 @@ class IpdAdmitInsuranceIn(BaseModel):
             self.claim_type = "pay_and_claim"
         else:
             raise ValueError("claim_type must be cashless or pay_and_claim")
+        if (
+                self.estimate_amount is not None
+                and self.estimate_amount > float(self.claimed_amount or 0)
+        ):
+            raise ValueError("Estimate amount cannot exceed claimed amount")
         return self
 
 

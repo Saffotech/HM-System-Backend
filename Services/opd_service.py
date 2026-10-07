@@ -572,13 +572,15 @@ def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limi
     q = db.query(Patient)
     if not include_inactive:
         q = q.filter(Patient.is_active.is_(True))
-    if search:
-        term = f"%{search.strip()}%"
+    # Match each word on its own. "Raju Khan" must hit first_name and last_name
+    # on the same patient; one whole-string ilike matches neither column.
+    for token in term_raw.split():
+        like = f"%{token}%"
         q = q.filter(
-            (Patient.first_name.ilike(term))
-            | (Patient.last_name.ilike(term))
-            | (Patient.phone.ilike(term))
-            | (Patient.patient_uid.ilike(term))
+            (Patient.first_name.ilike(like))
+            | (Patient.last_name.ilike(like))
+            | (Patient.phone.ilike(like))
+            | (Patient.patient_uid.ilike(like))
         )
     total = q.count()
     rows = q.order_by(Patient.id.desc()).offset((page - 1) * limit).limit(limit).all()

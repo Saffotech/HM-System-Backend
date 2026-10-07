@@ -3,6 +3,7 @@ from datetime import datetime
 from typing import List, Optional
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from Models.department import Department
@@ -292,6 +293,27 @@ def transfer_bed(
     return _admission_out(db, admission)
 
 
+def admission_text_search_filter(search: str, *extra_columns):
+    """P- matches only the patient ID. IPD- matches only the admission number.
+
+    A bare number is not an ID search, so 1028 cannot match both P-1028 and IPD-1028.
+    """
+    raw = (search or "").strip()
+    key = raw.upper()
+    if key.startswith("P-"):
+        return Patient.patient_uid.ilike(f"%{raw}%")
+    if key.startswith("IPD-"):
+        return IpdAdmission.admission_no.ilike(f"%{raw}%")
+    term = f"%{raw}%"
+    clauses = [
+        Patient.first_name.ilike(term),
+        Patient.last_name.ilike(term),
+        Patient.phone.ilike(term),
+        *[column.ilike(term) for column in extra_columns],
+    ]
+    return or_(*clauses)
+
+
 def list_admissions(
     db: Session,
     *,
@@ -322,18 +344,9 @@ def list_admissions(
 
         q = q.filter(cast(IpdAdmission.admitted_at, Date) == day)
 
-    if search:
-        term = f"%{search.strip()}%"
-        q = (
-            q.join(Patient, IpdAdmission.patient_id == Patient.id)
-            .filter(
-                (Patient.first_name.ilike(term))
-                | (Patient.last_name.ilike(term))
-                | (Patient.phone.ilike(term))
-                | (Patient.patient_uid.ilike(term))
-                | (IpdAdmission.admission_no.ilike(term))
-                | (IpdAdmission.bed_number.ilike(term))
-            )
+    if search and search.strip():
+        q = q.join(Patient, IpdAdmission.patient_id == Patient.id).filter(
+            admission_text_search_filter(search, IpdAdmission.bed_number)
         )
 
     total = q.count()
@@ -1062,15 +1075,13 @@ def payment_history(
         .join(Patient, IpdAdmission.patient_id == Patient.id)
         .order_by(IpdPaymentTransaction.paid_at.desc())
     )
-    if search:
-        term = f"%{search.strip()}%"
+    if search and search.strip():
         q = q.filter(
-            (Patient.first_name.ilike(term))
-            | (Patient.last_name.ilike(term))
-            | (Patient.patient_uid.ilike(term))
-            | (IpdBill.bill_number.ilike(term))
-            | (IpdAdmission.admission_no.ilike(term))
-            | (IpdPaymentTransaction.transaction_reference.ilike(term))
+            admission_text_search_filter(
+                search,
+                IpdBill.bill_number,
+                IpdPaymentTransaction.transaction_reference,
+            )
         )
 
     all_rows = q.all()

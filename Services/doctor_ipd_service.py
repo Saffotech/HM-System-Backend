@@ -17,7 +17,7 @@ from Services.doctor_prescription_service import (
     create_prescription_for_admission,
     serialize_prescription,
 )
-from Services.ipd_service import doctor_has_admission_access
+from Services.ipd_service import admission_text_search_filter, doctor_has_admission_access
 
 
 _STATUS_ALIASES = {
@@ -85,16 +85,7 @@ def list_doctor_ipd_admissions_service(
         query = query.filter(date_clause)
 
     if search and search.strip():
-        term = f"%{search.strip()}%"
-        query = query.filter(
-            or_(
-                Patient.first_name.ilike(term),
-                Patient.last_name.ilike(term),
-                Patient.patient_uid.ilike(term),
-                Patient.phone.ilike(term),
-                IpdAdmission.admission_no.ilike(term),
-            )
-        )
+        query = query.filter(admission_text_search_filter(search))
 
     total = query.count()
     rows = (

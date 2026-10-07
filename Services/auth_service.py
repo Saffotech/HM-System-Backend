@@ -7,6 +7,7 @@ from Models.user import User
 from Schemas.schemas import UserCreate
 from hash import hash_password
 from Services import audit_service
+from Services.admin_users_service import _PROFILE_CREATE
 from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
@@ -48,6 +49,12 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         department_id=department_id,
     )
     db.add(new_user)
+    db.flush()
+
+    create_profile = _PROFILE_CREATE.get(role.name)
+    if create_profile:
+        create_profile(db, new_user.id)
+
     db.commit()
     db.refresh(new_user)
 
