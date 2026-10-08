@@ -230,7 +230,7 @@ def get_notifications(
 
     total = query.count()
     rows = (
-        query.order_by(_priority_sort_key(), Notification.created_at.desc())
+        query.order_by(Notification.created_at.desc(), Notification.id.desc())
         .offset((page - 1) * limit)
         .limit(limit)
         .all()

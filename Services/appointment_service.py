@@ -16,8 +16,10 @@ from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit, Patient
 from Models.user import User
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
+from Services.notification_service import create_notification
 from Services import opd_settings_service as opd_settings_svc
 from Services.ipd_helpers import get_active_admission_for_patient
 from Services.queue_helpers import appointment_status_value
@@ -895,11 +897,80 @@ def list_appointments(
     }
 
 
+def _scheduled_as_ist(scheduled_at: Optional[datetime]) -> Optional[datetime]:
+    if scheduled_at is None:
+        return None
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=h.IST)
+    else:
+        scheduled_at = scheduled_at.astimezone(h.IST)
+    return scheduled_at.replace(microsecond=0)
+
+
+def _scheduled_label_ist(scheduled_at: Optional[datetime]) -> str:
+    scheduled_at = _scheduled_as_ist(scheduled_at)
+    if scheduled_at is None:
+        return "Not set"
+    return scheduled_at.strftime("%d %b %Y, %I:%M %p")
+
+
+def _notify_doctor_appointment_cancelled(db: Session, apt: Appointment) -> None:
+    """Tell the assigned doctor that OPD cancelled this appointment."""
+    if not apt.doctor_id:
+        return
+    patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    create_notification(
+        db,
+        user_id=apt.doctor_id,
+        title="Appointment Cancelled",
+        message=(
+            f"Appointment cancelled.\n"
+            f"Patient: {patient_name}\n"
+            f"Appointment: {apt.appointment_uid}\n"
+            f"Scheduled: {_scheduled_label_ist(apt.scheduled_at)}"
+        ),
+        notification_type=NotificationType.APPOINTMENT_CANCELLED,
+        source_module=SourceModule.OPD_BILLING,
+        reference_type=ReferenceType.APPOINTMENT,
+        reference_id=apt.id,
+    )
+
+
+def _notify_doctor_appointment_rescheduled(db: Session, apt: Appointment) -> None:
+    """Tell the assigned doctor that OPD moved this appointment to a new slot."""
+    if not apt.doctor_id:
+        return
+    patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    create_notification(
+        db,
+        user_id=apt.doctor_id,
+        title="Appointment Rescheduled",
+        message=(
+            f"Appointment rescheduled.\n"
+            f"Patient: {patient_name}\n"
+            f"Appointment: {apt.appointment_uid}\n"
+            f"Scheduled: {_scheduled_label_ist(apt.scheduled_at)}"
+        ),
+        notification_type=NotificationType.APPOINTMENT_RESCHEDULED,
+        source_module=SourceModule.OPD_BILLING,
+        reference_type=ReferenceType.APPOINTMENT,
+        reference_id=apt.id,
+    )
+
+
 def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate) -> AppointmentOut:
     apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
+    previous_status = appointment_status_value(apt.status)
+    previous_scheduled = apt.scheduled_at
     updates = data.model_dump(exclude_unset=True)
     if "status" in updates and updates["status"] is not None:
         try:
@@ -917,11 +988,24 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
     for key, value in updates.items():
         setattr(apt, key, value)
 
-    if updates.get("status") == AppointmentStatus.cancelled and apt.cancelled_at is None:
+    newly_cancelled = (
+        appointment_status_value(updates.get("status")) == AppointmentStatus.cancelled.value
+        and previous_status != AppointmentStatus.cancelled.value
+    )
+    if newly_cancelled and apt.cancelled_at is None:
         apt.cancelled_at = h.now_ist()
+
+    rescheduled = (
+        updates.get("scheduled_at") is not None
+        and _scheduled_as_ist(previous_scheduled) != _scheduled_as_ist(apt.scheduled_at)
+    )
 
     db.commit()
     db.refresh(apt)
+    if newly_cancelled:
+        _notify_doctor_appointment_cancelled(db, apt)
+    if rescheduled:
+        _notify_doctor_appointment_rescheduled(db, apt)
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
 
 

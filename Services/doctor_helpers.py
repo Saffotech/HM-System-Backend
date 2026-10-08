@@ -15,6 +15,15 @@ from Services.ipd_helpers import allocated_nurses_for_patients
 IST = ZoneInfo("Asia/Kolkata")
 
 
+def as_ist(dt: Optional[datetime]) -> Optional[datetime]:
+    """Clock time in Asia/Kolkata. Naive values are already IST wall time."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=IST)
+    return dt.astimezone(IST)
+
+
 def day_bounds(on_date: date) -> tuple[datetime, datetime]:
     start = datetime.combine(on_date, time.min, tzinfo=IST)
     end = datetime.combine(on_date, time.max, tzinfo=IST)
@@ -192,7 +201,7 @@ def appointment_to_dict(
     if patient is None:
         patient = get_patient(db, apt.patient_id)
 
-    scheduled = apt.scheduled_at
+    scheduled = as_ist(apt.scheduled_at)
     age_fields = patient_age_fields(
         patient.date_of_birth if patient else None,
         patient.gender if patient else None,
@@ -267,8 +276,8 @@ def admission_to_dict(
     if patient is None:
         patient = get_patient(db, admission.patient_id)
 
-    admitted = admission.admitted_at
-    discharged = admission.discharged_at
+    admitted = as_ist(admission.admitted_at)
+    discharged = as_ist(admission.discharged_at)
     age_fields = patient_age_fields(
         patient.date_of_birth if patient else None,
         patient.gender if patient else None,
