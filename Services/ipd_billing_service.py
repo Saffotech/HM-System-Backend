@@ -200,7 +200,10 @@ def _tx(
 def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[str, Any]]:
     """Bed (per day) + doctor visits + pharmacy dispensings for this admission."""
     pricing = opd_settings_service.get_pricing(db)
-    days = opd_settings_service.calculate_bed_days(admission.admitted_at)
+    ended_at = None
+    if (admission.status or "") == "discharged" and admission.discharged_at:
+        ended_at = admission.discharged_at
+    days = opd_settings_service.calculate_bed_days(admission.admitted_at, ended_at)
     rate = _money(
         opd_settings_service.resolve_bed_rate(
             pricing,

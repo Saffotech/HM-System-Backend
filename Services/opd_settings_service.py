@@ -450,18 +450,26 @@ def get_special_bed_rate(
     return None
 
 
-def calculate_bed_days(admitted_at: Optional[datetime]) -> int:
+def calculate_bed_days(
+    admitted_at: Optional[datetime],
+    ended_at: Optional[datetime] = None,
+) -> int:
     """
-    days = max(1, ceil((now - admitted_at) / 24h))
+    days = max(1, ceil((end - admitted_at) / 24h))
+
+    end is the discharge time when the stay is closed. An open stay uses now.
     """
     if not admitted_at:
         return 1
-    now = datetime.now(IST)
+    end = ended_at or datetime.now(IST)
     try:
-        delta_seconds = max(0.0, (now - admitted_at).total_seconds())
+        delta_seconds = max(0.0, (end - admitted_at).total_seconds())
     except TypeError:
         # Defensive fallback for naive/aware mismatch from legacy rows.
-        delta_seconds = max(0.0, (now.replace(tzinfo=None) - admitted_at.replace(tzinfo=None)).total_seconds())
+        delta_seconds = max(
+            0.0,
+            (end.replace(tzinfo=None) - admitted_at.replace(tzinfo=None)).total_seconds(),
+        )
     return max(1, int(math.ceil(delta_seconds / 86400)))
 
 

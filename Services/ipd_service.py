@@ -1,14 +1,15 @@
 """IPD admissions, beds, visits, billing, discharge, and dashboard."""
 from datetime import datetime
 from typing import List, Optional
-
+from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy import or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from Models.department import Department
 from Models.ipd import (
     IpdAdmission,
+    IpdAdmissionBilling,
     IpdAdmissionCareTeam,
     IpdBill,
     IpdBillItem,
@@ -57,12 +58,32 @@ def _parse_dt(value: Optional[str]) -> datetime:
         raw = value.strip().replace("Z", "+00:00")
         dt = datetime.fromisoformat(raw)
         if dt.tzinfo is None:
-            from zoneinfo import ZoneInfo
-
             dt = dt.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
         return dt
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="Invalid datetime format") from exc
+
+
+def _ist_date(dt: datetime):
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    return dt.astimezone(ZoneInfo("Asia/Kolkata")).date()
+
+
+def _ensure_admission_date_in_range(admitted_at: datetime, patient: Patient) -> None:
+    """Stay must start on or after the patient was registered, and not after today (IST)."""
+    day = _ist_date(admitted_at)
+    if day > _ist_date(h.now_ist()):
+        raise HTTPException(
+            status_code=400,
+            detail="Admission date cannot be in the future",
+        )
+    registered = getattr(patient, "created_at", None)
+    if registered is not None and day < _ist_date(registered):
+        raise HTTPException(
+            status_code=400,
+            detail="Admission date is before the permitted minimum",
+        )
 
 
 def _admission_doctor_name(db: Session, row: IpdAdmission) -> Optional[str]:
@@ -89,7 +110,7 @@ def _admission_out(db: Session, row: IpdAdmission) -> IpdAdmissionOut:
         if row.department_id
         else None
     )
-    days = opd_settings_service.calculate_bed_days(row.admitted_at)
+    days = _bed_days_for_admission(row)
     claim = (
         db.query(IpdInsuranceClaim)
         .filter(IpdInsuranceClaim.admission_id == row.id)
@@ -164,6 +185,9 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
         data.insurance,
     )
 
+    admitted_at = _parse_dt(data.admission_date)
+    _ensure_admission_date_in_range(admitted_at, patient)
+
     h.occupy_bed(db, bed, patient.id, data.department_id)
 
     admission = IpdAdmission(
@@ -179,7 +203,7 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
         status="admitted",
         payment_type=payment_type,
         self_pay_method=self_pay_method,
-        admitted_at=_parse_dt(data.admission_date),
+        admitted_at=admitted_at,
         admitted_by=admitted_by,
     )
     # Align bed.admitted_at with admission start for tariff day calc consistency
@@ -570,9 +594,17 @@ def add_doctor_visit(
     return _visit_out(db, visit)
 
 
+def _bed_days_for_admission(admission: IpdAdmission) -> int:
+    """Open stays run to now. A discharged stay stops at discharged_at."""
+    ended_at = None
+    if (admission.status or "") == "discharged" and admission.discharged_at:
+        ended_at = admission.discharged_at
+    return opd_settings_service.calculate_bed_days(admission.admitted_at, ended_at)
+
+
 def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[list[dict], float, int]:
     pricing = opd_settings_service.get_pricing(db)
-    days = opd_settings_service.calculate_bed_days(admission.admitted_at)
+    days = _bed_days_for_admission(admission)
     rate = float(
         opd_settings_service.resolve_bed_rate(
             pricing,
@@ -641,16 +673,113 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
     except Exception:
         db.rollback()
 
+    # Saved Daily Charges are manual lines. Bed, visits, and pharmacy are already above.
+    billing = (
+        db.query(IpdAdmissionBilling)
+        .filter(IpdAdmissionBilling.admission_id == admission.id)
+        .first()
+    )
+    for row in (billing.daily_charges or []) if billing else []:
+        if not isinstance(row, dict):
+            continue
+        source = str(row.get("source") or "").strip().lower()
+        row_id = str(row.get("id") or "")
+        if row.get("is_auto") is True or row.get("isAuto") is True:
+            continue
+        if row_id.startswith("auto-") or (source and source != "manual"):
+            continue
+        amount = round(float(row.get("amount") or 0), 2)
+        if amount == 0:
+            continue
+        items.append(
+            {
+                "description": row.get("item_name") or row.get("head") or "Daily charge",
+                "qty": 1,
+                "unit_price": amount,
+                "amount": amount,
+                "item_type": "daily",
+            }
+        )
+
     subtotal = round(sum(i["amount"] for i in items), 2)
     return items, subtotal, days
 
 
+def _finalized_bills(db: Session, admission_id: int) -> list[IpdBill]:
+    """Final invoices only. Void and draft bills are not a pricing snapshot."""
+    return (
+        db.query(IpdBill)
+        .options(selectinload(IpdBill.items))
+        .filter(
+            IpdBill.admission_id == admission_id,
+            IpdBill.status == "final",
+        )
+        .order_by(IpdBill.id.asc())
+        .all()
+    )
+
+
+def _preview_from_saved_bills(
+    db: Session,
+    admission: IpdAdmission,
+    bills: list[IpdBill],
+) -> IpdBillPreviewOut:
+    """Closed stay: use the tax and totals saved on the invoice."""
+    subtotal = round(sum(float(b.subtotal or 0) for b in bills), 2)
+    gst_amount = round(sum(float(b.gst_amount or 0) for b in bills), 2)
+    grand = round(sum(float(b.grand_total or 0) for b in bills), 2)
+    rates = {round(float(b.gst_percent or 0), 2) for b in bills}
+    gst_percent = rates.pop() if len(rates) == 1 else (
+        round(gst_amount / subtotal * 100, 2) if subtotal else 0.0
+    )
+    items = [
+        IpdBillItemOut(
+            id=item.id,
+            description=item.description,
+            qty=item.qty,
+            unit_price=float(item.unit_price),
+            amount=float(item.amount),
+            item_type=item.item_type,
+        )
+        for bill in bills
+        for item in (bill.items or [])
+    ]
+    patient = db.query(Patient).filter(Patient.id == admission.patient_id).first()
+    return IpdBillPreviewOut(
+        admission_id=admission.id,
+        admission_no=admission.admission_no,
+        patient_name=h.display_name(patient.first_name, patient.last_name) if patient else None,
+        ward_name=admission.ward_name,
+        bed_number=admission.bed_number,
+        length_of_stay_days=_bed_days_for_admission(admission),
+        bed_rate=float(items[0].unit_price) if items else 0.0,
+        items=items,
+        subtotal=subtotal,
+        gst_percent=gst_percent,
+        gst_amount=gst_amount,
+        grand_total=grand,
+    )
+
+
 def build_bill_preview(db: Session, admission_id: int) -> IpdBillPreviewOut:
     admission = h.get_admission(db, admission_id)
-    items, subtotal, days = _charge_lines_for_admission(db, admission)
+    saved = _finalized_bills(db, admission.id)
+    if (admission.status or "") == "discharged" and admission.discharged_at and saved:
+        return _preview_from_saved_bills(db, admission, saved)
+
+    items, line_subtotal, days = _charge_lines_for_admission(db, admission)
     pricing = opd_settings_service.get_pricing(db)
     gst_percent = float(getattr(pricing, "gst_percent", None) or 0)
-    _, gst_amount, grand = oh.bill_totals_from_subtotal(subtotal, gst_percent)
+    _, line_gst, _line_grand = oh.bill_totals_from_subtotal(line_subtotal, gst_percent)
+    # Same total as the opened bill: manual room charge replaces that day's bed
+    # line, and discount is removed before GST. Line items stay on the response.
+    net = _charge_head_net(db, admission)
+    subtotal = net if net > 0 else line_subtotal
+    if gst_percent > 0:
+        gst_amount = round(subtotal * gst_percent / 100.0, 2)
+    else:
+        gst_amount = line_gst
+    grand = round(subtotal + gst_amount, 2)
     patient = db.query(Patient).filter(Patient.id == admission.patient_id).first()
     rate = float(
         opd_settings_service.resolve_bed_rate(
@@ -922,6 +1051,45 @@ def collect_payment(
     return _bill_out(db, bill)
 
 
+def _charge_head_net(db: Session, admission: IpdAdmission) -> float:
+    """Charge-head total used by the opened bill, including saved daily charges."""
+    from Services import ipd_billing_service as billing
+
+    row = (
+        db.query(IpdAdmissionBilling)
+        .filter(IpdAdmissionBilling.admission_id == admission.id)
+        .first()
+    )
+    stored_daily = list(row.daily_charges or []) if row else []
+    stored_heads = list(row.charge_heads or []) if row else []
+    transactions = billing.merge_daily_transactions(
+        billing.build_auto_transactions(db, admission),
+        stored_daily,
+        admission,
+    )
+    gross = 0.0
+    discount = 0.0
+    for head in billing.rollup_charge_heads(transactions, stored_heads):
+        amount = round(float(head.get("amount") or 0), 2)
+        if head.get("charge_category") == "discount" or head.get("id") == "discount":
+            discount += amount
+        else:
+            gross += amount
+    return round(max(0.0, gross - discount), 2)
+
+
+def _detail_running_total(db: Session, admission: IpdAdmission, preview: IpdBillPreviewOut) -> float:
+    """Match the bill detail Total: charge-head net, then the same GST."""
+    net = _charge_head_net(db, admission)
+    subtotal = net if net > 0 else float(preview.subtotal or 0)
+    gst_percent = float(preview.gst_percent or 0)
+    if gst_percent > 0:
+        gst_amount = round(subtotal * gst_percent / 100, 2)
+    else:
+        gst_amount = float(preview.gst_amount or 0)
+    return round(subtotal + gst_amount, 2)
+
+
 def list_running_bills(db: Session, page: int = 1, limit: int = 20) -> dict:
     """Active admissions with computed running totals (not yet fully paid)."""
     page = max(1, page)
@@ -938,7 +1106,7 @@ def list_running_bills(db: Session, page: int = 1, limit: int = 20) -> dict:
     for adm in rows:
         preview = build_bill_preview(db, adm.id)
         unpaid = _open_unpaid_bill(db, adm.id)
-        running_total = float(preview.grand_total or 0)
+        running_total = _detail_running_total(db, adm, preview)
         paid_raw = _paid_towards_admission(db, adm.id)
         # Paid/Due are always relative to current running charges (never Paid > Total)
         if unpaid:

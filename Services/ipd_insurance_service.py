@@ -132,6 +132,17 @@ def _ward_room(admission: Optional[IpdAdmission]) -> str:
     return " / ".join(p for p in parts if p) or "—"
 
 
+def _live_charge_subtotal(db: Session, admission_id: int) -> float:
+    """Same charge total the bill detail shows: bed, visits, pharmacy, and saved daily charges."""
+    try:
+        from Services.ipd_service import build_bill_preview
+
+        preview = build_bill_preview(db, admission_id)
+        return round(float(preview.subtotal or 0), 2)
+    except Exception:
+        return 0.0
+
+
 def serialize_claim(
     db: Session,
     claim: IpdInsuranceClaim,
@@ -149,8 +160,8 @@ def serialize_claim(
     if not doctor_name and admission:
         doctor_name = "—"
 
-    net_bill = 0.0
-    if admission:
+    net_bill = _live_charge_subtotal(db, admission.id) if admission else 0.0
+    if admission and net_bill <= 0:
         for bill in admission.bills or []:
             if bill.status != "void":
                 net_bill = max(net_bill, float(bill.grand_total or 0))
@@ -483,13 +494,18 @@ def list_insurance_bills(
                 "uhid": c.get("uhid"),
                 "age_gender": c.get("age_gender"),
                 "ageGender": c.get("age_gender"),
-                "admitted": c.get("admitted"),
+                "admitted": c.get("admission_date"),
                 "doctor": c.get("doctor"),
                 "ward_room": c.get("ward_room"),
                 "wardRoom": c.get("ward_room"),
                 "coverage": c.get("coverage"),
                 "net_bill": c.get("net_bill"),
                 "netBill": c.get("net_bill"),
+                "claimed": c.get("claimed"),
+                "claimed_amount": c.get("claimed_amount"),
+                "claimedAmount": c.get("claimedAmount"),
+                "estimate_amount": c.get("estimate_amount"),
+                "estimateAmount": c.get("estimateAmount"),
                 "approved": c.get("approved"),
                 "claim_label": c.get("claim_label"),
                 "claimLabel": c.get("claim_label"),

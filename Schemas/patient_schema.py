@@ -1,7 +1,9 @@
 """Patient-related request/response schemas."""
 from datetime import date, datetime
 from typing import Optional
-from pydantic import BaseModel, Field
+from zoneinfo import ZoneInfo
+from pydantic import BaseModel, Field, field_validator
+from pydantic_core import PydanticCustomError
 
 GENDER_CODE_TO_LABEL = {
     1: "Male",
@@ -26,6 +28,17 @@ class PatientFields(BaseModel):
     gender: Optional[int] = Field(None, ge=1, le=4)
     blood_group: Optional[str] = None
     date_of_birth: Optional[date] = None
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def date_of_birth_not_in_future(cls, value: Optional[date]) -> Optional[date]:
+        if value is not None and value > datetime.now(ZoneInfo("Asia/Kolkata")).date():
+            raise PydanticCustomError(
+                "date_of_birth_future",
+                "Date of birth cannot be in the future",
+            )
+        return value
+
     address: Optional[str] = None
     state: Optional[str] = None
     aadhaar_number: Optional[str] = None

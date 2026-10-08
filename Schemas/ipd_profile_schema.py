@@ -1,8 +1,30 @@
 """IPD profile request/response schemas — mirrors OPD billing profile shape."""
+import re
 from datetime import date, datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic_core import PydanticCustomError
+
+IST = ZoneInfo("Asia/Kolkata")
+_HAS_LETTER = re.compile(r"[A-Za-z]")
+
+
+def _require_letter(value: Optional[str], label: str) -> Optional[str]:
+    """Blank stays allowed. A non-blank value must include a letter."""
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if not cleaned:
+        return None
+    if not _HAS_LETTER.search(cleaned):
+        raise PydanticCustomError(
+            "invalid_text",
+            "{label} must contain letters, not only numbers or symbols",
+            {"label": label},
+        )
+    return cleaned
 
 
 class RoleInfo(BaseModel):
@@ -39,12 +61,28 @@ class AddressUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("line")
+    @classmethod
+    def address_has_letters(cls, value: Optional[str]) -> Optional[str]:
+        return _require_letter(value, "Address")
+
+    @field_validator("city", "state")
+    @classmethod
+    def place_has_letters(cls, value: Optional[str], info) -> Optional[str]:
+        label = "City" if info.field_name == "city" else "State"
+        return _require_letter(value, label)
+
 
 class EmergencyContactUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=120)
     phone: Optional[str] = Field(None, max_length=20)
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("name")
+    @classmethod
+    def name_has_letters(cls, value: Optional[str]) -> Optional[str]:
+        return _require_letter(value, "Emergency contact name")
 
 
 class IpdProfileUpdate(BaseModel):
@@ -62,6 +100,26 @@ class IpdProfileUpdate(BaseModel):
     emergency_contact: Optional[EmergencyContactUpdate] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def date_of_birth_not_in_future(cls, value: Optional[date]) -> Optional[date]:
+        if value is not None and value > datetime.now(IST).date():
+            raise PydanticCustomError(
+                "date_of_birth_future",
+                "Date of birth cannot be in the future",
+            )
+        return value
+
+    @field_validator("qualification")
+    @classmethod
+    def qualification_has_letters(cls, value: Optional[str]) -> Optional[str]:
+        return _require_letter(value, "Qualification")
+
+    @field_validator("bio")
+    @classmethod
+    def bio_has_letters(cls, value: Optional[str]) -> Optional[str]:
+        return _require_letter(value, "Bio")
 
 
 class IpdProfileResponse(BaseModel):
