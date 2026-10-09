@@ -7,6 +7,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session, selectinload
 
 from Models.department import Department
+from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.ipd import (
     IpdAdmission,
     IpdAdmissionBilling,
@@ -673,7 +674,30 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
     except Exception:
         db.rollback()
 
-    # Saved Daily Charges are manual lines. Bed, visits, and pharmacy are already above.
+    lab_orders = (
+        db.query(LabTestOrder)
+        .filter(
+            LabTestOrder.admission_id == admission.id,
+            LabTestOrder.status == LabTestStatus.COMPLETED,
+        )
+        .order_by(LabTestOrder.updated_at.asc(), LabTestOrder.id.asc())
+        .all()
+    )
+    for order in lab_orders:
+        amount = round(float(order.price or 0), 2)
+        if amount <= 0:
+            continue
+        items.append(
+            {
+                "description": f"Laboratory — {order.test_name or 'Test'}",
+                "qty": 1,
+                "unit_price": amount,
+                "amount": amount,
+                "item_type": "laboratory",
+            }
+        )
+
+    # Saved Daily Charges are manual lines. Bed, visits, pharmacy, and labs are already above.
     billing = (
         db.query(IpdAdmissionBilling)
         .filter(IpdAdmissionBilling.admission_id == admission.id)
@@ -1108,10 +1132,10 @@ def list_running_bills(db: Session, page: int = 1, limit: int = 20) -> dict:
         unpaid = _open_unpaid_bill(db, adm.id)
         running_total = _detail_running_total(db, adm, preview)
         paid_raw = _paid_towards_admission(db, adm.id)
-        # Paid/Due are always relative to current running charges (never Paid > Total)
+        # Paid is cash collected. Due is the live total minus that cash (never Paid > Total).
         if unpaid:
-            due_balance = round(max(float(unpaid.balance_due or 0), 0), 2)
-            paid_balance = round(max(running_total - due_balance, 0), 2)
+            paid_balance = round(min(max(paid_raw, 0), running_total), 2)
+            due_balance = round(max(running_total - paid_balance, 0), 2)
             open_bill_id = unpaid.id
         else:
             paid_balance = round(min(max(paid_raw, 0), running_total), 2)

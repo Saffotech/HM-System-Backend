@@ -460,7 +460,10 @@ def list_insurance_bills(
         .options(
             joinedload(IpdInsuranceClaim.admission).joinedload(IpdAdmission.bills),
         )
-        .filter(IpdInsuranceClaim.claim_type == "cashless")
+        .filter(
+            IpdInsuranceClaim.claim_type == "cashless",
+            IpdAdmission.status == "admitted",
+        )
     )
     if search and search.strip():
         term = f"%{search.strip()}%"
@@ -519,6 +522,12 @@ def update_claim(
     claim: IpdInsuranceClaim,
     payload: IpdInsuranceClaimUpdate,
 ) -> IpdInsuranceClaim:
+    admission = claim.admission or h.get_admission(db, claim.admission_id)
+    if (admission.status or "") != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit billing for a closed admission",
+        )
     data = payload.model_dump(exclude_unset=True, by_alias=False)
     if "claimed" in data and "claimed_amount" not in data:
         data["claimed_amount"] = data.pop("claimed")

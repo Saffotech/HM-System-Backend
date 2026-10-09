@@ -1,4 +1,4 @@
-"""Unified IPD admission billing — auto bed/visit/pharmacy + saved daily/final charges."""
+"""Unified IPD admission billing — auto bed/visit/pharmacy/lab + saved daily/final charges."""
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -8,6 +8,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from Models.doctor_lab_test_order import LabTestOrder, LabTestStatus
 from Models.doctor_prescriptions import Prescription
 from Models.ipd import (
     IpdAdmission,
@@ -198,7 +199,7 @@ def _tx(
 
 
 def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[str, Any]]:
-    """Bed (per day) + doctor visits + pharmacy dispensings for this admission."""
+    """Bed (per day) + doctor visits + pharmacy + completed lab tests."""
     pricing = opd_settings_service.get_pricing(db)
     ended_at = None
     if (admission.status or "") == "discharged" and admission.discharged_at:
@@ -293,6 +294,36 @@ def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[s
                 amount=amount,
                 source="pharmacy",
                 source_id=item.id,
+            )
+        )
+
+    # Laboratory: completed IPD orders only. Ordered and sample-collected stay off the bill.
+    lab_orders = (
+        db.query(LabTestOrder)
+        .filter(
+            LabTestOrder.admission_id == admission.id,
+            LabTestOrder.status == LabTestStatus.COMPLETED,
+        )
+        .order_by(LabTestOrder.updated_at.asc(), LabTestOrder.id.asc())
+        .all()
+    )
+    for order in lab_orders:
+        amount = _money(order.price)
+        if amount <= 0:
+            continue
+        txs.append(
+            _tx(
+                tx_id=f"auto-lab-{order.id}",
+                admission_id=admission.id,
+                patient_id=admission.patient_id,
+                charge_date=_iso_date(order.updated_at or order.created_at),
+                category="laboratory",
+                particulars=order.test_name or "Laboratory test",
+                quantity=1,
+                rate=amount,
+                amount=amount,
+                source="laboratory",
+                source_id=order.id,
             )
         )
 
@@ -442,13 +473,10 @@ def rollup_charge_heads(
         stored = stored_map.get(hid)
         category = head["charge_category"]
         rolled = sums.get(category, 0.0)
-        if category == "discount":
-            amount = _money(stored.get("amount")) if stored else 0.0
+        if stored is not None:
+            amount = _money(stored.get("amount"))
         else:
-            # Prefer rolled auto+manual totals; keep stored override if rolled is 0
-            # but stored has a positive amount (manual final edit without dailies).
-            stored_amt = _money(stored.get("amount")) if stored else 0.0
-            amount = rolled if rolled > 0 else stored_amt
+            amount = rolled
         out.append(
             {
                 **head,
@@ -587,6 +615,11 @@ def update_daily_billing(
     updated_by: Optional[int] = None,
 ) -> dict[str, Any]:
     admission = h.get_admission(db, admission_id)
+    if (admission.status or "") != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit billing for a closed admission",
+        )
     raw_daily = (
         payload.get("dailyCharges")
         if payload.get("dailyCharges") is not None
@@ -611,14 +644,9 @@ def update_daily_billing(
     billing.updated_by = updated_by
     billing.updated_at = _now()
 
-    # Keep rolled charge heads in sync unless client also sent heads
-    auto_txs = build_auto_transactions(db, admission)
-    merged = merge_daily_transactions(auto_txs, stored, admission)
     if payload.get("charges") is not None or payload.get("charge_heads") is not None:
         heads_in = payload.get("charges") or payload.get("charge_heads") or []
         billing.charge_heads = _normalize_charge_heads(heads_in)
-    else:
-        billing.charge_heads = rollup_charge_heads(merged, billing.charge_heads or [])
 
     db.commit()
     return get_billing_bundle(db, admission.id)
@@ -632,6 +660,11 @@ def update_final_billing(
     updated_by: Optional[int] = None,
 ) -> dict[str, Any]:
     admission = h.get_admission(db, admission_id)
+    if (admission.status or "") != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit billing for a closed admission",
+        )
     heads_in = (
         payload.get("charges")
         if payload.get("charges") is not None
