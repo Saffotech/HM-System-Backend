@@ -1,5 +1,4 @@
 from datetime import datetime
-import math
 import re
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
@@ -450,27 +449,32 @@ def get_special_bed_rate(
     return None
 
 
+def _as_ist(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=IST)
+    return value.astimezone(IST)
+
+
 def calculate_bed_days(
     admitted_at: Optional[datetime],
     ended_at: Optional[datetime] = None,
 ) -> int:
     """
-    days = max(1, ceil((end - admitted_at) / 24h))
+    Calendar dates the stay touches, inclusive.
 
-    end is the discharge time when the stay is closed. An open stay uses now.
+    Monday 11 PM through Tuesday morning is 2 days. An open stay runs through
+    today. A closed stay stops on the discharge date.
     """
     if not admitted_at:
         return 1
     end = ended_at or datetime.now(IST)
     try:
-        delta_seconds = max(0.0, (end - admitted_at).total_seconds())
+        start_day = _as_ist(admitted_at).date()
+        end_day = _as_ist(end).date()
     except TypeError:
-        # Defensive fallback for naive/aware mismatch from legacy rows.
-        delta_seconds = max(
-            0.0,
-            (end.replace(tzinfo=None) - admitted_at.replace(tzinfo=None)).total_seconds(),
-        )
-    return max(1, int(math.ceil(delta_seconds / 86400)))
+        start_day = admitted_at.replace(tzinfo=None).date()
+        end_day = end.replace(tzinfo=None).date()
+    return max(1, (end_day - start_day).days + 1)
 
 
 def resolve_consultation_fee(

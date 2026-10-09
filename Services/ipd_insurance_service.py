@@ -510,6 +510,8 @@ def list_insurance_bills(
                 "estimate_amount": c.get("estimate_amount"),
                 "estimateAmount": c.get("estimateAmount"),
                 "approved": c.get("approved"),
+                "patient_paid": c.get("patient_paid"),
+                "patientPaid": c.get("patient_paid"),
                 "claim_label": c.get("claim_label"),
                 "claimLabel": c.get("claim_label"),
             }

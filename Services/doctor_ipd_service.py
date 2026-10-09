@@ -9,9 +9,11 @@ from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_prescriptions import Prescription
 from Models.ipd import IpdAdmission, IpdAdmissionCareTeam, IpdDoctorVisit
 from Models.patient import Patient
+from Models.user import User
 from Schemas.doctor_ipd_schema import DoctorIpdConsultationSaveRequest
 from Schemas.doctor_lab_test_schema import LabTestCreate
 from Services import doctor_helpers as h
+from Services import opd_settings_service
 from Services.doctor_lab_test_service import create_lab_test_service
 from Services.doctor_prescription_service import (
     create_prescription_for_admission,
@@ -154,10 +156,20 @@ def save_doctor_ipd_consultation_service(
     if notes:
         admission.notes = notes
 
+    doctor = db.query(User).filter(User.id == doctor_id).first()
+    pricing = opd_settings_service.get_pricing(db)
+    charge = float(
+        opd_settings_service.resolve_consultation_fee(
+            pricing,
+            doctor_id=doctor_id,
+            department_id=admission.department_id or (doctor.department_id if doctor else None),
+        )
+    )
+
     visit = IpdDoctorVisit(
         admission_id=admission.id,
         doctor_id=doctor_id,
-        charge=0.0,
+        charge=charge,
         notes=_build_ipd_visit_notes(
             symptoms=symptoms,
             diagnosis=diagnosis,

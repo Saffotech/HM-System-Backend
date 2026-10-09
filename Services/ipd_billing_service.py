@@ -13,6 +13,7 @@ from Models.doctor_prescriptions import Prescription
 from Models.ipd import (
     IpdAdmission,
     IpdAdmissionBilling,
+    IpdAdmissionCareTeam,
     IpdDoctorVisit,
     IpdInsuranceClaim,
 )
@@ -199,7 +200,7 @@ def _tx(
 
 
 def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[str, Any]]:
-    """Bed (per day) + doctor visits + pharmacy + completed lab tests."""
+    """Bed (per day) + doctor visits + care team + pharmacy + completed lab tests."""
     pricing = opd_settings_service.get_pricing(db)
     ended_at = None
     if (admission.status or "") == "discharged" and admission.discharged_at:
@@ -261,6 +262,39 @@ def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[s
                 amount=amount,
                 source="doctor",
                 source_id=visit.id,
+            )
+        )
+
+    care_team = (
+        db.query(IpdAdmissionCareTeam)
+        .filter(IpdAdmissionCareTeam.admission_id == admission.id)
+        .order_by(IpdAdmissionCareTeam.id.asc())
+        .all()
+    )
+    for member in care_team:
+        amount = _money(
+            opd_settings_service.resolve_consultation_fee(
+                pricing,
+                doctor_id=member.doctor_id,
+                department_id=member.department_id or admission.department_id,
+            )
+        )
+        if amount <= 0:
+            continue
+        doc = h.doctor_display(db, member.doctor_id) or "Doctor"
+        txs.append(
+            _tx(
+                tx_id=f"auto-care-{member.id}",
+                admission_id=admission.id,
+                patient_id=admission.patient_id,
+                charge_date=_iso_date(member.created_at),
+                category="doctor",
+                particulars=f"Care Team — {doc}",
+                quantity=1,
+                rate=amount,
+                amount=amount,
+                source="doctor",
+                source_id=member.id,
             )
         )
 
