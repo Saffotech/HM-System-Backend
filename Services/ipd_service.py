@@ -1655,31 +1655,15 @@ def payment_history(
             )
         )
 
-    all_rows = q.all()
-    by_mode: dict[str, float] = {"cash": 0.0, "upi": 0.0, "card": 0.0, "insurance": 0.0}
-    total_collected = 0.0
-    for txn, _, _, _ in all_rows:
-        amount = float(txn.amount or 0)
-        total_collected += amount
-        mode = _norm_payment_mode(txn.payment_mode)
-        by_mode[mode] = by_mode.get(mode, 0.0) + amount
-
-    filtered = all_rows
-    if payment_mode:
-        want = _norm_payment_mode(payment_mode)
-        filtered = [
-            row for row in all_rows if _norm_payment_mode(row[0].payment_mode) == want
-        ]
-
-    page_rows = filtered[(page - 1) * limit : page * limit]
-    items = []
-    for txn, bill, adm, patient in page_rows:
-        items.append(
+    entries: list[dict] = []
+    for txn, bill, adm, patient in q.all():
+        entries.append(
             {
                 "id": txn.id,
+                "sort_at": txn.paid_at,
                 "paid_at": _iso(txn.paid_at),
                 "receipt_no": f"IPD-RCPT-{txn.id:05d}",
-                "amount": float(txn.amount),
+                "amount": float(txn.amount or 0),
                 "mode": _norm_payment_mode(txn.payment_mode),
                 "reference": txn.transaction_reference,
                 "bill_id": bill.id,
@@ -1691,6 +1675,22 @@ def payment_history(
                 "patient_uid": patient.patient_uid,
             }
         )
+    entries.extend(_claim_payment_entries(db, search))
+    entries.sort(key=lambda row: _payment_sort_key(row["sort_at"]), reverse=True)
+
+    by_mode: dict[str, float] = {"cash": 0.0, "upi": 0.0, "card": 0.0, "insurance": 0.0}
+    total_collected = 0.0
+    for row in entries:
+        total_collected += row["amount"]
+        by_mode[row["mode"]] = by_mode.get(row["mode"], 0.0) + row["amount"]
+
+    filtered = entries
+    if payment_mode:
+        want = _norm_payment_mode(payment_mode)
+        filtered = [row for row in entries if row["mode"] == want]
+
+    page_rows = filtered[(page - 1) * limit : page * limit]
+    items = [{k: v for k, v in row.items() if k != "sort_at"} for row in page_rows]
     return {
         "summary": {
             "total_collected": round(total_collected, 2),
@@ -1698,13 +1698,87 @@ def payment_history(
             "upi": round(by_mode.get("upi", 0), 2),
             "card": round(by_mode.get("card", 0), 2),
             "insurance": round(by_mode.get("insurance", 0), 2),
-            "transaction_count": len(all_rows),
+            "transaction_count": len(entries),
         },
         "total": len(filtered),
         "page": page,
         "limit": limit,
         "items": items,
     }
+
+
+def _payment_sort_key(value: Optional[datetime]) -> datetime:
+    if value is None:
+        return datetime.min.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    if value.tzinfo is None:
+        return value.replace(tzinfo=ZoneInfo("Asia/Kolkata"))
+    return value
+
+
+def _claim_payment_paid_at(raw: Optional[str], fallback: Optional[datetime]) -> Optional[datetime]:
+    if raw:
+        try:
+            return _parse_dt(str(raw))
+        except HTTPException:
+            pass
+    return fallback
+
+
+def _claim_payment_entries(db: Session, search: Optional[str]) -> list[dict]:
+    """Insurer and patient payments saved on insurance claims, not on invoices."""
+    q = (
+        db.query(IpdInsuranceClaim, IpdAdmission, Patient)
+        .join(IpdAdmission, IpdInsuranceClaim.admission_id == IpdAdmission.id)
+        .join(Patient, IpdAdmission.patient_id == Patient.id)
+    )
+    if search and search.strip():
+        q = q.filter(admission_text_search_filter(search))
+
+    rows: list[dict] = []
+    for claim, adm, patient in q.all():
+        sources = (
+            ("insurance", claim.insurance_payments or []),
+            ("patient", claim.patient_payments or []),
+        )
+        for kind, payments in sources:
+            for index, payment in enumerate(payments):
+                if not isinstance(payment, dict):
+                    continue
+                try:
+                    amount = round(float(payment.get("amount") or 0), 2)
+                except (TypeError, ValueError):
+                    continue
+                if amount <= 0:
+                    continue
+                if kind == "insurance":
+                    mode = "insurance"
+                else:
+                    mode = _norm_payment_mode(payment.get("mode") or payment.get("paymentMode"))
+                    if mode not in {"cash", "card", "upi", "insurance"}:
+                        mode = "cash"
+                paid_at = _claim_payment_paid_at(
+                    payment.get("paid_at") or payment.get("paidAt"),
+                    claim.updated_at,
+                )
+                rows.append(
+                    {
+                        "id": f"claim-{claim.id}-{kind}-{payment.get('id') or index}",
+                        "sort_at": paid_at,
+                        "paid_at": _iso(paid_at),
+                        "receipt_no": f"IPD-CLM-{claim.id:05d}-{index + 1}",
+                        "amount": amount,
+                        "mode": mode,
+                        "reference": payment.get("reference"),
+                        "bill_id": None,
+                        "bill_number": None,
+                        "bill_balance": 0.0,
+                        "admission_id": adm.id,
+                        "admission_no": adm.admission_no,
+                        "patient_name": h.display_name(patient.first_name, patient.last_name),
+                        "patient_uid": patient.patient_uid,
+                    }
+                )
+    return rows
 
 
 def discharge_patient(
