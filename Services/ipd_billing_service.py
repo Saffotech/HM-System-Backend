@@ -116,6 +116,16 @@ def _money(value: Any) -> float:
         return 0.0
 
 
+def completed_lab_amount(price: Any) -> float:
+    """Completed lab charge. A zero price stays on the bill as 0."""
+    return max(_money(price), 0.0)
+
+
+def dispensed_medicine_amount(amount: Any) -> float:
+    """Dispensed medicine charge. A zero amount stays on the bill as 0."""
+    return max(_money(amount), 0.0)
+
+
 def _clone_default_heads() -> list[dict[str, Any]]:
     return [dict(row) for row in DEFAULT_CHARGE_HEADS]
 
@@ -244,10 +254,17 @@ def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[s
         .order_by(IpdDoctorVisit.visited_at.asc(), IpdDoctorVisit.id.asc())
         .all()
     )
+    from Services.ipd_doctor_visit_billing import billable_doctor_visit_amount
+
     for visit in visits:
-        amount = _money(visit.charge)
-        if amount <= 0:
-            continue
+        # A free consultation is still a bill line. A stored 0 uses the current fee.
+        amount = billable_doctor_visit_amount(
+            db,
+            admission=admission,
+            doctor_id=visit.doctor_id,
+            stored_charge=visit.charge,
+            pricing=pricing,
+        )
         doc = h.doctor_display(db, visit.doctor_id) or "Doctor"
         txs.append(
             _tx(
@@ -308,12 +325,10 @@ def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[s
         .all()
     )
     for item, dispensing in dispense_rows:
-        amount = _money(item.amount)
-        if amount <= 0:
-            continue
+        amount = dispensed_medicine_amount(item.amount)
         qty = max(int(item.quantity_dispensed or 1), 1)
         rate = _money(item.unit_price) if item.unit_price is not None else (
-            round(amount / qty, 2) if qty else amount
+            round(amount / qty, 2) if qty and amount else 0.0
         )
         txs.append(
             _tx(
@@ -342,9 +357,7 @@ def build_auto_transactions(db: Session, admission: IpdAdmission) -> list[dict[s
         .all()
     )
     for order in lab_orders:
-        amount = _money(order.price)
-        if amount <= 0:
-            continue
+        amount = completed_lab_amount(order.price)
         txs.append(
             _tx(
                 tx_id=f"auto-lab-{order.id}",
@@ -488,7 +501,7 @@ def rollup_charge_heads(
         if hid:
             stored_map[hid] = row
 
-    sums: dict[str, float] = {
+    manual_sums: dict[str, float] = {
         "room": 0.0,
         "doctor": 0.0,
         "laboratory": 0.0,
@@ -496,21 +509,34 @@ def rollup_charge_heads(
         "procedure": 0.0,
         "miscellaneous": 0.0,
     }
+    auto_sums = dict(manual_sums)
     for tx in transactions:
         cat = str(tx.get("category") or "miscellaneous")
-        if cat in sums:
-            sums[cat] = round(sums[cat] + _money(tx.get("amount")), 2)
+        if cat not in manual_sums:
+            continue
+        amount = _money(tx.get("amount"))
+        bucket = manual_sums if str(tx.get("source") or "") == "manual" else auto_sums
+        bucket[cat] = round(bucket[cat] + amount, 2)
 
     out: list[dict[str, Any]] = []
     for head in heads:
         hid = head["id"]
         stored = stored_map.get(hid)
         category = head["charge_category"]
-        rolled = sums.get(category, 0.0)
-        if stored is not None:
-            amount = _money(stored.get("amount"))
+        manual = manual_sums.get(category, 0.0)
+        auto = auto_sums.get(category, 0.0)
+        stored_amount = _money(stored.get("amount")) if stored is not None else 0.0
+        # A typed daily line is that category's charge. It is not added
+        # again on top of a saved head. A saved head, including an explicit
+        # zero, replaces the automatic bed, visit, lab, or pharmacy total
+        # when no daily line was typed for that category.
+        if manual > 0.009:
+            extra_auto = 0.0 if stored is not None and abs(stored_amount) < 0.009 else auto
+            amount = round(manual + extra_auto, 2)
+        elif stored is not None:
+            amount = stored_amount
         else:
-            amount = rolled
+            amount = auto
         out.append(
             {
                 **head,
@@ -537,6 +563,73 @@ def rollup_charge_heads(
         )
 
     out.sort(key=lambda r: int(r.get("sort_order") or 0))
+    return out
+
+
+def _synthetic_daily_row(head: dict[str, Any], amount: float, charge_date: str) -> dict[str, Any]:
+    """Display row for a head that has no matching daily lines. Not saved as manual."""
+    label = str(head.get("label") or "Charge")
+    category = str(head.get("charge_category") or "miscellaneous")
+    return {
+        "id": f"bill-{head.get('id') or category}",
+        "charge_date": charge_date,
+        "head": label,
+        "charge_category": category,
+        "item_name": label,
+        "quantity": 1,
+        "amount": round(amount, 2),
+        "source": "bill",
+        "source_id": None,
+        "is_auto": True,
+        "isAuto": True,
+    }
+
+
+def align_daily_charges_to_heads(
+    daily_charges: list[dict[str, Any]],
+    charge_heads: list[dict[str, Any]],
+    *,
+    charge_date: str,
+) -> list[dict[str, Any]]:
+    """Make the daily rows add up to the same gross the bill total uses.
+
+    Itemized rows stay when they already equal that category's head.
+    A saved head with no rows (Treatment, a package, a custom head) is
+    added once. A saved head that replaces the bed or visit line replaces
+    those rows, so the bed line is not counted again.
+    """
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for row in daily_charges:
+        cat = str(row.get("charge_category") or "miscellaneous")
+        grouped.setdefault(cat, []).append(row)
+
+    seen_categories: set[str] = set()
+    out: list[dict[str, Any]] = []
+    for head in charge_heads:
+        category = str(head.get("charge_category") or "")
+        target = _money(head.get("amount"))
+        is_custom = category == "custom" or not head.get("is_default", True)
+        is_discount = category == "discount" or head.get("id") == "discount"
+        if is_discount:
+            if target > 0.009:
+                out.append(_synthetic_daily_row(head, -abs(target), charge_date))
+            continue
+        if is_custom:
+            if abs(target) > 0.009:
+                out.append(_synthetic_daily_row(head, target, charge_date))
+            continue
+        if category in seen_categories:
+            continue
+        seen_categories.add(category)
+        rows = grouped.get(category, [])
+        zeros = [row for row in rows if abs(_money(row.get("amount"))) < 0.009]
+        priced = [row for row in rows if abs(_money(row.get("amount"))) >= 0.009]
+        priced_sum = round(sum(_money(row.get("amount")) for row in priced), 2)
+        if abs(priced_sum - target) <= 0.01:
+            out.extend(priced)
+        elif abs(target) > 0.009:
+            out.append(_synthetic_daily_row(head, target, charge_date))
+        out.extend(zeros)
     return out
 
 
@@ -585,7 +678,13 @@ def get_billing_bundle(db: Session, admission_id: int) -> dict[str, Any]:
     auto_txs = build_auto_transactions(db, admission)
     transactions = merge_daily_transactions(auto_txs, stored_daily, admission)
     charge_heads = rollup_charge_heads(transactions, stored_heads)
-    daily_charges = transactions_to_daily_charges(transactions)
+    charge_dates = [str(tx.get("charge_date") or "") for tx in transactions if tx.get("charge_date")]
+    charge_date = max(charge_dates) if charge_dates else _iso_date(getattr(admission, "admitted_at", None))
+    daily_charges = align_daily_charges_to_heads(
+        transactions_to_daily_charges(transactions),
+        charge_heads,
+        charge_date=charge_date,
+    )
 
     claim_row = (
         db.query(IpdInsuranceClaim)
@@ -602,17 +701,6 @@ def get_billing_bundle(db: Session, admission_id: int) -> dict[str, Any]:
         claim_out["charges"] = charge_heads
         claim_out["daily_charges"] = daily_charges
         claim_out["dailyCharges"] = daily_charges
-        net = sum(
-            _money(h.get("amount"))
-            for h in charge_heads
-            if h.get("charge_category") != "discount"
-        ) - sum(
-            _money(h.get("amount"))
-            for h in charge_heads
-            if h.get("charge_category") == "discount"
-        )
-        claim_out["net_bill"] = round(net, 2)
-        claim_out["netBill"] = round(net, 2)
 
     preview = None
     try:

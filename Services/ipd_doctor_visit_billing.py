@@ -42,6 +42,37 @@ def resolve_visit_charge(
     )
 
 
+def amount_for_doctor_visit(stored_charge: float, resolved_fee: float) -> float:
+    """Use the saved fee. A zero snapshot falls back to the current consultation fee."""
+    stored = round(float(stored_charge or 0), 2)
+    if stored > 0:
+        return stored
+    return round(max(float(resolved_fee or 0), 0), 2)
+
+
+def billable_doctor_visit_amount(
+    db: Session,
+    *,
+    admission: IpdAdmission,
+    doctor_id: int,
+    stored_charge: float,
+    pricing=None,
+) -> float:
+    """Amount to show for one doctor consultation. Zero-fee visits stay on the bill at 0."""
+    stored = round(float(stored_charge or 0), 2)
+    if stored > 0:
+        return stored
+    if pricing is None:
+        pricing = opd_settings_service.get_pricing(db)
+    doctor = db.query(User).filter(User.id == doctor_id).first()
+    fee = opd_settings_service.resolve_consultation_fee(
+        pricing,
+        doctor_id=doctor_id,
+        department_id=admission.department_id or (doctor.department_id if doctor else None),
+    )
+    return amount_for_doctor_visit(0, fee)
+
+
 def upsert_ipd_visit_from_nurse(
     db: Session,
     *,

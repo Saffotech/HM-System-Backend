@@ -133,12 +133,12 @@ def _ward_room(admission: Optional[IpdAdmission]) -> str:
 
 
 def _live_charge_subtotal(db: Session, admission_id: int) -> float:
-    """Same charge total the bill detail shows: bed, visits, pharmacy, and saved daily charges."""
+    """GST-inclusive total, the same figure discharge review shows."""
     try:
         from Services.ipd_service import build_bill_preview
 
         preview = build_bill_preview(db, admission_id)
-        return round(float(preview.subtotal or 0), 2)
+        return round(float(preview.grand_total or 0), 2)
     except Exception:
         return 0.0
 

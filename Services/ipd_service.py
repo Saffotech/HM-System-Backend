@@ -632,14 +632,23 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
         .order_by(IpdDoctorVisit.visited_at.asc())
         .all()
     )
+    from Services.ipd_doctor_visit_billing import billable_doctor_visit_amount
+
     for v in visits:
         doc = h.doctor_display(db, v.doctor_id) or "Doctor"
+        amount = billable_doctor_visit_amount(
+            db,
+            admission=admission,
+            doctor_id=v.doctor_id,
+            stored_charge=v.charge,
+            pricing=pricing,
+        )
         items.append(
             {
                 "description": f"Doctor Visit — {doc}",
                 "qty": 1,
-                "unit_price": float(v.charge or 0),
-                "amount": round(float(v.charge or 0), 2),
+                "unit_price": amount,
+                "amount": amount,
                 "item_type": "visit",
             }
         )
@@ -687,12 +696,14 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
             .filter(Prescription.admission_id == admission.id)
             .all()
         )
+        from Services.ipd_billing_service import dispensed_medicine_amount
+
         for item, _disp in pharmacy_rows:
-            amount = round(float(item.amount or 0), 2)
-            if amount <= 0:
-                continue
+            amount = dispensed_medicine_amount(item.amount)
             qty = max(int(item.quantity_dispensed or 1), 1)
-            unit = float(item.unit_price or 0) or round(amount / qty, 2)
+            unit = float(item.unit_price or 0) if item.unit_price is not None else (
+                round(amount / qty, 2) if qty and amount else 0.0
+            )
             items.append(
                 {
                     "description": f"Pharmacy — {item.medicine_name or 'Medicine'}",
@@ -714,10 +725,10 @@ def _charge_lines_for_admission(db: Session, admission: IpdAdmission) -> tuple[l
         .order_by(LabTestOrder.updated_at.asc(), LabTestOrder.id.asc())
         .all()
     )
+    from Services.ipd_billing_service import completed_lab_amount
+
     for order in lab_orders:
-        amount = round(float(order.price or 0), 2)
-        if amount <= 0:
-            continue
+        amount = completed_lab_amount(order.price)
         items.append(
             {
                 "description": f"Laboratory — {order.test_name or 'Test'}",
@@ -816,20 +827,43 @@ def _preview_from_saved_bills(
     )
 
 
+def _preview_charge_items(
+    service_items: list[dict],
+    line_subtotal: float,
+    head_items: list[dict],
+    head_net: float,
+) -> tuple[list[dict], float]:
+    """Pick the line list that adds up to the bill subtotal.
+
+    Saved heads that change the total replace the service lines, so a Room
+    head and the bed line are not both billed. Matching totals keep the
+    service lines.
+    """
+    if head_items and abs(head_net - line_subtotal) > 0.01:
+        return head_items, head_net
+    if head_net > 0:
+        return service_items, head_net
+    return service_items, line_subtotal
+
+
 def build_bill_preview(db: Session, admission_id: int) -> IpdBillPreviewOut:
     admission = h.get_admission(db, admission_id)
     saved = _finalized_bills(db, admission.id)
     if (admission.status or "") == "discharged" and admission.discharged_at and saved:
         return _preview_from_saved_bills(db, admission, saved)
 
-    items, line_subtotal, days = _charge_lines_for_admission(db, admission)
+    service_items, line_subtotal, days = _charge_lines_for_admission(db, admission)
     pricing = opd_settings_service.get_pricing(db)
     gst_percent = float(getattr(pricing, "gst_percent", None) or 0)
     _, line_gst, _line_grand = oh.bill_totals_from_subtotal(line_subtotal, gst_percent)
-    # Same total as the opened bill: manual room charge replaces that day's bed
-    # line, and discount is removed before GST. Line items stay on the response.
-    net = _charge_head_net(db, admission)
-    subtotal = net if net > 0 else line_subtotal
+    # One breakdown for the table and the total. When a saved head changes
+    # the money, the lines are those heads (Room replaces the bed line,
+    # Treatment is included once). When they already match, keep the
+    # visit, lab, and medicine lines.
+    head_items, head_net = _saved_charge_head_invoice_items(db, admission)
+    items, subtotal = _preview_charge_items(
+        service_items, line_subtotal, head_items, head_net
+    )
     if gst_percent > 0:
         gst_amount = round(subtotal * gst_percent / 100.0, 2)
     else:
@@ -1054,11 +1088,131 @@ def _lines_match_subtotal(lines: list[dict], target: float) -> bool:
     return abs(total - round(target, 2)) <= 0.01
 
 
+def _attach_new_zero_lines(
+    lines: list[dict],
+    detailed_items: list[dict],
+    invoiced_counts: dict[str, int],
+    *,
+    item_type: str,
+    fallback: str,
+) -> list[dict]:
+    """Keep a zero-price line on a later invoice without changing the amount due."""
+    remaining = dict(invoiced_counts)
+    attached = list(lines)
+    for item in detailed_items:
+        if str(item.get("item_type") or "") != item_type:
+            continue
+        if abs(round(float(item.get("amount") or 0), 2)) >= 0.01:
+            continue
+        description = str(item.get("description") or fallback)
+        already = int(remaining.get(description) or 0)
+        if already > 0:
+            remaining[description] = already - 1
+            continue
+        try:
+            qty = int(item.get("qty") or 1)
+        except (TypeError, ValueError):
+            qty = 1
+        attached.append(
+            {
+                "description": description,
+                "qty": qty if qty >= 1 else 1,
+                "unit_price": 0.0,
+                "amount": 0.0,
+                "item_type": item_type,
+            }
+        )
+    return attached
+
+
+def _attach_new_zero_visits(
+    lines: list[dict],
+    detailed_items: list[dict],
+    invoiced_zero_visits: dict[str, int],
+) -> list[dict]:
+    """Keep a free consultation on a later invoice without changing the amount due."""
+    return _attach_new_zero_lines(
+        lines,
+        detailed_items,
+        invoiced_zero_visits,
+        item_type="visit",
+        fallback="Doctor Visit",
+    )
+
+
+def _attach_new_zero_labs(
+    lines: list[dict],
+    detailed_items: list[dict],
+    invoiced_zero_labs: dict[str, int],
+) -> list[dict]:
+    """Keep a completed zero-price lab on a later invoice without changing the amount due."""
+    return _attach_new_zero_lines(
+        lines,
+        detailed_items,
+        invoiced_zero_labs,
+        item_type="laboratory",
+        fallback="Laboratory — Test",
+    )
+
+
+def _invoiced_zero_line_counts(
+    db: Session, admission_id: int, item_type: str, fallback: str
+) -> dict[str, int]:
+    bill_ids = [bill.id for bill in _non_void_bills(db, admission_id)]
+    counts: dict[str, int] = {}
+    if not bill_ids:
+        return counts
+    rows = (
+        db.query(IpdBillItem)
+        .filter(
+            IpdBillItem.bill_id.in_(bill_ids),
+            IpdBillItem.item_type == item_type,
+        )
+        .all()
+    )
+    for row in rows:
+        if abs(float(row.amount or 0)) >= 0.01:
+            continue
+        description = str(row.description or fallback)
+        counts[description] = counts.get(description, 0) + 1
+    return counts
+
+
+def _invoiced_zero_visit_counts(db: Session, admission_id: int) -> dict[str, int]:
+    return _invoiced_zero_line_counts(db, admission_id, "visit", "Doctor Visit")
+
+
+def _invoiced_zero_lab_counts(db: Session, admission_id: int) -> dict[str, int]:
+    return _invoiced_zero_line_counts(db, admission_id, "laboratory", "Laboratory — Test")
+
+
+def _attach_new_zero_pharmacy(
+    lines: list[dict],
+    detailed_items: list[dict],
+    invoiced_zero_pharmacy: dict[str, int],
+) -> list[dict]:
+    """Keep a dispensed medicine with amount 0 on a later invoice."""
+    return _attach_new_zero_lines(
+        lines,
+        detailed_items,
+        invoiced_zero_pharmacy,
+        item_type="pharmacy",
+        fallback="Pharmacy — Medicine",
+    )
+
+
+def _invoiced_zero_pharmacy_counts(db: Session, admission_id: int) -> dict[str, int]:
+    return _invoiced_zero_line_counts(db, admission_id, "pharmacy", "Pharmacy — Medicine")
+
+
 def _follow_up_invoice_lines(
     detailed_items: list[dict],
     current_items: list[dict],
     billed: dict[str, float],
     target: float,
+    invoiced_zero_visits: dict[str, int] | None = None,
+    invoiced_zero_labs: dict[str, int] | None = None,
+    invoiced_zero_pharmacy: dict[str, int] | None = None,
 ) -> list[dict]:
     """Itemize only the unpaid remainder. Lines must add up to this invoice's subtotal."""
     service_categories = {"room", "doctor", "laboratory", "pharmacy", "discount"}
@@ -1083,32 +1237,46 @@ def _follow_up_invoice_lines(
         combined.append(line)
         seen.add(key)
 
+    zero_visits = invoiced_zero_visits or {}
+    zero_labs = invoiced_zero_labs or {}
+    zero_pharmacy = invoiced_zero_pharmacy or {}
+
+    def _finish(chosen: list[dict]) -> list[dict]:
+        with_visits = _attach_new_zero_visits(chosen, detailed_items, zero_visits)
+        with_labs = _attach_new_zero_labs(with_visits, detailed_items, zero_labs)
+        return _attach_new_zero_pharmacy(with_labs, detailed_items, zero_pharmacy)
+
     for candidate in (combined, detailed_delta, current_delta):
         if candidate and _lines_match_subtotal(candidate, target):
-            return candidate
+            return _finish(candidate)
 
     partial = detailed_delta or current_delta
     covered = round(sum(float(line["amount"]) for line in partial), 2) if partial else 0.0
     gap = round(target - covered, 2)
     if partial and covered > 0.01 and gap > 0.01:
-        return partial + [
+        return _finish(
+            partial
+            + [
+                {
+                    "description": "Additional IPD charges",
+                    "qty": 1,
+                    "unit_price": gap,
+                    "amount": gap,
+                    "item_type": "misc",
+                }
+            ]
+        )
+    return _finish(
+        [
             {
                 "description": "Additional IPD charges",
                 "qty": 1,
-                "unit_price": gap,
-                "amount": gap,
+                "unit_price": target,
+                "amount": target,
                 "item_type": "misc",
             }
         ]
-    return [
-        {
-            "description": "Additional IPD charges",
-            "qty": 1,
-            "unit_price": target,
-            "amount": target,
-            "item_type": "misc",
-        }
-    ]
+    )
 
 
 def generate_bill(
@@ -1179,6 +1347,9 @@ def generate_bill(
             preview_items,
             _billed_category_totals(db, admission.id),
             subtotal,
+            _invoiced_zero_visit_counts(db, admission.id),
+            _invoiced_zero_lab_counts(db, admission.id),
+            _invoiced_zero_pharmacy_counts(db, admission.id),
         )
 
     amount_received = float(data.amount_received or 0)
@@ -1345,19 +1516,13 @@ def list_running_bills(db: Session, page: int = 1, limit: int = 20) -> dict:
         preview = build_bill_preview(db, adm.id)
         unpaid = _open_unpaid_bill(db, adm.id)
         running_total = _detail_running_total(db, adm, preview)
-        paid_raw = _paid_towards_admission(db, adm.id)
-        # Paid is cash collected. Due is the live total minus that cash (never Paid > Total).
-        if unpaid:
-            paid_balance = round(min(max(paid_raw, 0), running_total), 2)
-            due_balance = round(max(running_total - paid_balance, 0), 2)
-            open_bill_id = unpaid.id
-        else:
-            paid_balance = round(min(max(paid_raw, 0), running_total), 2)
-            due_balance = round(max(running_total - paid_balance, 0), 2)
-            if due_balance <= 0.01:
-                due_balance = 0.0
-                paid_balance = running_total if running_total > 0 else 0.0
-            open_bill_id = None
+        # Paid stays the cash recorded on invoices, including when that cash
+        # is higher than today's live total. Due is whatever is still unpaid.
+        paid_balance = round(max(_paid_towards_admission(db, adm.id), 0), 2)
+        due_balance = round(max(running_total - paid_balance, 0), 2)
+        if due_balance <= 0.01:
+            due_balance = 0.0
+        open_bill_id = unpaid.id if unpaid else None
 
         items.append(
             {
@@ -1556,26 +1721,7 @@ def discharge_patient(
             detail=f"Settle bill {unpaid.bill_number} (balance {unpaid.balance_due}) before discharge",
         )
 
-    # Bill any uncovered running charges (first bill or post-payment delta)
-    bill_out = None
-    preview = build_bill_preview(db, admission.id)
-    due = round(
-        max(float(preview.grand_total or 0) - _paid_towards_admission(db, admission.id), 0),
-        2,
-    )
-    if due > 0.01:
-        try:
-            bill_out = generate_bill(
-                db,
-                IpdGenerateBillRequest(admission_id=admission.id, pay_later=True),
-                generated_by=discharged_by,
-            )
-        except HTTPException as exc:
-            detail = str(getattr(exc, "detail", "") or "")
-            if "No outstanding balance" not in detail:
-                raise
-        # The follow-up invoice is saved for collection. Discharge still closes the stay.
-
+    # Close the stay and free the bed. Do not create a pay-later invoice.
     if admission.bed_id:
         bed = h.get_bed(db, admission.bed_id)
         h.free_bed(db, bed)
@@ -1594,7 +1740,7 @@ def discharge_patient(
     db.refresh(admission)
     return {
         "admission": _admission_out(db, admission).model_dump(),
-        "bill": bill_out.model_dump() if bill_out else None,
+        "bill": None,
         "message": "Patient discharged",
     }
 
