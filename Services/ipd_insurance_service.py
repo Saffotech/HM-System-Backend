@@ -18,6 +18,7 @@ from Schemas.ipd_schema import (
 )
 from Services import ipd_helpers as h
 from Services.doctor_helpers import format_patient_age_label, patient_age
+from Services.ipd_insurance_split import insurance_split
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -176,6 +177,21 @@ def serialize_claim(
     claimed = float(claim.claimed_amount or 0)
     patient_responsibility = max(claimed - approved, 0) if approved else None
 
+    split = None
+    if claim.claim_type == "cashless":
+        paid_on_bills = sum(
+            float(b.paid_amount or 0)
+            for b in ((admission.bills or []) if admission else [])
+            if b.status != "void"
+        )
+        split = insurance_split(
+            net_bill,
+            approved=approved,
+            estimate=claim.estimate_amount,
+            claimed=claimed,
+            patient_paid=patient_paid + paid_on_bills,
+        )
+
     return {
         "id": claim.id,
         "claim_id": claim.id,
@@ -228,6 +244,18 @@ def serialize_claim(
         "patientResponsibility": patient_responsibility,
         "insurance_paid": ins_paid,
         "patient_paid": patient_paid,
+        "bill_total": split["bill_total"] if split else None,
+        "billTotal": split["bill_total"] if split else None,
+        "coverage_source": split["coverage_source"] if split else None,
+        "coverageSource": split["coverage_source"] if split else None,
+        "insurance_share": split["insurance_share"] if split else None,
+        "insuranceShare": split["insurance_share"] if split else None,
+        "patient_share": split["patient_share"] if split else None,
+        "patientShare": split["patient_share"] if split else None,
+        "patient_paid_total": split["patient_paid"] if split else None,
+        "patientPaidTotal": split["patient_paid"] if split else None,
+        "patient_balance": split["patient_balance"] if split else None,
+        "patientBalance": split["patient_balance"] if split else None,
         "charges": [],
         "daily_charges": [],
         "dailyCharges": [],
@@ -514,6 +542,16 @@ def list_insurance_bills(
                 "patientPaid": c.get("patient_paid"),
                 "claim_label": c.get("claim_label"),
                 "claimLabel": c.get("claim_label"),
+                "coverage_source": c.get("coverage_source"),
+                "coverageSource": c.get("coverage_source"),
+                "insurance_share": c.get("insurance_share"),
+                "insuranceShare": c.get("insurance_share"),
+                "patient_share": c.get("patient_share"),
+                "patientShare": c.get("patient_share"),
+                "patient_paid_total": c.get("patient_paid_total"),
+                "patientPaidTotal": c.get("patient_paid_total"),
+                "patient_balance": c.get("patient_balance"),
+                "patientBalance": c.get("patient_balance"),
             }
         )
     return {"items": items, "total": total, "page": page, "limit": limit}
