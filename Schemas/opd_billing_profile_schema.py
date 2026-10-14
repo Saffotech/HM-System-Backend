@@ -1,7 +1,13 @@
+import re
 from datetime import date, datetime
 from typing import List, Optional
+from zoneinfo import ZoneInfo
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic_core import PydanticCustomError
+
+IST = ZoneInfo("Asia/Kolkata")
+_PLACE_NAME = re.compile(r"^(?=.*[A-Za-z])[A-Za-z][A-Za-z .'-]*$")
 
 
 class AddressInfo(BaseModel):
@@ -75,6 +81,23 @@ class AddressUpdate(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    @field_validator("city", "state")
+    @classmethod
+    def place_name_has_letters(cls, value: Optional[str], info) -> Optional[str]:
+        if value is None:
+            return None
+        cleaned = value.strip()
+        if not cleaned:
+            return None
+        if not _PLACE_NAME.fullmatch(cleaned):
+            label = "City" if info.field_name == "city" else "State"
+            raise PydanticCustomError(
+                "invalid_place_name",
+                "{label} must contain letters, not only numbers or symbols",
+                {"label": label},
+            )
+        return cleaned
+
 
 class EmergencyContactUpdate(BaseModel):
     name: Optional[str] = Field(None, max_length=120)
@@ -99,6 +122,16 @@ class OpdBillingProfileUpdate(BaseModel):
     emergency_contact: Optional[EmergencyContactUpdate] = None
 
     model_config = ConfigDict(extra="forbid")
+
+    @field_validator("date_of_birth")
+    @classmethod
+    def date_of_birth_not_in_future(cls, value: Optional[date]) -> Optional[date]:
+        if value is not None and value > datetime.now(IST).date():
+            raise PydanticCustomError(
+                "date_of_birth_future",
+                "Date of birth cannot be in the future",
+            )
+        return value
 
 
 class OpdBillingProfileImageResponse(BaseModel):

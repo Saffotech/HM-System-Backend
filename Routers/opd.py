@@ -92,7 +92,7 @@ def get_patient(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("patients:view")),
 ):
-    return PatientOut.model_validate(opd_service.get_patient(db, patient_id))
+    return PatientOut.model_validate(opd_service.get_patient_record(db, patient_id))
 
 
 @router.get("/patient/{patient_id}/profile")

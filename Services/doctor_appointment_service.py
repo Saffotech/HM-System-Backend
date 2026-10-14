@@ -148,6 +148,8 @@ def update_appointment_status_service(
             apt.status = status
     else:
         apt.status = status
+        if status == AppointmentStatus.cancelled.value and apt.cancelled_at is None:
+            apt.cancelled_at = opd_helpers.now_ist()
 
     persist(db)
     db.refresh(apt)

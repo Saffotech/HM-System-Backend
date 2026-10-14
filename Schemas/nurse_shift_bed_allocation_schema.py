@@ -32,7 +32,7 @@ class NurseShiftBedAllocationCreate(BaseModel):
     bed_id: int = Field(..., ge=1)
     shift_date: date
     assigned_until: Optional[date] = None
-    shift_name: str = Field(..., min_length=1, max_length=100)
+    shift_name: Optional[str] = Field(None, max_length=100)
     shift_start: Optional[time] = None
     shift_end: Optional[time] = None
     department_id: Optional[int] = Field(None, ge=1)
@@ -44,7 +44,7 @@ class NurseShiftBedAllocationBulkCreate(BaseModel):
     bed_ids: List[int] = Field(..., min_length=1)
     shift_date: date
     assigned_until: Optional[date] = None
-    shift_name: str = Field(..., min_length=1, max_length=100)
+    shift_name: Optional[str] = Field(None, max_length=100)
     shift_start: Optional[time] = None
     shift_end: Optional[time] = None
     department_id: Optional[int] = Field(None, ge=1)
@@ -78,7 +78,7 @@ class NurseShiftBedAllocationItem(BaseModel):
     ward_name: Optional[str] = None
     shift_date: date  # assigned_from
     assigned_until: Optional[date] = None
-    shift_name: str
+    shift_name: str = ""
     shift_start: Optional[time] = None
     shift_end: Optional[time] = None
     department_id: Optional[int] = None

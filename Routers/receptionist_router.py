@@ -66,11 +66,18 @@ def reference_doctors(
 )
 def receptionist_dashboard(
     doctor_id: Optional[int] = Query(None, ge=1),
+    department_id: Optional[int] = Query(None, ge=1),
+    search: Optional[str] = Query(None),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("receptionist:view_queues")),
 ):
-    data = receptionist_service.get_dashboard(db, doctor_id=doctor_id)
+    data = receptionist_service.get_dashboard(
+        db,
+        doctor_id=doctor_id,
+        department_id=department_id,
+        search=search,
+    )
     return {"success": True, "data": data}
 
 

@@ -80,7 +80,7 @@ def _date_range_label(from_date: date | None, until_date: date | None) -> str:
     return "date TBD"
 
 
-def _normalize_shift_name(name: str) -> str:
+def _normalize_shift_name(name: str | None) -> str:
     return (name or "").strip()
 
 
@@ -213,7 +213,7 @@ def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
         "ward_name": bed.ward_name if bed else None,
         "shift_date": row.shift_date,  # assigned_from
         "assigned_until": getattr(row, "assigned_until", None),
-        "shift_name": row.shift_name,
+        "shift_name": row.shift_name or "",
         "shift_start": row.shift_start,
         "shift_end": row.shift_end,
         "department_id": row.department_id,
@@ -350,9 +350,7 @@ def create_allocation_service(
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
     bed = _get_bed(db, data.bed_id)
-    shift_name = _normalize_shift_name(data.shift_name)
-    if not shift_name:
-        raise HTTPException(status_code=400, detail="shift_name is required")
+    shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
 
     if data.department_id is not None:
         _get_department(db, data.department_id)
@@ -419,8 +417,19 @@ def create_allocation_service(
     bed_label = out.get("bed_number") or f"#{out.get('bed_id')}"
     ward_name = out.get("ward_name")
     ward_part = f" ({ward_name})" if ward_name else ""
-    timing = _shift_timing_label(out.get("shift_name"), out.get("shift_start"), out.get("shift_end"))
     dates = _date_range_label(out.get("shift_date"), out.get("assigned_until"))
+    shift_name_label = (out.get("shift_name") or "").strip()
+    if shift_name_label:
+        timing = _shift_timing_label(
+            shift_name_label, out.get("shift_start"), out.get("shift_end")
+        )
+        notify_message = (
+            f"You were assigned bed {bed_label}{ward_part} for {timing}, {dates}."
+        )
+    else:
+        notify_message = (
+            f"You were assigned bed {bed_label}{ward_part} {dates}."
+        )
     nurse_id = out["nurse_id"]
     allocation_id = out["id"]
 
@@ -437,10 +446,7 @@ def create_allocation_service(
         db,
         nurse_id=nurse_id,
         title="Shift assigned",
-        message=(
-            f"You were assigned bed {bed_label}{ward_part} "
-            f"for {timing}, {dates}."
-        ),
+        message=notify_message,
         allocation_id=allocation_id,
         actor=actor,
     )
@@ -456,9 +462,7 @@ def bulk_create_allocations_service(
     ip_address: str | None = None,
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
-    shift_name = _normalize_shift_name(data.shift_name)
-    if not shift_name:
-        raise HTTPException(status_code=400, detail="shift_name is required")
+    shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
 
     if data.department_id is not None:
         _get_department(db, data.department_id)
@@ -547,16 +551,20 @@ def bulk_create_allocations_service(
             details={"created_ids": created_ids, "skipped": skipped},
             ip_address=ip_address,
         )
-        timing = _shift_timing_label(shift_name, start, end)
         dates = _date_range_label(data.shift_date, assigned_until)
         bed_count = len(created_ids)
+        if shift_name:
+            timing = _shift_timing_label(shift_name, start, end)
+            notify_message = (
+                f"You were assigned {bed_count} bed(s) for {timing}, {dates}."
+            )
+        else:
+            notify_message = f"You were assigned {bed_count} bed(s) {dates}."
         _notify_nurse_shift_change(
             db,
             nurse_id=nurse.id,
             title="Shift assigned",
-            message=(
-                f"You were assigned {bed_count} bed(s) for {timing}, {dates}."
-            ),
+            message=notify_message,
             allocation_id=created_ids[0],
             actor=actor,
         )
@@ -1134,7 +1142,7 @@ def resolve_duty_shift_for_nurse(
             == _normalize_shift_name(resolved_name)
         ]
 
-    if not resolved_name:
+    if resolved_name is None:
         resolved_name = (
             _normalize_shift_name(shift_name)
             if shift_name

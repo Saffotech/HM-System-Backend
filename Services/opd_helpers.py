@@ -138,6 +138,14 @@ def get_patient(db: Session, patient_id: int) -> Patient:
     return patient
 
 
+def get_patient_record(db: Session, patient_id: int) -> Patient:
+    """Patient row for bills and payment history, including a deactivated profile."""
+    patient = db.query(Patient).filter(Patient.id == patient_id).first()
+    if not patient:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    return patient
+
+
 def get_visit_with_relations(db: Session, visit_id: int):
     row = (
         db.query(OpdVisit, Patient, User, Department)
@@ -153,27 +161,33 @@ def get_visit_with_relations(db: Session, visit_id: int):
 
 
 def save_default_bill_items(db: Session, visit: OpdVisit, doctor: Optional[User]) -> None:
-    consultation_label = (
-        f"Dr. {doctor.first_name} Consultation" if doctor else "Doctor Consultation"
-    )
-    db.add_all(
-        [
+    """Store registration and consultation only when those fees were actually charged."""
+    rows = []
+    if float(visit.registration_fee or 0) > 0:
+        rows.append(
             BillItem(
                 visit_id=visit.id,
                 description="Registration Fee",
                 qty=1,
                 unit_price=visit.registration_fee,
                 amount=visit.registration_fee,
-            ),
+            )
+        )
+    if float(visit.consultation_fee or 0) > 0:
+        consultation_label = (
+            f"Dr. {doctor.first_name} Consultation" if doctor else "Doctor Consultation"
+        )
+        rows.append(
             BillItem(
                 visit_id=visit.id,
                 description=consultation_label,
                 qty=1,
                 unit_price=visit.consultation_fee,
                 amount=visit.consultation_fee,
-            ),
-        ]
-    )
+            )
+        )
+    if rows:
+        db.add_all(rows)
 
 
 def save_extra_bill_items(db: Session, visit_id: int, items: List[dict]) -> float:

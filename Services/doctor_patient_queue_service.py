@@ -39,7 +39,10 @@ def _notify_paid_appointment_in_queue(
     created_by: int | None,
 ) -> None:
     patient_name = queue.patient_name or "Patient"
-    scheduled_label = appointment.scheduled_at.astimezone(IST).strftime("%I:%M %p")
+    scheduled = h.as_ist(appointment.scheduled_at)
+    scheduled_label = (
+        scheduled.strftime("%d %b %Y, %I:%M %p") if scheduled else "Not set"
+    )
     create_notification(
         db,
         user_id=appointment.doctor_id,

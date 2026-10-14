@@ -12,7 +12,6 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from database import get_db
-
 from Models.user import User
 
 from dependencies import (

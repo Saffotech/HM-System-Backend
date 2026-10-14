@@ -9,15 +9,17 @@ from Models.doctor_lab_test_order import LabTestOrder
 from Models.doctor_prescriptions import Prescription
 from Models.ipd import IpdAdmission, IpdAdmissionCareTeam, IpdDoctorVisit
 from Models.patient import Patient
+from Models.user import User
 from Schemas.doctor_ipd_schema import DoctorIpdConsultationSaveRequest
 from Schemas.doctor_lab_test_schema import LabTestCreate
 from Services import doctor_helpers as h
+from Services import opd_settings_service
 from Services.doctor_lab_test_service import create_lab_test_service
 from Services.doctor_prescription_service import (
     create_prescription_for_admission,
     serialize_prescription,
 )
-from Services.ipd_service import doctor_has_admission_access
+from Services.ipd_service import admission_text_search_filter, doctor_has_admission_access
 
 
 _STATUS_ALIASES = {
@@ -85,16 +87,7 @@ def list_doctor_ipd_admissions_service(
         query = query.filter(date_clause)
 
     if search and search.strip():
-        term = f"%{search.strip()}%"
-        query = query.filter(
-            or_(
-                Patient.first_name.ilike(term),
-                Patient.last_name.ilike(term),
-                Patient.patient_uid.ilike(term),
-                Patient.phone.ilike(term),
-                IpdAdmission.admission_no.ilike(term),
-            )
-        )
+        query = query.filter(admission_text_search_filter(search))
 
     total = query.count()
     rows = (
@@ -163,10 +156,20 @@ def save_doctor_ipd_consultation_service(
     if notes:
         admission.notes = notes
 
+    doctor = db.query(User).filter(User.id == doctor_id).first()
+    pricing = opd_settings_service.get_pricing(db)
+    charge = float(
+        opd_settings_service.resolve_consultation_fee(
+            pricing,
+            doctor_id=doctor_id,
+            department_id=admission.department_id or (doctor.department_id if doctor else None),
+        )
+    )
+
     visit = IpdDoctorVisit(
         admission_id=admission.id,
         doctor_id=doctor_id,
-        charge=0.0,
+        charge=charge,
         notes=_build_ipd_visit_notes(
             symptoms=symptoms,
             diagnosis=diagnosis,
@@ -182,6 +185,7 @@ def save_doctor_ipd_consultation_service(
     created_rx = None
     lab_outs = []
     created_lab_ids: list[int] = []
+    created_lab_repeat_by_id: dict[int, bool] = {}
     seen_lab_names: set[str] = set()
 
     try:
@@ -243,6 +247,7 @@ def save_doctor_ipd_consultation_service(
                 raise
             lab_outs.append(lab_out.model_dump(mode="json"))
             created_lab_ids.append(lab_out.id)
+            created_lab_repeat_by_id[lab_out.id] = bool(lab.is_repeat)
 
         db.commit()
     except HTTPException:
@@ -279,7 +284,12 @@ def save_doctor_ipd_consultation_service(
             .filter(LabTestOrder.id.in_(created_lab_ids))
             .all()
         ):
-            notify_lab_techs_order_created(db, order, doctor_id=doctor_id)
+            notify_lab_techs_order_created(
+                db,
+                order,
+                doctor_id=doctor_id,
+                is_repeat=created_lab_repeat_by_id.get(order.id, False),
+            )
 
     visited_at = visit.visited_at
     return {

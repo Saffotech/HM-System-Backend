@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
@@ -185,10 +187,13 @@ def update_lab_test(
         test_id=test.id,
     )
 
+    previous_price = test.price
     test.test_name = name
     test.department_id = department_id
+    price_changed = False
     if "price" in updates:
         test.price = updates["price"]
+        price_changed = Decimal(str(previous_price)) != Decimal(str(test.price))
 
     db.commit()
     db.refresh(test)
@@ -201,6 +206,18 @@ def update_lab_test(
         summary=f"Updated lab catalog test {test.test_name}",
         details={key: str(value) for key, value in updates.items()},
     )
+    if price_changed:
+        from Services.lab_notification_helpers import (
+            notify_lab_techs_catalog_price_changed,
+        )
+
+        notify_lab_techs_catalog_price_changed(
+            db,
+            test,
+            old_price=previous_price,
+            new_price=test.price,
+            actor=actor,
+        )
     return _to_response(test)
 
 

@@ -18,6 +18,7 @@ from Schemas.ipd_schema import (
 )
 from Services import ipd_helpers as h
 from Services.doctor_helpers import format_patient_age_label, patient_age
+from Services.ipd_insurance_split import insurance_split
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -132,6 +133,17 @@ def _ward_room(admission: Optional[IpdAdmission]) -> str:
     return " / ".join(p for p in parts if p) or "—"
 
 
+def _live_charge_subtotal(db: Session, admission_id: int) -> float:
+    """GST-inclusive total, the same figure discharge review shows."""
+    try:
+        from Services.ipd_service import build_bill_preview
+
+        preview = build_bill_preview(db, admission_id)
+        return round(float(preview.grand_total or 0), 2)
+    except Exception:
+        return 0.0
+
+
 def serialize_claim(
     db: Session,
     claim: IpdInsuranceClaim,
@@ -149,8 +161,8 @@ def serialize_claim(
     if not doctor_name and admission:
         doctor_name = "—"
 
-    net_bill = 0.0
-    if admission:
+    net_bill = _live_charge_subtotal(db, admission.id) if admission else 0.0
+    if admission and net_bill <= 0:
         for bill in admission.bills or []:
             if bill.status != "void":
                 net_bill = max(net_bill, float(bill.grand_total or 0))
@@ -164,6 +176,21 @@ def serialize_claim(
     approved = float(claim.approved_amount or 0)
     claimed = float(claim.claimed_amount or 0)
     patient_responsibility = max(claimed - approved, 0) if approved else None
+
+    split = None
+    if claim.claim_type == "cashless":
+        paid_on_bills = sum(
+            float(b.paid_amount or 0)
+            for b in ((admission.bills or []) if admission else [])
+            if b.status != "void"
+        )
+        split = insurance_split(
+            net_bill,
+            approved=approved,
+            estimate=claim.estimate_amount,
+            claimed=claimed,
+            patient_paid=patient_paid + paid_on_bills,
+        )
 
     return {
         "id": claim.id,
@@ -217,6 +244,18 @@ def serialize_claim(
         "patientResponsibility": patient_responsibility,
         "insurance_paid": ins_paid,
         "patient_paid": patient_paid,
+        "bill_total": split["bill_total"] if split else None,
+        "billTotal": split["bill_total"] if split else None,
+        "coverage_source": split["coverage_source"] if split else None,
+        "coverageSource": split["coverage_source"] if split else None,
+        "insurance_share": split["insurance_share"] if split else None,
+        "insuranceShare": split["insurance_share"] if split else None,
+        "patient_share": split["patient_share"] if split else None,
+        "patientShare": split["patient_share"] if split else None,
+        "patient_paid_total": split["patient_paid"] if split else None,
+        "patientPaidTotal": split["patient_paid"] if split else None,
+        "patient_balance": split["patient_balance"] if split else None,
+        "patientBalance": split["patient_balance"] if split else None,
         "charges": [],
         "daily_charges": [],
         "dailyCharges": [],
@@ -449,7 +488,10 @@ def list_insurance_bills(
         .options(
             joinedload(IpdInsuranceClaim.admission).joinedload(IpdAdmission.bills),
         )
-        .filter(IpdInsuranceClaim.claim_type == "cashless")
+        .filter(
+            IpdInsuranceClaim.claim_type == "cashless",
+            IpdAdmission.status == "admitted",
+        )
     )
     if search and search.strip():
         term = f"%{search.strip()}%"
@@ -483,16 +525,33 @@ def list_insurance_bills(
                 "uhid": c.get("uhid"),
                 "age_gender": c.get("age_gender"),
                 "ageGender": c.get("age_gender"),
-                "admitted": c.get("admitted"),
+                "admitted": c.get("admission_date"),
                 "doctor": c.get("doctor"),
                 "ward_room": c.get("ward_room"),
                 "wardRoom": c.get("ward_room"),
                 "coverage": c.get("coverage"),
                 "net_bill": c.get("net_bill"),
                 "netBill": c.get("net_bill"),
+                "claimed": c.get("claimed"),
+                "claimed_amount": c.get("claimed_amount"),
+                "claimedAmount": c.get("claimedAmount"),
+                "estimate_amount": c.get("estimate_amount"),
+                "estimateAmount": c.get("estimateAmount"),
                 "approved": c.get("approved"),
+                "patient_paid": c.get("patient_paid"),
+                "patientPaid": c.get("patient_paid"),
                 "claim_label": c.get("claim_label"),
                 "claimLabel": c.get("claim_label"),
+                "coverage_source": c.get("coverage_source"),
+                "coverageSource": c.get("coverage_source"),
+                "insurance_share": c.get("insurance_share"),
+                "insuranceShare": c.get("insurance_share"),
+                "patient_share": c.get("patient_share"),
+                "patientShare": c.get("patient_share"),
+                "patient_paid_total": c.get("patient_paid_total"),
+                "patientPaidTotal": c.get("patient_paid_total"),
+                "patient_balance": c.get("patient_balance"),
+                "patientBalance": c.get("patient_balance"),
             }
         )
     return {"items": items, "total": total, "page": page, "limit": limit}
@@ -503,6 +562,12 @@ def update_claim(
     claim: IpdInsuranceClaim,
     payload: IpdInsuranceClaimUpdate,
 ) -> IpdInsuranceClaim:
+    admission = claim.admission or h.get_admission(db, claim.admission_id)
+    if (admission.status or "") != "admitted":
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot edit billing for a closed admission",
+        )
     data = payload.model_dump(exclude_unset=True, by_alias=False)
     if "claimed" in data and "claimed_amount" not in data:
         data["claimed_amount"] = data.pop("claimed")

@@ -187,7 +187,9 @@ def remove_care_team_doctor(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("ipd:admission:create")),
 ):
-    return ipd_service.remove_care_team_doctor(db, admission_id, doctor_id)
+    return ipd_service.remove_care_team_doctor(
+        db, admission_id, doctor_id, removed_by=current_user.id
+    )
 
 
 @router.post("/admissions/{admission_id}/visits", status_code=201)

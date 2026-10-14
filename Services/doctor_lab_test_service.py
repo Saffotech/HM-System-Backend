@@ -1,3 +1,4 @@
+from datetime import datetime
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -22,6 +23,7 @@ from Services.lab_department_helpers import resolve_lab_department_id
 from Services.lab_notification_helpers import (
     notify_lab_techs_order_cancelled,
     notify_lab_techs_order_created,
+    notify_lab_techs_order_updated,
 )
 from Services.lab_service import (
     EXTENSION_MEDIA_TYPES,
@@ -94,6 +96,7 @@ def _find_in_flight_duplicate(
     parent_filters: list,
     catalog_test,
     exclude_order_id: int | None = None,
+    same_calendar_day: bool = False,
 ) -> LabTestOrder | None:
     query = db.query(LabTestOrder).filter(
         *parent_filters,
@@ -105,6 +108,15 @@ def _find_in_flight_duplicate(
     )
     if exclude_order_id is not None:
         query = query.filter(LabTestOrder.id != exclude_order_id)
+    # Edit has no is_repeat flag; only block accidental same-day collisions.
+    # A prior-day in-flight order (e.g. Blood Test on 27th during a long IPD
+    # stay) must not stop renaming CBC → Blood Test on a later day.
+    if same_calendar_day:
+        start, end = h.day_bounds(datetime.now(h.IST).date())
+        query = query.filter(
+            LabTestOrder.created_at >= start,
+            LabTestOrder.created_at <= end,
+        )
     return query.first()
 
 
@@ -268,7 +280,12 @@ def create_lab_test_service(
     if commit:
         db.commit()
         db.refresh(lab_test)
-        notify_lab_techs_order_created(db, lab_test, doctor_id=doctor_id)
+        notify_lab_techs_order_created(
+            db,
+            lab_test,
+            doctor_id=doctor_id,
+            is_repeat=bool(payload.is_repeat),
+        )
     else:
         db.flush()
         db.refresh(lab_test)
@@ -366,6 +383,9 @@ def update_lab_test_service(
     if test.status != LabTestStatus.ORDERED:
         raise HTTPException(status_code=400, detail="Only ordered tests can be updated")
 
+    previous_department_id = test.department_id
+    previous_test_name = test.test_name
+
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
         raise HTTPException(status_code=400, detail="No fields provided for update")
@@ -406,6 +426,7 @@ def update_lab_test_service(
             parent_filters=parent_filter,
             catalog_test=catalog_test,
             exclude_order_id=test.id,
+            same_calendar_day=True,
         )
         if duplicate:
             raise HTTPException(
@@ -426,6 +447,13 @@ def update_lab_test_service(
 
     db.commit()
     db.refresh(test)
+    notify_lab_techs_order_updated(
+        db,
+        test,
+        doctor_id=doctor_id,
+        previous_department_id=previous_department_id,
+        previous_test_name=previous_test_name,
+    )
     patient = h.get_patient(db, test.patient_id)
     return _serialize_lab_test_response(test, patient)
 

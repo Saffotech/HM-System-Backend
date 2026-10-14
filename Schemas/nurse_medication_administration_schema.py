@@ -81,6 +81,14 @@ class PatientMedicationItem(BaseModel):
     timing: Optional[str] = None
     quantity: Optional[int] = None
 
+    # Additive OPD/IPD labeling (existing clients ignore these keys)
+    prescription_id: Optional[int] = None
+    source: Optional[str] = None  # "OPD" | "IPD"
+    appointment_id: Optional[int] = None
+    admission_id: Optional[int] = None
+    doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
+
 
 class PatientMedicationResponse(BaseModel):
 
@@ -91,6 +99,8 @@ class PatientMedicationResponse(BaseModel):
 
     bed_number: Optional[str] = None
     ward_name: Optional[str] = None
+    # Patient-level doctor = IPD attending (ward context). Per-item
+    # medications[].doctor_name is the prescribing doctor for that medicine.
     doctor_id: Optional[int] = None
     doctor_name: Optional[str] = None
 

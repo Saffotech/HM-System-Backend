@@ -16,9 +16,12 @@ from Models.nurse_patient_vitals import PatientVitals
 from Models.opd_billing import Appointment, AppointmentStatus
 from Models.patient import OpdVisit, Patient
 from Models.user import User
+from Enums.notification import NotificationType, ReferenceType, SourceModule
 from Schemas.opd_schema import AppointmentCreate, AppointmentOut, AppointmentUpdate
 from Services import opd_helpers as h
+from Services.notification_service import create_notification
 from Services import opd_settings_service as opd_settings_svc
+from Services.ipd_helpers import get_active_admission_for_patient
 from Services.queue_helpers import appointment_status_value
 
 LIST_FILTERS = frozenset({"all", "scheduled", "pending", "completed", "cancelled"})
@@ -98,6 +101,29 @@ def iso_scheduled_at(dt: Optional[datetime]) -> Optional[str]:
     if dt is None:
         return None
     return _to_ist(dt).isoformat()
+
+
+def find_patient_appointment_on_day(
+    db: Session,
+    *,
+    patient_id: int,
+    scheduled_at: datetime,
+) -> Optional[Appointment]:
+    """Any scheduled or completed appointment for this patient on that IST day."""
+    start, end = _day_window(scheduled_at)
+    return (
+        db.query(Appointment)
+        .filter(
+            Appointment.patient_id == patient_id,
+            Appointment.scheduled_at >= start,
+            Appointment.scheduled_at < end,
+            Appointment.status.in_(
+                [AppointmentStatus.scheduled, AppointmentStatus.completed]
+            ),
+        )
+        .order_by(Appointment.id.desc())
+        .first()
+    )
 
 
 def find_active_appointment_same_day(
@@ -718,8 +744,36 @@ def preview_today_appointments(db: Session, *, limit: int = 8) -> list[Appointme
     return _appointments_out_list(db, rows, visit_map)
 
 
+def _slot_has_passed(slot_time: datetime) -> bool:
+    """True when the slot start is already at or before the current India time."""
+    return _to_ist(slot_time) <= h.now_ist()
+
+
 def create_appointment(db: Session, data: AppointmentCreate, created_by: int) -> AppointmentOut:
-    """Create or reuse one active appointment for the patient+doctor+dept+day."""
+    """Create one appointment. A patient cannot be booked twice on the same IST day."""
+    if _slot_has_passed(data.scheduled_at):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot book a time that has already passed",
+        )
+
+    if get_active_admission_for_patient(db, data.patient_id) is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Patient is currently admitted in IPD",
+        )
+
+    existing = find_patient_appointment_on_day(
+        db,
+        patient_id=data.patient_id,
+        scheduled_at=data.scheduled_at,
+    )
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Patient already has an appointment on this date",
+        )
+
     apt = resolve_appointment_for_visit(
         db,
         patient_id=data.patient_id,
@@ -843,11 +897,80 @@ def list_appointments(
     }
 
 
+def _scheduled_as_ist(scheduled_at: Optional[datetime]) -> Optional[datetime]:
+    if scheduled_at is None:
+        return None
+    if scheduled_at.tzinfo is None:
+        scheduled_at = scheduled_at.replace(tzinfo=h.IST)
+    else:
+        scheduled_at = scheduled_at.astimezone(h.IST)
+    return scheduled_at.replace(microsecond=0)
+
+
+def _scheduled_label_ist(scheduled_at: Optional[datetime]) -> str:
+    scheduled_at = _scheduled_as_ist(scheduled_at)
+    if scheduled_at is None:
+        return "Not set"
+    return scheduled_at.strftime("%d %b %Y, %I:%M %p")
+
+
+def _notify_doctor_appointment_cancelled(db: Session, apt: Appointment) -> None:
+    """Tell the assigned doctor that OPD cancelled this appointment."""
+    if not apt.doctor_id:
+        return
+    patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    create_notification(
+        db,
+        user_id=apt.doctor_id,
+        title="Appointment Cancelled",
+        message=(
+            f"Appointment cancelled.\n"
+            f"Patient: {patient_name}\n"
+            f"Appointment: {apt.appointment_uid}\n"
+            f"Scheduled: {_scheduled_label_ist(apt.scheduled_at)}"
+        ),
+        notification_type=NotificationType.APPOINTMENT_CANCELLED,
+        source_module=SourceModule.OPD_BILLING,
+        reference_type=ReferenceType.APPOINTMENT,
+        reference_id=apt.id,
+    )
+
+
+def _notify_doctor_appointment_rescheduled(db: Session, apt: Appointment) -> None:
+    """Tell the assigned doctor that OPD moved this appointment to a new slot."""
+    if not apt.doctor_id:
+        return
+    patient = db.query(Patient).filter(Patient.id == apt.patient_id).first()
+    patient_name = (
+        h.display_name(patient.first_name, patient.last_name) if patient else "Patient"
+    )
+    create_notification(
+        db,
+        user_id=apt.doctor_id,
+        title="Appointment Rescheduled",
+        message=(
+            f"Appointment rescheduled.\n"
+            f"Patient: {patient_name}\n"
+            f"Appointment: {apt.appointment_uid}\n"
+            f"Scheduled: {_scheduled_label_ist(apt.scheduled_at)}"
+        ),
+        notification_type=NotificationType.APPOINTMENT_RESCHEDULED,
+        source_module=SourceModule.OPD_BILLING,
+        reference_type=ReferenceType.APPOINTMENT,
+        reference_id=apt.id,
+    )
+
+
 def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate) -> AppointmentOut:
     apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
 
+    previous_status = appointment_status_value(apt.status)
+    previous_scheduled = apt.scheduled_at
     updates = data.model_dump(exclude_unset=True)
     if "status" in updates and updates["status"] is not None:
         try:
@@ -865,8 +988,24 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
     for key, value in updates.items():
         setattr(apt, key, value)
 
+    newly_cancelled = (
+        appointment_status_value(updates.get("status")) == AppointmentStatus.cancelled.value
+        and previous_status != AppointmentStatus.cancelled.value
+    )
+    if newly_cancelled and apt.cancelled_at is None:
+        apt.cancelled_at = h.now_ist()
+
+    rescheduled = (
+        updates.get("scheduled_at") is not None
+        and _scheduled_as_ist(previous_scheduled) != _scheduled_as_ist(apt.scheduled_at)
+    )
+
     db.commit()
     db.refresh(apt)
+    if newly_cancelled:
+        _notify_doctor_appointment_cancelled(db, apt)
+    if rescheduled:
+        _notify_doctor_appointment_rescheduled(db, apt)
     return _appointment_out(db, apt, _visit_for_appointment(db, apt))
 
 
@@ -954,6 +1093,8 @@ def doctor_availability(db: Session, doctor_id: int, department_id: int, date_st
 
     slots = []
     for slot_time in opd_settings_svc.iter_slot_datetimes(day, config):
+        if _slot_has_passed(slot_time):
+            continue
         taken = _slot_taken(slot_time)
         slots.append({
             "time": slot_time.strftime("%H:%M"),
