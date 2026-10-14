@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
-from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
+from Models.hospital_settings import HospitalSettings
 from Models.user import User
 from Schemas.hospital_settings_schema import HospitalSettingsOut, HospitalSettingsUpdate
 from Services import audit_service
@@ -59,30 +59,27 @@ def _to_out(row: HospitalSettings) -> HospitalSettingsOut:
     )
 
 
-def get_settings_row(db: Session) -> HospitalSettings:
-    row = db.query(HospitalSettings).filter(HospitalSettings.id == SETTINGS_ROW_ID).first()
+def _require_tenant_id(db: Session, tenant_id: int | None) -> int:
+    resolved = tenant_id if tenant_id is not None else db.info.get("tenant_id")
+    if resolved is None:
+        raise HTTPException(status_code=400, detail="This account is not linked to a hospital")
+    return resolved
+
+
+def get_settings_row(db: Session, tenant_id: int | None = None) -> HospitalSettings:
+    resolved = _require_tenant_id(db, tenant_id)
+    row = (
+        db.query(HospitalSettings)
+        .filter(HospitalSettings.tenant_id == resolved)
+        .first()
+    )
     if not row:
-        raise HTTPException(
-            status_code=404,
-            detail="Hospital settings not found. Run python seed.py to create the default row.",
-        )
+        raise HTTPException(status_code=404, detail="Hospital settings not found")
     return row
 
 
-def ensure_default_settings(db: Session) -> HospitalSettings:
-    row = db.query(HospitalSettings).filter(HospitalSettings.id == SETTINGS_ROW_ID).first()
-    if row:
-        return row
-
-    row = HospitalSettings(id=SETTINGS_ROW_ID, name="")
-    db.add(row)
-    db.commit()
-    db.refresh(row)
-    return row
-
-
-def get_settings(db: Session) -> HospitalSettingsOut:
-    return _to_out(get_settings_row(db))
+def get_settings(db: Session, tenant_id: int | None = None) -> HospitalSettingsOut:
+    return _to_out(get_settings_row(db, tenant_id))
 
 
 def update_settings(
@@ -90,7 +87,7 @@ def update_settings(
     data: HospitalSettingsUpdate,
     actor: User,
 ) -> HospitalSettingsOut:
-    row = get_settings_row(db)
+    row = get_settings_row(db, actor.tenant_id)
     updates = data.model_dump(exclude_unset=True)
 
     if not updates:

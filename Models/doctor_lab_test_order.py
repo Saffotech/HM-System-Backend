@@ -10,6 +10,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 from database import Base
+from Models.tenant import TenantScoped
 from datetime import datetime
 from zoneinfo import ZoneInfo
 import enum
@@ -23,7 +24,7 @@ class LabTestStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
-class LabTestOrder(Base):
+class LabTestOrder(TenantScoped):
 
     __tablename__ = "lab_test_orders"
     __table_args__ = (

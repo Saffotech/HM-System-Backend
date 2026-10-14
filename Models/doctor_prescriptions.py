@@ -17,6 +17,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
@@ -29,7 +30,7 @@ def _now():
 # PRESCRIPTION
 # ==========================================================
 
-class Prescription(Base):
+class Prescription(TenantScoped):
 
     __tablename__ = "prescriptions"
     __table_args__ = (

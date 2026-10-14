@@ -15,8 +15,9 @@ from database import SessionLocal
 from Models.department import Department
 from Models.lab_test import LabTest
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
-from Models.hospital_settings import SETTINGS_ROW_ID, HospitalSettings
-from Models.opd_settings import OPD_SETTINGS_ROW_ID, OpdSettings
+from Models.hospital_settings import HospitalSettings
+from Models.opd_settings import OpdSettings
+from Models.tenant import Tenant
 from Models.nurse_profile import NurseProfile
 from Models.receptionist_profile import ReceptionistProfile
 from Models.lab_technician_profile import LabTechnicianProfile
@@ -24,7 +25,6 @@ from Models.opd_billing_profile import OpdBillingProfile
 from Models.ipd_profile import IpdProfile
 from Models.pharmacist_profile import PharmacistProfile
 from Models.admin_profile import AdminProfile
-from Models.super_admin_profile import SuperAdminProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -39,6 +39,7 @@ PERMISSIONS_LIST = [
     "users:activate",
     "roles:create",
     "roles:view",
+    "hospitals:create",
     "billing:view",
     "billing:create",
     "billing:update",
@@ -101,10 +102,6 @@ PERMISSIONS_LIST = [
     "admin_profile:update",
     "admin_profile:upload_image",
     "admin_profile:delete_image",
-    "super_admin_profile:view",
-    "super_admin_profile:update",
-    "super_admin_profile:upload_image",
-    "super_admin_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "nurse_medication:view",
@@ -182,11 +179,7 @@ ADMIN_PERMISSIONS = [
 
 ROLES_DATA = {
     "admin": {
-        "description": "System administrator",
-        "permissions": "__all__",
-    },
-    "super_admin": {
-        "description": "Hospital owner / super administrator",
+        "description": "Hospital administrator",
         "permissions": "__all__",
     },
     "doctor": {
@@ -421,7 +414,13 @@ def _target_permission_ids(
 ) -> set[int]:
     raw = role_data["permissions"]
     if raw == "__all__":
-        return set(perm_ids.values())
+        # Hospital admin must not register other hospitals.
+        skipped = {"hospitals:create"} if role_name == "admin" else set()
+        return {
+            pid
+            for name, pid in perm_ids.items()
+            if name not in skipped
+        }
 
     target: set[int] = set()
     for perm_name in raw:
@@ -478,59 +477,85 @@ def upsert_roles(db, perm_ids: dict[str, int]) -> dict[str, int]:
     return role_ids
 
 
-def upsert_departments(db) -> dict[str, int]:
+def ensure_catalog_for_tenant(db, tenant_id: int) -> tuple[int, int, int]:
+    """Create this hospital's departments and lab tests. Does not commit."""
     dept_ids: dict[str, int] = {}
-    added = 0
+    dept_added = 0
     for item in DEPARTMENTS:
-        dept = db.query(Department).filter(Department.code == item["code"]).first()
+        dept = (
+            db.query(Department)
+            .filter(
+                Department.tenant_id == tenant_id,
+                Department.code == item["code"],
+            )
+            .first()
+        )
         if not dept:
-            dept = Department(name=item["name"], code=item["code"], is_active=True)
+            dept = Department(
+                tenant_id=tenant_id,
+                name=item["name"],
+                code=item["code"],
+                is_active=True,
+            )
             db.add(dept)
             db.flush()
-            added += 1
+            dept_added += 1
         else:
             dept.name = item["name"]
             dept.is_active = True
         dept_ids[item["code"]] = dept.id
-    db.commit()
-    print(f"Departments synced: {len(dept_ids)} total ({added} new)")
-    return dept_ids
 
-
-def upsert_lab_tests(db, department_ids: dict[str, int]) -> None:
-    """Create missing catalog tests only. Never overwrite Admin-managed prices."""
-    added = 0
-    reactivated = 0
+    lab_added = 0
+    lab_reactivated = 0
     for item in LAB_TEST_CATALOG:
-        department_id = department_ids[item["department_code"]]
+        department_id = dept_ids[item["department_code"]]
         test = (
             db.query(LabTest)
             .filter(
+                LabTest.tenant_id == tenant_id,
                 LabTest.test_name == item["test_name"],
                 LabTest.department_id == department_id,
             )
             .first()
         )
         if test:
-            # Existing row: keep test.price untouched (Admin / Super Admin owns it).
             if not test.active:
                 test.active = True
-                reactivated += 1
+                lab_reactivated += 1
             continue
         db.add(
             LabTest(
+                tenant_id=tenant_id,
                 test_name=item["test_name"],
                 department_id=department_id,
                 price=Decimal("0.00"),
                 active=True,
             )
         )
-        added += 1
-    if added or reactivated:
-        db.commit()
+        lab_added += 1
+    return dept_added, lab_added, lab_reactivated
+
+
+def ensure_catalogs(db) -> None:
+    tenants = db.query(Tenant).all()
+    if not tenants:
+        print("Departments and lab tests: no hospitals yet (created by POST /tenants)")
+        return
+    dept_added = 0
+    lab_added = 0
+    lab_reactivated = 0
+    for tenant in tenants:
+        added, tests_added, reactivated = ensure_catalog_for_tenant(db, tenant.id)
+        dept_added += added
+        lab_added += tests_added
+        lab_reactivated += reactivated
+    db.commit()
     print(
-        f"Lab test catalog synced: {added} new, {reactivated} reactivated "
-        f"({len(LAB_TEST_CATALOG)} defaults; prices never overwritten)"
+        f"Departments synced for {len(tenants)} hospitals ({dept_added} new)"
+    )
+    print(
+        f"Lab test catalog synced: {lab_added} new, {lab_reactivated} reactivated "
+        f"({len(LAB_TEST_CATALOG)} defaults per hospital; prices never overwritten)"
     )
 
 
@@ -561,49 +586,61 @@ def backfill_lab_order_prices(db) -> None:
 
 
 def ensure_hospital_settings(db) -> None:
-    row = db.query(HospitalSettings).filter(HospitalSettings.id == SETTINGS_ROW_ID).first()
-    if row:
-        if row.currency == "INR":
-            row.currency = "USD"
-            db.commit()
-            print("Hospital settings currency updated INR -> USD")
-        else:
-            print("Hospital settings row already exists")
+    tenants = db.query(Tenant).all()
+    if not tenants:
+        print("Hospital settings: no hospitals yet (created by POST /tenants)")
         return
-
-    db.add(
-        HospitalSettings(
-            id=SETTINGS_ROW_ID,
-            name="",
-            default_registration_fee=0.0,
-            default_consultation_fee=0.0,
-            default_gst_percent=0.0,
-            currency="USD",
-            timezone="Asia/Kolkata",
+    created = 0
+    for tenant in tenants:
+        row = (
+            db.query(HospitalSettings)
+            .filter(HospitalSettings.tenant_id == tenant.id)
+            .first()
         )
-    )
+        if row:
+            continue
+        db.add(
+            HospitalSettings(
+                tenant_id=tenant.id,
+                name=tenant.name or "",
+                address_line1=tenant.address,
+                city=tenant.city,
+                state=tenant.state,
+                pincode=tenant.pincode,
+                phone=tenant.phone,
+                email=tenant.email,
+                currency="USD",
+                timezone="Asia/Kolkata",
+            )
+        )
+        created += 1
     db.commit()
-    print("Hospital settings default row created (id=1)")
+    print(f"Hospital settings synced for {len(tenants)} hospitals ({created} created)")
 
 
 def ensure_opd_settings(db) -> None:
-    row = db.query(OpdSettings).filter(OpdSettings.id == OPD_SETTINGS_ROW_ID).first()
-    if row:
-        print("OPD settings row already exists")
+    tenants = db.query(Tenant).all()
+    if not tenants:
+        print("OPD settings: no hospitals yet (created by POST /tenants)")
         return
-
-    db.add(
-        OpdSettings(
-            id=OPD_SETTINGS_ROW_ID,
-            allow_patient_delete=True,
-            allow_appointment_delete=True,
-            allow_unpaid_bill_delete=True,
-            require_admin_approval_for_delete=True,
-            extra={},
+    created = 0
+    for tenant in tenants:
+        row = db.query(OpdSettings).filter(OpdSettings.tenant_id == tenant.id).first()
+        if row:
+            continue
+        db.add(
+            OpdSettings(
+                tenant_id=tenant.id,
+                allow_patient_delete=True,
+                allow_appointment_delete=True,
+                allow_unpaid_bill_delete=True,
+                require_admin_approval_for_delete=True,
+                extra={},
+            )
         )
-    )
+        created += 1
     db.commit()
-    print("OPD settings default row created (id=1)")
+    print(f"OPD settings synced for {len(tenants)} hospitals ({created} created)")
 
 
 def ensure_nurse_profiles(db, role_ids: dict[str, int]) -> None:
@@ -893,90 +930,6 @@ def ensure_admin_profiles(db, role_ids: dict[str, int]) -> None:
     )
 
 
-def ensure_super_admin_profiles(db, role_ids: dict[str, int]) -> None:
-    """Backfill empty super_admin_profiles for super_admin-role users missing a row."""
-    super_role_id = role_ids.get("super_admin")
-    if not super_role_id:
-        print("WARNING: super_admin role not found — skipped super admin profile backfill")
-        return
-
-    owners = (
-        db.query(User)
-        .filter(User.role_id == super_role_id, User.deleted_at.is_(None))
-        .all()
-    )
-    added = 0
-    for owner in owners:
-        exists = (
-            db.query(SuperAdminProfile.id)
-            .filter(SuperAdminProfile.user_id == owner.id)
-            .first()
-        )
-        if exists:
-            continue
-        db.add(
-            SuperAdminProfile(
-                user_id=owner.id,
-                languages=[],
-                is_profile_completed=False,
-            )
-        )
-        added += 1
-    if added:
-        db.commit()
-    print(
-        f"Super Admin profiles synced: {added} new "
-        f"({len(owners)} super_admin users)"
-    )
-
-
-def ensure_super_admin_user(
-    db,
-    role_ids: dict[str, int],
-    *,
-    email: str,
-    password: str,
-    first_name: str = "Super",
-    last_name: str = "Admin",
-) -> None:
-    from hash import hash_password
-
-    if len(password) < 8:
-        print("ERROR: --super-admin-password must be at least 8 characters")
-        sys.exit(1)
-
-    super_role_id = role_ids.get("super_admin")
-    if not super_role_id:
-        print("WARNING: super_admin role not found — skipped super admin user")
-        return
-
-    user = db.query(User).filter(User.email == email).first()
-    if user:
-        user.first_name = first_name
-        user.last_name = last_name
-        user.role_id = super_role_id
-        user.password = hash_password(password)
-        user.is_active = True
-        user.deleted_at = None
-        db.commit()
-        print(f"Super admin user updated: {email}")
-        ensure_super_admin_profiles(db, role_ids)
-        return
-
-    user = User(
-        first_name=first_name,
-        last_name=last_name,
-        email=email,
-        password=hash_password(password),
-        role_id=super_role_id,
-        is_active=True,
-    )
-    db.add(user)
-    db.commit()
-    print(f"Super admin user created: {email}")
-    ensure_super_admin_profiles(db, role_ids)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed HMS reference data")
     parser.add_argument(
@@ -984,33 +937,7 @@ def main() -> None:
         action="store_true",
         help="Wipe roles/permissions and reseed (only when no users exist)",
     )
-    parser.add_argument(
-        "--super-admin-email",
-        metavar="EMAIL",
-        help="Create or update a super_admin user (use with --super-admin-password)",
-    )
-    parser.add_argument(
-        "--super-admin-password",
-        metavar="PASSWORD",
-        help="Password for super_admin user (min 8 characters)",
-    )
-    parser.add_argument(
-        "--super-admin-first-name",
-        default="Super",
-        help="First name for super_admin user (default: Super)",
-    )
-    parser.add_argument(
-        "--super-admin-last-name",
-        default="Admin",
-        help="Last name for super_admin user (default: Admin)",
-    )
     args = parser.parse_args()
-
-    if bool(args.super_admin_email) ^ bool(args.super_admin_password):
-        print(
-            "ERROR: pass both --super-admin-email and --super-admin-password, or neither."
-        )
-        sys.exit(1)
 
     db = SessionLocal()
     try:
@@ -1020,8 +947,7 @@ def main() -> None:
 
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
-        department_ids = upsert_departments(db)
-        upsert_lab_tests(db, department_ids)
+        ensure_catalogs(db)
         backfill_lab_order_prices(db)
         ensure_hospital_settings(db)
         ensure_opd_settings(db)
@@ -1033,17 +959,6 @@ def main() -> None:
         ensure_ipd_profiles(db, role_ids)
         ensure_pharmacist_profiles(db, role_ids)
         ensure_admin_profiles(db, role_ids)
-        ensure_super_admin_profiles(db, role_ids)
-
-        if args.super_admin_email and args.super_admin_password:
-            ensure_super_admin_user(
-                db,
-                role_ids,
-                email=args.super_admin_email.strip(),
-                password=args.super_admin_password,
-                first_name=args.super_admin_first_name.strip(),
-                last_name=args.super_admin_last_name.strip(),
-            )
 
         # Beds are admin-managed (Settings → OPD → Beds & wards). No hardcoded seed.
         from Services.bed_service import seed_default_beds
@@ -1061,13 +976,6 @@ def main() -> None:
             )
             print(f"  role_id={rid} -> {name} ({perm_count} permissions)")
         print("\nAdmin panel role: admin")
-        print("Super Admin role: super_admin")
-        if not args.super_admin_email:
-            print(
-                "\nNo super admin user created. First-time setup:\n"
-                "  python seed.py --super-admin-email YOU@hospital.com "
-                "--super-admin-password 'YourPass123'"
-            )
         print("\nExisting staff must re-login after permission changes.")
     finally:
         db.close()

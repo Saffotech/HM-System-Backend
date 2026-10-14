@@ -1,7 +1,18 @@
 import enum
 
-from sqlalchemy import CheckConstraint, Column, Integer, String, Boolean, DateTime, Date, Float, ForeignKey
-from database import Base
+from sqlalchemy import (
+    CheckConstraint,
+    Column,
+    Integer,
+    String,
+    Boolean,
+    DateTime,
+    Date,
+    Float,
+    ForeignKey,
+    UniqueConstraint,
+)
+from Models.tenant import TenantScoped
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -23,16 +34,17 @@ def registration_source_value(raw) -> str:
     return RegistrationSource.OPD.value
 
 
-class Patient(Base):
+class Patient(TenantScoped):
     __tablename__ = 'patients'
     __table_args__ = (
         CheckConstraint(
             "registration_source IN ('OPD', 'IPD')",
             name="ck_patients_registration_source",
         ),
+        UniqueConstraint("tenant_id", "patient_uid", name="uq_patients_tenant_uid"),
     )
     id = Column(Integer, primary_key=True, index=True)
-    patient_uid = Column(String, unique=True, nullable=False)
+    patient_uid = Column(String, nullable=False)
     first_name = Column(String, nullable=False)
     last_name = Column(String, nullable=True)
     date_of_birth = Column(Date, nullable=True)
@@ -53,13 +65,17 @@ class Patient(Base):
     created_at = Column(DateTime(timezone=True),
                         default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))
 
-class OpdVisit(Base):
+class OpdVisit(TenantScoped):
     __tablename__ = "opd_visits"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "bill_number", name="uq_opd_visits_tenant_bill"),
+        UniqueConstraint("tenant_id", "token_number", name="uq_opd_visits_tenant_token"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
 
-    bill_number = Column(String, nullable=False, unique=True)
-    token_number = Column(String, nullable=False, unique=True)
+    bill_number = Column(String, nullable=False)
+    token_number = Column(String, nullable=False)
 
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False)
     appointment_id = Column(Integer, ForeignKey("appointments.id"), nullable=True, index=True)

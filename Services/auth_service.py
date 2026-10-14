@@ -13,7 +13,12 @@ from Services.role_policy import assert_can_assign_role, caller_role_name
 
 def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
     email = (data.email or "").strip().lower()
-    existing = db.query(User).filter(func.lower(User.email) == email).first()
+    existing = (
+        db.query(User)
+        .execution_options(include_all_tenants=True)
+        .filter(func.lower(User.email) == email)
+        .first()
+    )
     if existing:
         raise HTTPException(status_code=409, detail="Email already registered")
 
@@ -46,6 +51,7 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         password=hash_password(data.password),
         role_id=data.role_id,
         department_id=department_id,
+        tenant_id=actor.tenant_id,
     )
     db.add(new_user)
     db.commit()

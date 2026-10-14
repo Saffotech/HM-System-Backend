@@ -19,6 +19,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
@@ -40,9 +41,12 @@ class HandoverStatus(str, enum.Enum):
 # SHIFT HANDOVER
 # ==========================================================
 
-class ShiftHandover(Base):
+class ShiftHandover(TenantScoped):
 
     __tablename__ = "shift_handovers"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "handover_uid", name="uq_shift_handovers_tenant_uid"),
+    )
 
     id = Column(
         Integer,
@@ -52,7 +56,6 @@ class ShiftHandover(Base):
 
     handover_uid = Column(
         String(50),
-        unique=True,
         nullable=False,
         index=True
     )

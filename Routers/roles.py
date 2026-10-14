@@ -73,33 +73,11 @@ def assign_permissions(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("roles:create")),
 ):
-    from Services.admin_edit_policy import apply_module_locks_to_permission_ids
-    from Services import opd_settings_service
-
     role = db.query(Role).filter(Role.id == role_id).first()
     if not role:
         raise HTTPException(status_code=404, detail="Role not found")
 
     permission_ids = list(data.permission_ids or [])
-    caller_role = (
-        (current_user.role_obj.name or "").strip().lower()
-        if current_user.role_obj
-        else ""
-    )
-    if caller_role != "super_admin":
-        all_perms = db.query(Permission).all()
-        id_by_name = {p.name: p.id for p in all_perms}
-        name_by_id = {p.id: p.name for p in all_perms}
-        current_ids = [p.id for p in (role.permissions or [])]
-        locks = opd_settings_service.get_admin_edit_controls(db)
-        permission_ids = apply_module_locks_to_permission_ids(
-            locks=locks,
-            role_name=role.name or "",
-            current_permission_ids=current_ids,
-            current_name_by_id=name_by_id,
-            requested_permission_ids=permission_ids,
-            permission_id_by_name=id_by_name,
-        )
 
     # clear existing and reassign
     db.query(RolePermission).filter(RolePermission.role_id == role_id).delete()

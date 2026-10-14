@@ -13,10 +13,12 @@ class User(Base):
     username        = Column(String, nullable=True)
     email           = Column(String, unique=True, nullable=False, index=True)
     password        = Column(String, nullable=False)
-
     # RBAC — role_id replaces role string
     role_id         = Column(Integer, ForeignKey("roles.id"), nullable=True)
     role_obj        = relationship("Role")
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
+    tenant = relationship("Tenant")
+
     department_id = Column(
         Integer,
         ForeignKey("departments.id"),
@@ -68,12 +70,6 @@ class User(Base):
     )
     admin_profile = relationship(
         "AdminProfile",
-        back_populates="user",
-        uselist=False,
-        cascade="all, delete-orphan",
-    )
-    super_admin_profile = relationship(
-        "SuperAdminProfile",
         back_populates="user",
         uselist=False,
         cascade="all, delete-orphan",

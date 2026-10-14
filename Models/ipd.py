@@ -17,17 +17,21 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship as orm_relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class IpdAdmission(Base):
+class IpdAdmission(TenantScoped):
     __tablename__ = "ipd_admissions"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "admission_no", name="uq_ipd_admissions_tenant_no"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    admission_no = Column(String, unique=True, nullable=False, index=True)
+    admission_no = Column(String, nullable=False, index=True)
 
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
     bed_id = Column(Integer, ForeignKey("beds.id"), nullable=True, index=True)

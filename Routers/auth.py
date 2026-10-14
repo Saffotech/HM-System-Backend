@@ -22,6 +22,20 @@ def _permissions_for_user(user: User) -> list[str]:
         return []
     return [p.name for p in (user.role_obj.permissions or [])]
 
+def _hospital_blocked(user: User) -> bool:
+    if user.tenant_id is None:
+        return False
+    return user.tenant is None or not user.tenant.is_active
+
+
+def _hospital_payload(user: User) -> dict | None:
+    if user.tenant is None:
+        return None
+    return {
+        "id": user.tenant.id,
+        "name": user.tenant.name,
+        "code": user.tenant.code,
+    }
 
 def _issue_token_pair(user: User) -> dict:
     permissions = _permissions_for_user(user)
@@ -31,6 +45,8 @@ def _issue_token_pair(user: User) -> dict:
             "role": user.role_obj.name if user.role_obj else "",
             "role_id": user.role_id,
             "permissions": permissions,
+            "tenant_id": user.tenant_id,
+            "hospital": _hospital_payload(user)
         }
     )
     refresh_token = create_refresh_token(user.id)
@@ -42,6 +58,8 @@ def _issue_token_pair(user: User) -> dict:
         "permissions": permissions,
         "first_name": user.first_name,
         "user_id": user.id,
+        "tenant_id": user.tenant_id,
+        "hospital": _hospital_payload(user),
     }
 
 
@@ -65,7 +83,10 @@ def login(
     email = (data.email or "").strip().lower()
     user = (
         db.query(User)
-        .options(joinedload(User.role_obj).joinedload(Role.permissions))
+        .options(
+            joinedload(User.role_obj).joinedload(Role.permissions),
+            joinedload(User.tenant),
+        )
         .filter(func.lower(User.email) == email)
         .first()
     )
@@ -108,6 +129,8 @@ def login(
         )
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
+    if _hospital_blocked(user):
+        raise HTTPException(status_code=403, detail="Hospital is inactive")
     user.last_login = datetime.now(ZoneInfo("Asia/Kolkata"))
     user.login_count = (user.login_count or 0) + 1
     db.commit()
@@ -166,7 +189,10 @@ def refresh_tokens(data: RefreshTokenRequest, db: Session = Depends(get_db)):
 
     user = (
         db.query(User)
-        .options(joinedload(User.role_obj).joinedload(Role.permissions))
+        .options(
+            joinedload(User.role_obj).joinedload(Role.permissions),
+            joinedload(User.tenant),
+        )
         .filter(User.id == int(user_id), User.deleted_at.is_(None))
         .first()
     )
@@ -180,6 +206,9 @@ def refresh_tokens(data: RefreshTokenRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
+
+    if _hospital_blocked(user):
+        raise HTTPException(status_code=403, detail="Hospital is inactive")
 
     tokens = _issue_token_pair(user)
     return {
@@ -207,7 +236,7 @@ def get_me(
             joinedload(User.opd_billing_profile),
             joinedload(User.pharmacist_profile),
             joinedload(User.admin_profile),
-            joinedload(User.super_admin_profile),
+            joinedload(User.tenant),
         )
         .filter(User.id == current_user.id)
         .first()
@@ -226,4 +255,6 @@ def get_me(
         "created_at": str(user.created_at),
         "profile_image_url": profile_image_url_for_user(user),
         "permissions": _permissions_for_user(user),
+        "tenant_id": user.tenant_id,
+        "hospital": _hospital_payload(user),
     }

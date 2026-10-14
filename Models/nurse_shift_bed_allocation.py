@@ -16,13 +16,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class NurseShiftBedAllocation(Base):
+class NurseShiftBedAllocation(TenantScoped):
     """Persistent bed responsibility for a nurse until admin changes it.
 
     Does not modify beds.patient_id or imply patient ownership.

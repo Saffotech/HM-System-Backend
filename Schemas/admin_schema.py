@@ -29,7 +29,7 @@ class StaffListResponse(BaseModel):
 class StaffDetailOut(StaffListItem):
     phone: Optional[str] = None
     login_count: int = 0
-    # Role-profile Account fields (admin / super-admin managed)
+    # Role-profile Account fields (admin managed)
     employee_id: Optional[str] = None
     joining_date: Optional[date] = None
     shift_name: Optional[str] = None

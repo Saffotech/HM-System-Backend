@@ -1,4 +1,4 @@
-"""Audit logging for doctor-module write actions (Super Admin reads via GET /super-admin/audit)."""
+"""Audit logging for doctor-module write actions (Admin reads via GET /admin/audit)."""
 from datetime import date
 from typing import Any, Optional
 

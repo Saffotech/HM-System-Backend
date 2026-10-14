@@ -13,6 +13,7 @@ class AuditLog(Base):
     __tablename__ = "audit_logs"
 
     id = Column(Integer, primary_key=True, index=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     actor_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
     actor_email = Column(String, nullable=True)
     actor_role = Column(String, nullable=True)

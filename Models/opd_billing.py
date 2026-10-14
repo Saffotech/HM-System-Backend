@@ -2,10 +2,23 @@
 import enum
 from datetime import datetime
 
-from sqlalchemy import Column, DateTime, Date, Enum, Float, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import (
+    Column,
+    DateTime,
+    Date,
+    Enum,
+    Float,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from zoneinfo import ZoneInfo
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
@@ -44,14 +57,19 @@ class PaymentTransaction(Base):
     recorded_by = Column(Integer, ForeignKey("users.id"), nullable=True)
 
 
-class Appointment(Base):
+class Appointment(TenantScoped):
     __tablename__ = "appointments"
     __table_args__ = (
         Index("ix_appointments_scheduled_at_status", "scheduled_at", "status"),
+        UniqueConstraint(
+            "tenant_id",
+            "appointment_uid",
+            name="uq_appointments_tenant_uid",
+        ),
     )
 
     id = Column(Integer, primary_key=True, index=True)
-    appointment_uid = Column(String, unique=True, nullable=False)
+    appointment_uid = Column(String, nullable=False)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=False, index=True)
     doctor_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=False)
@@ -75,8 +93,16 @@ class Appointment(Base):
     created_at = Column(DateTime(timezone=True), default=_now)
 
 
-class Bed(Base):
+class Bed(TenantScoped):
     __tablename__ = "beds"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "ward_name",
+            "bed_number",
+            name="uq_beds_tenant_ward_number",
+        ),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     bed_number = Column(String, nullable=False)

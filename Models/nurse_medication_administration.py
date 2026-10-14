@@ -16,6 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
@@ -39,7 +40,7 @@ class MedicationStatus(str, enum.Enum):
 # MEDICATION ADMINISTRATION
 # ==========================================================
 
-class MedicationAdministration(Base):
+class MedicationAdministration(TenantScoped):
 
     __tablename__ = "medication_administrations"
 

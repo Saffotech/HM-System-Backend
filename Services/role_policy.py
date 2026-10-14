@@ -20,9 +20,6 @@ def caller_role_name(user: User) -> str:
 
 
 def assert_can_assign_role(caller_role: str, target_role_name: str) -> None:
-    if caller_role == "super_admin":
-        return
-
     if caller_role == "admin":
         if target_role_name in ADMIN_REGISTERABLE_ROLES:
             return

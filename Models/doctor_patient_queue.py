@@ -16,6 +16,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.types import TypeDecorator, String as SAString
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
@@ -74,7 +75,7 @@ class LowercaseStrEnum(TypeDecorator):
 # PATIENT QUEUE
 # ==========================================================
 
-class PatientQueue(Base):
+class PatientQueue(TenantScoped):
 
     __tablename__ = "patient_queue"
     __table_args__ = (

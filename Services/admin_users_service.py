@@ -22,7 +22,6 @@ from Services.ipd_profile_service import create_empty_ipd_profile
 from Services.pharmacist_profile_service import create_empty_pharmacist_profile
 from Services.receptionist_profile_service import create_empty_receptionist_profile
 from Services.role_policy import assert_can_assign_role, caller_role_name
-from Services.super_admin_profile_service import create_empty_super_admin_profile
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -36,7 +35,6 @@ _ROLE_PROFILE_ATTR = {
     "ipd": "ipd_profile",
     "pharmacist": "pharmacist_profile",
     "admin": "admin_profile",
-    "super_admin": "super_admin_profile",
 }
 
 _PROFILE_CREATE = {
@@ -48,7 +46,6 @@ _PROFILE_CREATE = {
     "ipd": create_empty_ipd_profile,
     "pharmacist": create_empty_pharmacist_profile,
     "admin": create_empty_admin_profile,
-    "super_admin": create_empty_super_admin_profile,
 }
 
 _ACCOUNT_PROFILE_KEYS = (
@@ -67,7 +64,7 @@ def _role_name(user: User) -> Optional[str]:
 
 
 def _supports_shift(role_name: Optional[str]) -> bool:
-    return bool(role_name) and role_name != "super_admin" and role_name in _ROLE_PROFILE_ATTR
+    return bool(role_name) and role_name in _ROLE_PROFILE_ATTR
 
 
 def _get_profile(user: User, role_name: Optional[str] = None):
@@ -201,7 +198,6 @@ def _base_query(db: Session):
             joinedload(User.opd_billing_profile),
             joinedload(User.pharmacist_profile),
             joinedload(User.admin_profile),
-            joinedload(User.super_admin_profile),
         )
         .filter(User.deleted_at.is_(None))
     )

@@ -25,6 +25,7 @@ def log_event(
     user_agent: Optional[str] = None,
 ) -> None:
     entry = AuditLog(
+        tenant_id=actor.tenant_id if actor else None,
         actor_id=actor.id if actor else None,
         actor_email=actor.email if actor else None,
         actor_role=caller_role_name(actor) if actor else None,

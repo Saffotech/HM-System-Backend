@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-
+from Models.tenant import Tenant
 from config import settings
 from database import Base, engine
 
@@ -26,7 +26,6 @@ from Models.ipd import (  # noqa: F401
 from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
-from Models.super_admin_profile import SuperAdminProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.lab_test import LabTest  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
@@ -107,8 +106,8 @@ from Routers.opd_billing_notification_router import (
     router as opd_billing_notification_router,
 )
 from Routers.roles import router as roles_router
-from Routers.super_admin_router import router as super_admin_router
-from Routers.super_admin_profile_router import router as super_admin_profile_router
+from Routers.tenant_router import router as tenant_router
+import Models.tenant_filter  # noqa: F401  registers hospital row filters
 
 Base.metadata.create_all(bind=engine)
 
@@ -166,8 +165,7 @@ app.include_router(pharmacist_notification_router)
 app.include_router(lab_router)
 app.include_router(lab_technician_profile_router)
 app.include_router(lab_technician_notification_router)
-app.include_router(super_admin_router)
-app.include_router(super_admin_profile_router)
+app.include_router(tenant_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)

@@ -14,13 +14,14 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class PatientOtherVisit(Base):
+class PatientOtherVisit(TenantScoped):
     __tablename__ = "patient_other_visits"
 
     id = Column(Integer, primary_key=True, index=True)

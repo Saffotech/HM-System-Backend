@@ -17,20 +17,25 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class NurseWorkforceShift(Base):
+class NurseWorkforceShift(TenantScoped):
     """Shift master — Morning/Evening/Night/custom templates."""
 
     __tablename__ = "nurse_workforce_shifts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_nurse_shifts_tenant_name"),
+        UniqueConstraint("tenant_id", "code", name="uq_nurse_shifts_tenant_code"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(100), nullable=False, unique=True, index=True)
-    code = Column(String(50), nullable=True, unique=True)
+    name = Column(String(100), nullable=False, index=True)
+    code = Column(String(50), nullable=True)
     start_time = Column(Time, nullable=False)
     end_time = Column(Time, nullable=False)
     grace_minutes = Column(Integer, nullable=False, default=15)

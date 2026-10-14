@@ -10,6 +10,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -25,7 +26,7 @@ class ParameterFlag(str, enum.Enum):
     HIGH = "high"
 
 
-class LabResult(Base):
+class LabResult(TenantScoped):
 
     __tablename__ = "lab_results"
 

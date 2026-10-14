@@ -20,14 +20,14 @@ from Enums.notification import (
     ReferenceType,
     SourceModule,
 )
-from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class Notification(Base):
+class Notification(TenantScoped):
     __tablename__ = "notifications"
 
     id = Column(Integer, primary_key=True, index=True)

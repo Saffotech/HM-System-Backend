@@ -14,16 +14,17 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
-from database import Base
+from Models.tenant import TenantScoped
 
 
-class LabTest(Base):
+class LabTest(TenantScoped):
     __tablename__ = "lab_tests"
     __table_args__ = (
         UniqueConstraint(
+            "tenant_id",
             "test_name",
             "department_id",
-            name="uq_lab_tests_name_department",
+            name="uq_lab_tests_tenant_name_department",
         ),
         CheckConstraint("price >= 0", name="ck_lab_tests_price_non_negative"),
     )

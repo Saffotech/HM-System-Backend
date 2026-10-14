@@ -20,6 +20,7 @@ class OpdSettings(Base):
     allow_appointment_delete = Column(Boolean, nullable=False, default=True)
     allow_unpaid_bill_delete = Column(Boolean, nullable=False, default=True)
     require_admin_approval_for_delete = Column(Boolean, nullable=False, default=True)
+    tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=False, unique=True, index=True)
     # Reserved for future OPD controls (pricing, slots, payment modes, etc.)
     extra = Column(JSONB, nullable=False, server_default="{}")
     updated_at = Column(

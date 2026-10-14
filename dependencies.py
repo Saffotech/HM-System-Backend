@@ -13,6 +13,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 def get_current_user(
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db)
+
 ) -> User:
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -36,6 +37,12 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated"
         )
+    if user.tenant_id is not None and (user.tenant is None or not user.tenant.is_active):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hospital is inactive",
+        )
+    db.info["tenant_id"] = user.tenant_id
     return user
 
 
@@ -65,11 +72,13 @@ class PermissionChecker:
             user = (
                 db.query(User)
                 .options(
-                    joinedload(User.role_obj).joinedload(Role.permissions)
+                    joinedload(User.role_obj).joinedload(Role.permissions),
+                    joinedload(User.tenant),
                 )
                 .filter(User.id == int(user_id))
                 .first()
             )
+
             if not user:
                 raise HTTPException(status_code=401, detail="Invalid token")
             if not user.is_active:
@@ -78,10 +87,15 @@ class PermissionChecker:
                     detail="Account is deactivated",
                 )
 
+            if user.tenant_id is not None and (user.tenant is None or not user.tenant.is_active):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Hospital is inactive",
+                )
+            db.info["tenant_id"] = user.tenant_id
+
             live_permissions = set(_permissions_for_user(user))
             token_permissions = set(payload.get("permissions") or [])
-            # Prefer live DB always when the user has a role. Empty live set means
-            # admin revoked all role permissions — do NOT fall back to stale JWT.
             if user.role_obj is not None:
                 permissions = live_permissions
             else:

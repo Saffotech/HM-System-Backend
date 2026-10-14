@@ -5,13 +5,14 @@ from sqlalchemy import Column, DateTime, ForeignKey, Integer, Numeric, String
 from sqlalchemy.orm import relationship
 
 from database import Base
+from Models.tenant import TenantScoped
 
 
 def _now():
     return datetime.now(ZoneInfo("Asia/Kolkata"))
 
 
-class Dispensing(Base):
+class Dispensing(TenantScoped):
     __tablename__ = "dispensings"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -1,4 +1,4 @@
-"""Audit logging for IPD-module actions (Super Admin reads via GET /super-admin/audit)."""
+"""Audit logging for IPD-module actions (Admin reads via GET /admin/audit)."""
 from typing import Any, Optional
 
 from sqlalchemy.orm import Session
