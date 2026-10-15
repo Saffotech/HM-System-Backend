@@ -2,13 +2,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
-from Models.tenant import Tenant
+from Models.tenant import Tenant, ensure_subscription_columns
 from config import settings
 from database import Base, engine
 
 # Models registered for create_all / metadata (import side-effect)
 from Models import department, opd_billing, patient, role, user  # noqa: F401
 from Models.audit_log import AuditLog  # noqa: F401
+from Models.lead import Lead, LeadActivity, ensure_activity_history_columns  # noqa: F401
 from Models.hospital_settings import HospitalSettings  # noqa: F401
 from Models.doctor_profile import DoctorProfile  # noqa: F401
 from Models.nurse_profile import NurseProfile  # noqa: F401
@@ -107,9 +108,13 @@ from Routers.opd_billing_notification_router import (
 )
 from Routers.roles import router as roles_router
 from Routers.tenant_router import router as tenant_router
+from Routers.lead_router import router as lead_router
+from Routers.registration_router import router as registration_router
 import Models.tenant_filter  # noqa: F401  registers hospital row filters
 
 Base.metadata.create_all(bind=engine)
+ensure_activity_history_columns(engine)
+ensure_subscription_columns(engine)
 
 app = FastAPI(title="Hospital Management API")
 
@@ -166,6 +171,8 @@ app.include_router(lab_router)
 app.include_router(lab_technician_profile_router)
 app.include_router(lab_technician_notification_router)
 app.include_router(tenant_router)
+app.include_router(lead_router)
+app.include_router(registration_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)

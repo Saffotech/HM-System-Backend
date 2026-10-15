@@ -12,6 +12,7 @@ from decimal import Decimal
 from sqlalchemy import text
 
 from database import SessionLocal
+from hash import hash_password
 from Models.department import Department
 from Models.lab_test import LabTest
 from Models.doctor_profile import DoctorProfile  # noqa: F401 — User relationship
@@ -149,6 +150,7 @@ PERMISSIONS_LIST = [
     "ipd_profile:update",
     "ipd_profile:upload_image",
     "ipd_profile:delete_image",
+    "leads:manage",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -333,6 +335,18 @@ ROLES_DATA = {
             "notifications:update",
         ],
     },
+    "crm": {
+        "description": "Platform CRM. No hospital; works leads across tenants.",
+        "permissions": [
+            "leads:manage",
+        ],
+    },
+    "accountant": {
+        "description": "Platform accountant. No hospital; registers agreed leads as tenants.",
+        "permissions": [
+            "hospitals:create",
+        ],
+    },
 }
 
 DEPARTMENTS = [
@@ -414,8 +428,8 @@ def _target_permission_ids(
 ) -> set[int]:
     raw = role_data["permissions"]
     if raw == "__all__":
-        # Hospital admin must not register other hospitals.
-        skipped = {"hospitals:create"} if role_name == "admin" else set()
+        # Hospital admin must not register other hospitals or work platform CRM leads.
+        skipped = {"hospitals:create", "leads:manage"} if role_name == "admin" else set()
         return {
             pid
             for name, pid in perm_ids.items()
@@ -930,6 +944,68 @@ def ensure_admin_profiles(db, role_ids: dict[str, int]) -> None:
     )
 
 
+CRM_EMAIL = "crm@saffocare.example"
+CRM_PASSWORD = "Demo1234"
+
+
+def ensure_crm_user(db, role_ids: dict[str, int]) -> None:
+    """Platform CRM user. tenant_id stays empty so login is not locked to one hospital."""
+    role_id = role_ids.get("crm")
+    if not role_id:
+        print("WARNING: crm role not found — skipped CRM user")
+        return
+
+    existing = db.query(User).filter(User.email == CRM_EMAIL).first()
+    if existing:
+        print(f"CRM user already present: {existing.email}")
+        return
+
+    db.add(
+        User(
+            first_name="Meera",
+            last_name="Iyer",
+            email=CRM_EMAIL,
+            password=hash_password(CRM_PASSWORD),
+            role_id=role_id,
+            tenant_id=None,
+            is_active=True,
+        )
+    )
+    db.commit()
+    print(f"CRM user created: {CRM_EMAIL}")
+
+
+ACCOUNTANT_EMAIL = "accounts@saffocare.example"
+ACCOUNTANT_PASSWORD = "Demo1234"
+
+
+def ensure_accountant_user(db, role_ids: dict[str, int]) -> None:
+    """Platform accountant. tenant_id stays empty so registration is not locked to one hospital."""
+    role_id = role_ids.get("accountant")
+    if not role_id:
+        print("WARNING: accountant role not found — skipped accountant user")
+        return
+
+    existing = db.query(User).filter(User.email == ACCOUNTANT_EMAIL).first()
+    if existing:
+        print(f"Accountant user already present: {existing.email}")
+        return
+
+    db.add(
+        User(
+            first_name="Priya",
+            last_name="Nair",
+            email=ACCOUNTANT_EMAIL,
+            password=hash_password(ACCOUNTANT_PASSWORD),
+            role_id=role_id,
+            tenant_id=None,
+            is_active=True,
+        )
+    )
+    db.commit()
+    print(f"Accountant user created: {ACCOUNTANT_EMAIL}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed HMS reference data")
     parser.add_argument(
@@ -947,6 +1023,8 @@ def main() -> None:
 
         perm_ids = upsert_permissions(db)
         role_ids = upsert_roles(db, perm_ids)
+        ensure_crm_user(db, role_ids)
+        ensure_accountant_user(db, role_ids)
         ensure_catalogs(db)
         backfill_lab_order_prices(db)
         ensure_hospital_settings(db)
@@ -969,11 +1047,11 @@ def main() -> None:
         print("\nSeed completed successfully!")
         print("\nRole IDs:")
         for name, rid in role_ids.items():
-            perm_count = (
-                len(PERMISSIONS_LIST)
-                if ROLES_DATA[name]["permissions"] == "__all__"
-                else len(ROLES_DATA[name]["permissions"])
-            )
+            if ROLES_DATA[name]["permissions"] == "__all__":
+                skipped = {"hospitals:create", "leads:manage"} if name == "admin" else set()
+                perm_count = len(PERMISSIONS_LIST) - len(skipped)
+            else:
+                perm_count = len(ROLES_DATA[name]["permissions"])
             print(f"  role_id={rid} -> {name} ({perm_count} permissions)")
         print("\nAdmin panel role: admin")
         print("\nExisting staff must re-login after permission changes.")

@@ -1,3 +1,7 @@
+from calendar import monthrange
+from datetime import date, datetime, timedelta
+from zoneinfo import ZoneInfo
+
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -11,6 +15,9 @@ from Schemas.tenant_schema import TenantRegisterRequest, TenantRegisterResponse
 from Services import audit_service
 from hash import hash_password
 
+IST = ZoneInfo("Asia/Kolkata")
+TRIAL_DAYS = {"14 days": 14, "30 days": 30, "60 days": 60}
+
 
 def _split_full_name(full_name: str) -> tuple[str, str | None]:
     parts = full_name.strip().split(None, 1)
@@ -20,7 +27,40 @@ def _split_full_name(full_name: str) -> tuple[str, str | None]:
     return parts[0], last_name or None
 
 
-def register_tenant(db: Session, data: TenantRegisterRequest, actor: User) -> TenantRegisterResponse:
+def _add_months(start: date, months: int) -> date:
+    month_index = start.month - 1 + months
+    year = start.year + month_index // 12
+    month = month_index % 12 + 1
+    return date(year, month, min(start.day, monthrange(year, month)[1]))
+
+
+def _subscription(data: TenantRegisterRequest) -> dict:
+    suspended = data.tenant_status == "Suspended"
+    on_trial = data.tenant_status == "Trial" or data.trial_period != "None"
+    if suspended:
+        subscription_status = "Suspended"
+    elif on_trial:
+        subscription_status = "Trial"
+    else:
+        subscription_status = "Active"
+    started = datetime.now(IST).date()
+    if on_trial and not suspended:
+        renews = started + timedelta(days=TRIAL_DAYS.get(data.trial_period, 14))
+    else:
+        renews = _add_months(started, 12 if data.billing_cycle == "Annual" else 1)
+    return {
+        "plan": data.plan,
+        "billing_cycle": data.billing_cycle,
+        "trial_period": data.trial_period,
+        "tenant_status": data.tenant_status,
+        "subscription_status": subscription_status,
+        "is_active": not suspended,
+        "subscription_started_on": started,
+        "subscription_renews_on": renews,
+    }
+
+
+def register_tenant(db: Session, data: TenantRegisterRequest, actor: User, *, commit: bool = True) -> TenantRegisterResponse:
     code = data.code.strip().upper()
     hospital_email = str(data.email).strip().lower()
     admin_email = str(data.admin_email).strip().lower()
@@ -42,6 +82,7 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User) -> Te
         raise HTTPException(status_code=500, detail="Admin role is not seeded")
 
     first_name, last_name = _split_full_name(data.admin_full_name)
+    subscription = _subscription(data)
 
     tenant = Tenant(
         name=data.name.strip(),
@@ -53,7 +94,7 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User) -> Te
         city=data.city.strip(),
         state=data.state.strip(),
         pincode=data.pincode.strip(),
-        is_active=True,
+        **subscription,
     )
     db.add(tenant)
     db.flush()
@@ -95,23 +136,29 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User) -> Te
     from seed import ensure_catalog_for_tenant
 
     ensure_catalog_for_tenant(db, tenant.id)
-    db.commit()
-    db.refresh(tenant)
-    db.refresh(admin)
-
-    audit_service.log_event(
-        db,
-        actor=actor,
-        action="hospital.register",
-        resource_type="tenant",
-        resource_id=tenant.id,
-        summary=f"Registered hospital {tenant.name} ({tenant.code})",
-        details={
-            "code": tenant.code,
-            "admin_email": admin.email,
-            "admin_user_id": admin.id,
-        },
-    )
+    db.flush()
+    if commit:
+        db.commit()
+        db.refresh(tenant)
+        db.refresh(admin)
+        audit_service.log_event(
+            db,
+            actor=actor,
+            action="hospital.register",
+            resource_type="tenant",
+            resource_id=tenant.id,
+            summary=f"Registered hospital {tenant.name} ({tenant.code})",
+            details={
+                "code": tenant.code,
+                "admin_email": admin.email,
+                "admin_user_id": admin.id,
+                "plan": tenant.plan,
+                "billing_cycle": tenant.billing_cycle,
+                "trial_period": tenant.trial_period,
+                "tenant_status": tenant.tenant_status,
+                "subscription_status": tenant.subscription_status,
+            },
+        )
 
     return TenantRegisterResponse(
         tenant_id=tenant.id,
@@ -120,4 +167,12 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User) -> Te
         hospital_type=tenant.hospital_type,
         admin_user_id=admin.id,
         admin_email=admin.email,
+        plan=tenant.plan,
+        billing_cycle=tenant.billing_cycle,
+        trial_period=tenant.trial_period,
+        tenant_status=tenant.tenant_status,
+        subscription_status=tenant.subscription_status,
+        is_active=tenant.is_active,
+        subscription_started_on=tenant.subscription_started_on,
+        subscription_renews_on=tenant.subscription_renews_on,
     )
