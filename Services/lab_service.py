@@ -745,8 +745,8 @@ def upload_report_file(
             detail="Only PDF, JPG, JPEG and PNG files are allowed",
         )
 
-    file.file.seek(0, os.SEEK_END)
-    file_size = file.file.tell()
+    file.file.seek(0)
+    file_size = file.size if file.size is not None else len(file.file.read())
     file.file.seek(0)
 
     if file_size <= 0:
