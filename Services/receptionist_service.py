@@ -946,7 +946,15 @@ def _queue_history_query(
         payment_filter=None,
         include_cancelled=(status == "cancelled" or status is None),
     )
-    q = _apply_receptionist_status_filter(q, status)
+    if status is not None:
+        q = _apply_receptionist_status_filter(q, status)
+    else:
+        q = q.filter(
+            Appointment.status.in_([
+                AppointmentStatus.completed,
+                AppointmentStatus.cancelled,
+            ])
+        )
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
     return q, Visit, date_from, date_to, payment_filter
