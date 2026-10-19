@@ -11,7 +11,11 @@ from Models.opd_settings import OpdSettings
 from Models.role import Role
 from Models.tenant import Tenant
 from Models.user import User
-from Schemas.tenant_schema import TenantRegisterRequest, TenantRegisterResponse
+from Schemas.tenant_schema import (
+    TenantRegisterRequest,
+    TenantRegisterResponse,
+    TenantSummary,
+)
 from Services import audit_service
 from Services.invoice_service import create_first_invoice
 from hash import hash_password
@@ -182,3 +186,76 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User, *, co
         subscription_started_on=tenant.subscription_started_on,
         subscription_renews_on=tenant.subscription_renews_on,
     )
+
+
+def _assert_platform_staff(actor: User) -> None:
+    if actor.tenant_id is not None:
+        raise HTTPException(
+            status_code=403,
+            detail="The hospital directory is only available to platform staff",
+        )
+
+
+def _summary(tenant: Tenant, admin: User | None) -> TenantSummary:
+    return TenantSummary(
+        tenant_id=tenant.id,
+        name=tenant.name,
+        code=tenant.code,
+        hospital_type=tenant.hospital_type,
+        email=tenant.email,
+        phone=tenant.phone,
+        address=tenant.address,
+        city=tenant.city,
+        state=tenant.state,
+        pincode=tenant.pincode,
+        admin_user_id=admin.id if admin else None,
+        admin_email=admin.email if admin else None,
+        plan=tenant.plan,
+        billing_cycle=tenant.billing_cycle,
+        trial_period=tenant.trial_period,
+        tenant_status=tenant.tenant_status,
+        subscription_status=tenant.subscription_status,
+        is_active=tenant.is_active,
+        subscription_started_on=tenant.subscription_started_on,
+        subscription_renews_on=tenant.subscription_renews_on,
+        created_at=tenant.created_at,
+    )
+
+
+def _admins_by_tenant(db: Session, tenant_ids: list[int]) -> dict[int, User]:
+    if not tenant_ids:
+        return {}
+    role = db.query(Role).filter(Role.name == "admin").first()
+    if role is None:
+        return {}
+    rows = (
+        db.query(User)
+        .execution_options(include_all_tenants=True)
+        .filter(User.role_id == role.id, User.tenant_id.in_(tenant_ids))
+        .order_by(User.id.asc())
+        .all()
+    )
+    admins: dict[int, User] = {}
+    for user in rows:
+        admins.setdefault(user.tenant_id, user)
+    return admins
+
+
+def list_tenants(db: Session, actor: User) -> list[TenantSummary]:
+    _assert_platform_staff(actor)
+    tenants = (
+        db.query(Tenant)
+        .order_by(Tenant.created_at.desc(), Tenant.id.desc())
+        .all()
+    )
+    admins = _admins_by_tenant(db, [tenant.id for tenant in tenants])
+    return [_summary(tenant, admins.get(tenant.id)) for tenant in tenants]
+
+
+def get_tenant(db: Session, actor: User, tenant_id: int) -> TenantSummary:
+    _assert_platform_staff(actor)
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+    admin = _admins_by_tenant(db, [tenant.id]).get(tenant.id)
+    return _summary(tenant, admin)

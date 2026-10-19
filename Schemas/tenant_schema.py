@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field, field_validator
 
@@ -58,6 +58,30 @@ class TenantRegisterRequest(BaseModel):
         if text not in TENANT_STATUSES:
             raise ValueError("Choose a tenant status.")
         return text
+
+
+class TenantSummary(BaseModel):
+    tenant_id: int
+    name: str
+    code: str
+    hospital_type: str
+    email: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    city: str | None = None
+    state: str | None = None
+    pincode: str | None = None
+    admin_user_id: int | None = None
+    admin_email: str | None = None
+    plan: str
+    billing_cycle: str
+    trial_period: str
+    tenant_status: str
+    subscription_status: str
+    is_active: bool
+    subscription_started_on: date
+    subscription_renews_on: date
+    created_at: datetime
 
 
 class TenantRegisterResponse(BaseModel):

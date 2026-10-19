@@ -359,6 +359,13 @@ ROLES_DATA = {
             "invoices:manage",
         ],
     },
+    "platform_admin": {
+        "description": "Platform admin. No hospital; manages leads and hospital registration.",
+        "permissions": [
+            "leads:manage",
+            "hospitals:create",
+        ],
+    },
 }
 
 DEPARTMENTS = [
@@ -1055,6 +1062,37 @@ def ensure_accountant_user(db, role_ids: dict[str, int]) -> None:
     print(f"Accountant user created: {ACCOUNTANT_EMAIL}")
 
 
+PLATFORM_ADMIN_EMAIL = "saffo.admin@saffocare.example"
+PLATFORM_ADMIN_PASSWORD = "Demo1234"
+
+
+def ensure_platform_admin_user(db, role_ids: dict[str, int]) -> None:
+    """Platform admin. tenant_id stays empty. An existing email is left unchanged."""
+    role_id = role_ids.get("platform_admin")
+    if not role_id:
+        print("WARNING: platform_admin role not found — skipped platform admin user")
+        return
+
+    existing = db.query(User).filter(User.email == PLATFORM_ADMIN_EMAIL).first()
+    if existing:
+        print(f"Platform admin user already present: {existing.email}")
+        return
+
+    db.add(
+        User(
+            first_name="Saffo",
+            last_name="Admin",
+            email=PLATFORM_ADMIN_EMAIL,
+            password=hash_password(PLATFORM_ADMIN_PASSWORD),
+            role_id=role_id,
+            tenant_id=None,
+            is_active=True,
+        )
+    )
+    db.commit()
+    print(f"Platform admin user created: {PLATFORM_ADMIN_EMAIL}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Seed HMS reference data")
     parser.add_argument(
@@ -1074,6 +1112,7 @@ def main() -> None:
         role_ids = upsert_roles(db, perm_ids)
         ensure_crm_user(db, role_ids)
         ensure_accountant_user(db, role_ids)
+        ensure_platform_admin_user(db, role_ids)
         ensure_catalogs(db)
         backfill_lab_order_prices(db)
         ensure_hospital_settings(db)
