@@ -9,6 +9,38 @@ from jwt_token import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
+PLATFORM_ROLES = frozenset({"platform_admin", "crm", "accountant"})
+
+
+def _role_name(user: User) -> str:
+    return user.role_obj.name if user.role_obj else ""
+
+
+def _reject_if_token_stale(user: User, payload: dict) -> None:
+    current = int(user.token_version or 0)
+    claimed = int(payload.get("tv") or 0)
+    if claimed != current:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
+def _bind_hospital_session(db: Session, user: User) -> None:
+    if user.tenant_id is None and _role_name(user) not in PLATFORM_ROLES:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This account is not linked to a hospital",
+        )
+    if user.tenant_id is not None and (user.tenant is None or not user.tenant.is_active):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Hospital is inactive",
+        )
+    db.info["tenant_id"] = user.tenant_id
+    db.info["platform_user"] = _role_name(user) in PLATFORM_ROLES
+
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
@@ -37,12 +69,8 @@ def get_current_user(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated"
         )
-    if user.tenant_id is not None and (user.tenant is None or not user.tenant.is_active):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Hospital is inactive",
-        )
-    db.info["tenant_id"] = user.tenant_id
+    _reject_if_token_stale(user, payload)
+    _bind_hospital_session(db, user)
     return user
 
 
@@ -86,13 +114,8 @@ class PermissionChecker:
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Account is deactivated",
                 )
-
-            if user.tenant_id is not None and (user.tenant is None or not user.tenant.is_active):
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN,
-                    detail="Hospital is inactive",
-                )
-            db.info["tenant_id"] = user.tenant_id
+            _reject_if_token_stale(user, payload)
+            _bind_hospital_session(db, user)
 
             live_permissions = set(_permissions_for_user(user))
             token_permissions = set(payload.get("permissions") or [])

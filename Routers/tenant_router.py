@@ -2,11 +2,12 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from Schemas.tenant_schema import (
+    TenantActiveUpdate,
     TenantRegisterRequest,
     TenantRegisterResponse,
     TenantSummary,
 )
-from Services.tenant_service import get_tenant, list_tenants, register_tenant
+from Services.tenant_service import get_tenant, list_tenants, register_tenant, set_tenant_active
 from database import get_db
 from dependencies import PermissionChecker, get_current_user
 from Models.user import User
@@ -41,3 +42,14 @@ def get_hospital(
     _: bool = Depends(PermissionChecker("hospitals:create")),
 ):
     return get_tenant(db, current_user, tenant_id)
+
+
+@router.patch("/{tenant_id}/active", response_model=TenantSummary)
+def set_hospital_active(
+    tenant_id: int,
+    data: TenantActiveUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("hospitals:create")),
+):
+    return set_tenant_active(db, current_user, tenant_id, data.is_active)

@@ -32,6 +32,7 @@ from Schemas.opd_schema import (
     VisitSuccessResponse,
 )
 from Schemas.patient_schema import PatientOut, PatientUpdate, gender_code_to_label
+from Services import hospital_settings_service
 from Services import opd_helpers as h
 from Services import appointment_service
 from Services import opd_settings_service
@@ -692,7 +693,7 @@ def build_invoice(db: Session, visit_id: int) -> dict:
         }]
 
     return {
-        "hospital": {"name": "CarePoint Hospital", "address": "", "gstin": ""},
+        "hospital": hospital_settings_service.letterhead_for_tenant(db, visit.tenant_id),
         "bill_number": visit.bill_number,
         "token_number": visit.token_number,
         "visit_date": visit.visit_date.strftime("%d %b %Y") if visit.visit_date else "",

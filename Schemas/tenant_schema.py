@@ -60,6 +60,10 @@ class TenantRegisterRequest(BaseModel):
         return text
 
 
+class TenantActiveUpdate(BaseModel):
+    is_active: bool
+
+
 class TenantSummary(BaseModel):
     tenant_id: int
     name: str

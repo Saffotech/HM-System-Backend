@@ -1,7 +1,7 @@
 from datetime import date
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -12,6 +12,16 @@ from Schemas.hospital_settings_schema import HospitalSettingsOut, HospitalSettin
 from Services import audit_service, hospital_settings_service
 
 router = APIRouter(prefix="/admin", tags=["Super Admin"])
+
+
+@router.get("/letterhead")
+def get_letterhead(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    if current_user.tenant_id is None:
+        raise HTTPException(status_code=403, detail="This account is not linked to a hospital")
+    return hospital_settings_service.letterhead_for_tenant(db, current_user.tenant_id)
 
 
 @router.get("/settings", response_model=HospitalSettingsOut)

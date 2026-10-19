@@ -183,7 +183,7 @@ class ShiftHandover(TenantScoped):
 # SHIFT HANDOVER PATIENT
 # ==========================================================
 
-class ShiftHandoverPatient(Base):
+class ShiftHandoverPatient(TenantScoped):
 
     __tablename__ = "shift_handover_patients"
 

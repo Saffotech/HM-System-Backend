@@ -113,3 +113,36 @@ def update_settings(
     )
 
     return _to_out(row)
+
+
+def letterhead_for_tenant(db: Session, tenant_id: int) -> dict:
+    row = (
+        db.query(HospitalSettings)
+        .filter(HospitalSettings.tenant_id == tenant_id)
+        .first()
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Hospital settings not found")
+    address = ", ".join(
+        part
+        for part in (
+            row.address_line1,
+            row.address_line2,
+            row.city,
+            row.state,
+            row.pincode,
+        )
+        if part
+    )
+    return {
+        "name": row.name,
+        "address_line1": row.address_line1,
+        "address_line2": row.address_line2,
+        "city": row.city,
+        "state": row.state,
+        "pincode": row.pincode,
+        "phone": row.phone,
+        "email": row.email,
+        "gstin": row.gstin or "",
+        "address": address,
+    }

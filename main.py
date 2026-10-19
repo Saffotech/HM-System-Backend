@@ -3,7 +3,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from Models.subscription_invoice import SubscriptionInvoice  # noqa: F401
-from Models.tenant import Tenant, ensure_subscription_columns
+from Models.tenant import (
+    ensure_child_tenant_ids,
+    ensure_subscription_columns,
+    ensure_user_token_version,
+)
 from config import settings
 from database import Base, engine
 
@@ -120,6 +124,8 @@ import Models.tenant_filter  # noqa: F401  registers hospital row filters
 Base.metadata.create_all(bind=engine)
 ensure_activity_history_columns(engine)
 ensure_subscription_columns(engine)
+ensure_user_token_version(engine)
+ensure_child_tenant_ids(engine)
 
 app = FastAPI(title="Hospital Management API")
 

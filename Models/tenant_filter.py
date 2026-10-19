@@ -26,7 +26,17 @@ def _filter_by_tenant(execute_state):
     if execute_state.execution_options.get("include_all_tenants"):
         return
     tenant_id = execute_state.session.info.get("tenant_id")
+    platform_user = execute_state.session.info.get("platform_user")
     if not tenant_id:
+        if not platform_user:
+            return
+        execute_state.statement = execute_state.statement.options(
+            with_loader_criteria(
+                TenantScoped,
+                lambda cls: cls.tenant_id == -1,
+                include_aliases=True,
+            )
+        )
         return
     execute_state.statement = execute_state.statement.options(
         with_loader_criteria(

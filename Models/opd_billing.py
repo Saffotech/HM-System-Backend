@@ -34,7 +34,7 @@ class AppointmentStatus(str, enum.Enum):
     no_show = "no_show"
 
 
-class BillItem(Base):
+class BillItem(TenantScoped):
     __tablename__ = "bill_items"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -45,7 +45,7 @@ class BillItem(Base):
     amount = Column(Float, nullable=False)
 
 
-class PaymentTransaction(Base):
+class PaymentTransaction(TenantScoped):
     __tablename__ = "payment_transactions"
 
     id = Column(Integer, primary_key=True, index=True)

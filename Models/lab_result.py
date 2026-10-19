@@ -125,7 +125,7 @@ class LabResult(TenantScoped):
     )
 
 
-class LabResultParameter(Base):
+class LabResultParameter(TenantScoped):
 
     __tablename__ = "lab_result_parameters"
 

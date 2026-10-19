@@ -517,6 +517,7 @@ def ensure_catalog_for_tenant(db, tenant_id: int) -> tuple[int, int, int]:
     for item in DEPARTMENTS:
         dept = (
             db.query(Department)
+            .execution_options(include_all_tenants=True)
             .filter(
                 Department.tenant_id == tenant_id,
                 Department.code == item["code"],
@@ -544,6 +545,7 @@ def ensure_catalog_for_tenant(db, tenant_id: int) -> tuple[int, int, int]:
         department_id = dept_ids[item["department_code"]]
         test = (
             db.query(LabTest)
+            .execution_options(include_all_tenants=True)
             .filter(
                 LabTest.tenant_id == tenant_id,
                 LabTest.test_name == item["test_name"],

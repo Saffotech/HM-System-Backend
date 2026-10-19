@@ -86,7 +86,7 @@ class IpdAdmission(TenantScoped):
     )
 
 
-class IpdAdmissionCareTeam(Base):
+class IpdAdmissionCareTeam(TenantScoped):
     """Extra doctors associated with an admission (primary remains ipd_admissions.doctor_id)."""
 
     __tablename__ = "ipd_admission_care_team"
@@ -113,7 +113,7 @@ class IpdAdmissionCareTeam(Base):
     admission = orm_relationship("IpdAdmission", back_populates="care_team")
 
 
-class IpdAdmissionBilling(Base):
+class IpdAdmissionBilling(TenantScoped):
     """Persisted hospital charge heads + manual daily lines for an admission."""
 
     __tablename__ = "ipd_admission_billing"
@@ -136,7 +136,7 @@ class IpdAdmissionBilling(Base):
     admission = orm_relationship("IpdAdmission", back_populates="billing")
 
 
-class IpdInsuranceClaim(Base):
+class IpdInsuranceClaim(TenantScoped):
     """Cashless / copay insurance profile bound to one IPD admission."""
 
     __tablename__ = "ipd_insurance_claims"
@@ -179,7 +179,7 @@ class IpdInsuranceClaim(Base):
     admission = orm_relationship("IpdAdmission", back_populates="insurance_claim")
 
 
-class IpdDoctorVisit(Base):
+class IpdDoctorVisit(TenantScoped):
     __tablename__ = "ipd_doctor_visits"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -205,7 +205,7 @@ class IpdDoctorVisit(Base):
     admission = orm_relationship("IpdAdmission", back_populates="visits")
 
 
-class IpdBill(Base):
+class IpdBill(TenantScoped):
     __tablename__ = "ipd_bills"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -241,7 +241,7 @@ class IpdBill(Base):
     )
 
 
-class IpdBillItem(Base):
+class IpdBillItem(TenantScoped):
     __tablename__ = "ipd_bill_items"
 
     id = Column(Integer, primary_key=True, index=True)
@@ -258,7 +258,7 @@ class IpdBillItem(Base):
     bill = orm_relationship("IpdBill", back_populates="items")
 
 
-class IpdPaymentTransaction(Base):
+class IpdPaymentTransaction(TenantScoped):
     __tablename__ = "ipd_payment_transactions"
 
     id = Column(Integer, primary_key=True, index=True)

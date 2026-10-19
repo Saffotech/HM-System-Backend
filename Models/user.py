@@ -18,6 +18,7 @@ class User(Base):
     role_obj        = relationship("Role")
     tenant_id = Column(Integer, ForeignKey("tenants.id"), nullable=True, index=True)
     tenant = relationship("Tenant")
+    token_version = Column(Integer, nullable=False, default=0, server_default="0")
 
     department_id = Column(
         Integer,

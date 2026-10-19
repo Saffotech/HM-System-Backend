@@ -34,7 +34,7 @@ class Dispensing(TenantScoped):
     )
 
 
-class DispensingItem(Base):
+class DispensingItem(TenantScoped):
     __tablename__ = "dispensing_items"
 
     id = Column(Integer, primary_key=True, index=True)

@@ -37,6 +37,7 @@ from Schemas.ipd_schema import (
     IpdTransferBedRequest,
 )
 from Services import bed_service
+from Services import hospital_settings_service
 from Services import ipd_helpers as h
 from Services import opd_helpers as oh
 from Services import opd_settings_service
@@ -1786,7 +1787,7 @@ def build_invoice(db: Session, bill_id: int) -> dict:
     bill_date = bill.generated_at or bill.paid_at
 
     return {
-        "hospital": {"name": "CarePoint Hospital", "address": "", "gstin": ""},
+        "hospital": hospital_settings_service.letterhead_for_tenant(db, admission.tenant_id),
         "bill_id": bill.id,
         "bill_number": bill.bill_number,
         "admission_id": admission.id,

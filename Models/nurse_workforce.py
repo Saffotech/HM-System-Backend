@@ -48,7 +48,7 @@ class NurseWorkforceShift(TenantScoped):
     updated_at = Column(DateTime(timezone=True), default=_now, onupdate=_now, nullable=False)
 
 
-class NurseWorkforceRoster(Base):
+class NurseWorkforceRoster(TenantScoped):
     """Monthly/daily nurse roster assignment."""
 
     __tablename__ = "nurse_workforce_rosters"

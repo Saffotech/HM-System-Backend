@@ -8,7 +8,7 @@ from Models.role import Role
 from Schemas.schemas import RefreshTokenRequest, UserCreate, UserLogin
 from hash import verify_password
 from jwt_token import create_access_token, create_refresh_token, decode_refresh_token
-from dependencies import PermissionChecker, get_current_user
+from dependencies import PLATFORM_ROLES, PermissionChecker, get_current_user
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from Services.audit_helpers import client_ip, user_agent
@@ -23,8 +23,9 @@ def _permissions_for_user(user: User) -> list[str]:
     return [p.name for p in (user.role_obj.permissions or [])]
 
 def _hospital_blocked(user: User) -> bool:
+    role_name = user.role_obj.name if user.role_obj else ""
     if user.tenant_id is None:
-        return False
+        return role_name not in PLATFORM_ROLES
     return user.tenant is None or not user.tenant.is_active
 
 
@@ -46,10 +47,11 @@ def _issue_token_pair(user: User) -> dict:
             "role_id": user.role_id,
             "permissions": permissions,
             "tenant_id": user.tenant_id,
-            "hospital": _hospital_payload(user)
+            "hospital": _hospital_payload(user),
+            "tv": int(user.token_version or 0),
         }
     )
-    refresh_token = create_refresh_token(user.id)
+    refresh_token = create_refresh_token(user.id, int(user.token_version or 0))
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -130,7 +132,12 @@ def login(
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
     if _hospital_blocked(user):
-        raise HTTPException(status_code=403, detail="Hospital is inactive")
+        detail = (
+            "Hospital is inactive"
+            if user.tenant_id is not None
+            else "This account is not linked to a hospital"
+        )
+        raise HTTPException(status_code=403, detail=detail)
     user.last_login = datetime.now(ZoneInfo("Asia/Kolkata"))
     user.login_count = (user.login_count or 0) + 1
     db.commit()
@@ -168,6 +175,8 @@ def logout(
         ip_address=client_ip(request),
         user_agent=user_agent(request),
     )
+    current_user.token_version = int(current_user.token_version or 0) + 1
+    db.commit()
     return {"message": "Logged out successfully"}
 
 
@@ -206,9 +215,19 @@ def refresh_tokens(data: RefreshTokenRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
+    if int(payload.get("tv") or 0) != int(user.token_version or 0):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
 
     if _hospital_blocked(user):
-        raise HTTPException(status_code=403, detail="Hospital is inactive")
+        detail = (
+            "Hospital is inactive"
+            if user.tenant_id is not None
+            else "This account is not linked to a hospital"
+        )
+        raise HTTPException(status_code=403, detail=detail)
 
     tokens = _issue_token_pair(user)
     return {

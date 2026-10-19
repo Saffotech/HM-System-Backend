@@ -19,10 +19,11 @@ def create_access_token(data: dict) -> str:
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
-def create_refresh_token(user_id: int) -> str:
+def create_refresh_token(user_id: int, token_version: int = 0) -> str:
     payload = {
         "sub": str(user_id),
         "type": TOKEN_TYPE_REFRESH,
+        "tv": int(token_version or 0),
         "exp": datetime.utcnow() + timedelta(days=REFRESH_EXPIRE_DAYS),
     }
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)

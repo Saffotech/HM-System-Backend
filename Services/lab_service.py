@@ -1005,7 +1005,7 @@ def get_report_detail(db: Session, report_id: int, current_user: User):
         .first()
     )
 
-    if not report:
+    if not report or current_user.tenant_id is None or report.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Report not found")
     if not report.lab_order:
         raise HTTPException(status_code=404, detail="Report not found")
@@ -1161,7 +1161,7 @@ def get_report_file(db: Session, report_id: int, current_user: User):
         .first()
     )
 
-    if not report:
+    if not report or current_user.tenant_id is None or report.tenant_id != current_user.tenant_id:
         raise HTTPException(status_code=404, detail="Report not found")
     if not report.lab_order:
         raise HTTPException(status_code=404, detail="Report not found")

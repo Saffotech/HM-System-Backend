@@ -259,3 +259,19 @@ def get_tenant(db: Session, actor: User, tenant_id: int) -> TenantSummary:
         raise HTTPException(status_code=404, detail="Hospital not found")
     admin = _admins_by_tenant(db, [tenant.id]).get(tenant.id)
     return _summary(tenant, admin)
+
+
+def set_tenant_active(db: Session, actor: User, tenant_id: int, is_active: bool) -> TenantSummary:
+    _assert_platform_staff(actor)
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+    tenant.is_active = is_active
+    if is_active and tenant.tenant_status == "Suspended":
+        tenant.tenant_status = "Active"
+    if not is_active:
+        tenant.tenant_status = "Suspended"
+    db.commit()
+    db.refresh(tenant)
+    admin = _admins_by_tenant(db, [tenant.id]).get(tenant.id)
+    return _summary(tenant, admin)
