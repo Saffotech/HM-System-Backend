@@ -44,8 +44,8 @@ from Services.nurse_shift_bed_allocation_service import (
 )
 
 router = APIRouter(
-    prefix="/admin/nurse-bed-allocations",
-    tags=["Admin - Nurse Bed Allocation"],
+    prefix="/manager/nurse-bed-allocations",
+    tags=["Manager - Nurse Bed Allocation"],
 )
 
 

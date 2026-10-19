@@ -6,6 +6,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from database import SessionLocal
 from Models.admin_profile import AdminProfile  # noqa: F401
+from Models.manager_profile import ManagerProfile  # noqa: F401
 from Models.doctor_profile import DoctorProfile  # noqa: F401
 from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.lab_technician_profile import LabTechnicianProfile  # noqa: F401

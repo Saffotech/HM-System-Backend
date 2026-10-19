@@ -236,6 +236,7 @@ def get_me(
             joinedload(User.opd_billing_profile),
             joinedload(User.pharmacist_profile),
             joinedload(User.admin_profile),
+            joinedload(User.manager_profile),
             joinedload(User.tenant),
         )
         .filter(User.id == current_user.id)

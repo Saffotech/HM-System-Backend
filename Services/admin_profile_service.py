@@ -1,4 +1,4 @@
-"""Hospital Admin profile service — GET/PUT profile and image upload/delete."""
+"""Super Admin profile service — GET/PUT profile and image upload/delete."""
 import logging
 import os
 import shutil
@@ -15,12 +15,10 @@ from Models.admin_profile import AdminProfile
 from Models.user import User
 from Schemas.admin_profile_schema import (
     AddressInfo,
-    DepartmentInfo,
     EmergencyContactInfo,
+    RoleInfo,
     AdminProfileResponse,
     AdminProfileUpdate,
-    RoleInfo,
-    ShiftInfo,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,7 +68,7 @@ def _assert_admin(user: User) -> None:
     if role_name != ADMIN_ROLE:
         raise HTTPException(
             status_code=403,
-            detail="Only Hospital Admin staff can access this endpoint",
+            detail="Only Admin staff can access this endpoint",
         )
 
 
@@ -99,9 +97,9 @@ def to_profile_image_url(stored_path: Optional[str]) -> Optional[str]:
     return "/" + stored_path.replace("\\", "/").lstrip("/")
 
 
-def compute_profile_completed(profile: AdminProfile) -> bool:
-    """Minimum completion: qualification (Hospital Admin)."""
-    return bool(profile.qualification)
+def compute_profile_completed(user: User, profile: AdminProfile) -> bool:
+    """Minimum completion: phone OR profile image (lightweight identity)."""
+    return bool(user.phone) or bool(profile.profile_image)
 
 
 def compute_profile_completion_percentage(
@@ -111,15 +109,8 @@ def compute_profile_completion_percentage(
     checks = [
         bool(user.phone),
         bool(user.phone_code),
-        bool(user.address),
-        bool(user.city),
-        bool(user.state),
-        user.date_of_birth is not None,
-        user.gender is not None,
         bool(user.emergency_contact_name),
         bool(user.emergency_contact_phone),
-        bool(profile.qualification),
-        profile.experience_years is not None,
         bool(profile.bio),
         bool(languages),
         bool(profile.profile_image),
@@ -134,7 +125,6 @@ def _get_admin_user(db: Session, user_id: int) -> User:
         db.query(User)
         .options(
             joinedload(User.role_obj),
-            joinedload(User.department),
             joinedload(User.admin_profile),
         )
         .filter(User.id == user_id, User.deleted_at.is_(None))
@@ -153,7 +143,7 @@ def _get_profile_or_404(user: User) -> AdminProfile:
     if not profile:
         raise HTTPException(
             status_code=404,
-            detail="Hospital Admin profile not found. Contact admin.",
+            detail="Super Admin profile not found. Contact support.",
         )
     return profile
 
@@ -161,21 +151,9 @@ def _get_profile_or_404(user: User) -> AdminProfile:
 def _to_response(user: User, profile: AdminProfile) -> AdminProfileResponse:
     languages = profile.languages if isinstance(profile.languages, list) else []
 
-    department = None
-    if user.department:
-        department = DepartmentInfo(id=user.department.id, name=user.department.name)
-
     role = None
     if user.role_obj:
         role = RoleInfo(id=user.role_obj.id, name=user.role_obj.name)
-
-    shift = None
-    if profile.shift_name or profile.shift_start_time or profile.shift_end_time:
-        shift = ShiftInfo(
-            name=profile.shift_name,
-            start_time=profile.shift_start_time,
-            end_time=profile.shift_end_time,
-        )
 
     return AdminProfileResponse(
         user_id=user.id,
@@ -195,15 +173,11 @@ def _to_response(user: User, profile: AdminProfile) -> AdminProfileResponse:
             name=user.emergency_contact_name,
             phone=user.emergency_contact_phone,
         ),
-        department=department,
         role=role,
         employee_id=profile.employee_id,
-        qualification=profile.qualification,
-        experience_years=profile.experience_years,
         joining_date=profile.joining_date,
         bio=profile.bio,
         languages=languages,
-        shift=shift,
         profile_image_url=to_profile_image_url(profile.profile_image),
         is_profile_completed=bool(profile.is_profile_completed),
         profile_completion_percentage=compute_profile_completion_percentage(
@@ -236,21 +210,18 @@ def update_admin_profile(
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    profile_fields = ("qualification", "experience_years", "bio")
+    if "bio" in updates:
+        profile.bio = updates["bio"]
+
+    if "languages" in updates:
+        profile.languages = _normalize_languages(updates["languages"])
+
     user_fields = (
         "phone",
         "phone_code",
         "date_of_birth",
         "gender",
     )
-
-    for field in profile_fields:
-        if field in updates:
-            setattr(profile, field, updates[field])
-
-    if "languages" in updates:
-        profile.languages = _normalize_languages(updates["languages"])
-
     for field in user_fields:
         if field in updates:
             setattr(user, field, updates[field])
@@ -271,14 +242,14 @@ def update_admin_profile(
         if "phone" in contact:
             user.emergency_contact_phone = contact["phone"]
 
-    profile.is_profile_completed = compute_profile_completed(profile)
+    profile.is_profile_completed = compute_profile_completed(user, profile)
     profile.updated_at = _now()
 
     db.commit()
     user = _get_admin_user(db, current_user.id)
     profile = _get_profile_or_404(user)
 
-    logger.info("Hospital Admin user %s updated profile", current_user.id)
+    logger.info("Super Admin user %s updated profile", current_user.id)
     return _to_response(user, profile)
 
 
@@ -327,12 +298,12 @@ def upload_profile_image(
             shutil.copyfileobj(file.file, buffer)
     except OSError as exc:
         logger.exception(
-            "Failed to save profile image for Hospital Admin user %s", current_user.id
+            "Failed to save profile image for Super Admin user %s", current_user.id
         )
         raise HTTPException(status_code=500, detail="Failed to save file") from exc
 
     profile.profile_image = stored_path
-    profile.is_profile_completed = compute_profile_completed(profile)
+    profile.is_profile_completed = compute_profile_completed(user, profile)
     profile.updated_at = _now()
 
     try:
@@ -355,7 +326,7 @@ def upload_profile_image(
         except OSError:
             logger.warning("Could not remove old profile image %s", old_file_path)
 
-    logger.info("Hospital Admin user %s uploaded profile image", current_user.id)
+    logger.info("Super Admin user %s uploaded profile image", current_user.id)
     return {
         "message": "Profile image uploaded successfully",
         "profile_image_url": to_profile_image_url(profile.profile_image),
@@ -376,7 +347,7 @@ def delete_profile_image(db: Session, current_user: User) -> dict:
         old_path = None
 
     profile.profile_image = None
-    profile.is_profile_completed = compute_profile_completed(profile)
+    profile.is_profile_completed = compute_profile_completed(user, profile)
     profile.updated_at = _now()
     db.commit()
 
@@ -386,7 +357,7 @@ def delete_profile_image(db: Session, current_user: User) -> dict:
         except OSError:
             logger.warning("Could not remove profile image file %s", old_path)
 
-    logger.info("Hospital Admin user %s deleted profile image", current_user.id)
+    logger.info("Super Admin user %s deleted profile image", current_user.id)
     return {
         "message": "Profile image deleted successfully",
         "profile_image_url": None,

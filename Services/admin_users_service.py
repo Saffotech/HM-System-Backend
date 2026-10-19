@@ -9,9 +9,10 @@ from sqlalchemy.orm import Session, joinedload
 from Models.department import Department
 from Models.role import Role
 from Models.user import User
-from Schemas.admin_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
+from Schemas.manager_schema import StaffDetailOut, StaffListItem, StaffUpdateRequest
 from Services import audit_service
 from Services.admin_profile_service import create_empty_admin_profile
+from Services.manager_profile_service import create_empty_manager_profile
 from Services.doctor_profile_service import create_empty_doctor_profile
 from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.lab_technician_profile_service import create_empty_lab_technician_profile
@@ -35,6 +36,7 @@ _ROLE_PROFILE_ATTR = {
     "ipd": "ipd_profile",
     "pharmacist": "pharmacist_profile",
     "admin": "admin_profile",
+    "manager": "manager_profile",
 }
 
 _PROFILE_CREATE = {
@@ -46,6 +48,7 @@ _PROFILE_CREATE = {
     "ipd": create_empty_ipd_profile,
     "pharmacist": create_empty_pharmacist_profile,
     "admin": create_empty_admin_profile,
+    "manager": create_empty_manager_profile,
 }
 
 _ACCOUNT_PROFILE_KEYS = (
@@ -64,7 +67,7 @@ def _role_name(user: User) -> Optional[str]:
 
 
 def _supports_shift(role_name: Optional[str]) -> bool:
-    return bool(role_name) and role_name in _ROLE_PROFILE_ATTR
+    return bool(role_name) and role_name != "admin" and role_name in _ROLE_PROFILE_ATTR
 
 
 def _get_profile(user: User, role_name: Optional[str] = None):
@@ -198,6 +201,7 @@ def _base_query(db: Session):
             joinedload(User.opd_billing_profile),
             joinedload(User.pharmacist_profile),
             joinedload(User.admin_profile),
+            joinedload(User.manager_profile),
         )
         .filter(User.deleted_at.is_(None))
     )

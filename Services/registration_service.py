@@ -78,7 +78,14 @@ def list_registrations(db: Session, actor: User, status: str) -> list[Registrati
         .order_by(Lead.agreed_at.asc() if lead_status == "Agreed" else Lead.registered_at.desc())
         .all()
     )
-    return [_out(lead) for lead in leads]
+    hospital_ids = [lead.hospital_id for lead in leads if lead.hospital_id is not None]
+    codes = {}
+    if hospital_ids:
+        codes = {
+            row.id: row.code
+            for row in db.query(Tenant.id, Tenant.code).filter(Tenant.id.in_(hospital_ids)).all()
+        }
+    return [_out(lead, codes.get(lead.hospital_id)) for lead in leads]
 
 
 def get_registration(db: Session, actor: User, lead_id: int) -> RegistrationOut:

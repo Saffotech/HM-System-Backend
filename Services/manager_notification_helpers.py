@@ -18,15 +18,13 @@ from Services.notification_service import create_notification
 
 logger = logging.getLogger(__name__)
 
-ADMIN_ROLE = "admin"
-
 
 def _active_admin_ids(db: Session) -> list[int]:
     rows = (
         db.query(User.id)
         .join(Role, User.role_id == Role.id)
         .filter(
-            Role.name == ADMIN_ROLE,
+            Role.name.in_(("admin", "manager")),
             User.is_active.is_(True),
             User.deleted_at.is_(None),
         )

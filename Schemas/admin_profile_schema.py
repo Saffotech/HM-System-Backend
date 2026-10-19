@@ -15,20 +15,9 @@ class EmergencyContactInfo(BaseModel):
     phone: Optional[str] = None
 
 
-class DepartmentInfo(BaseModel):
-    id: int
-    name: str
-
-
 class RoleInfo(BaseModel):
     id: int
     name: str
-
-
-class ShiftInfo(BaseModel):
-    name: Optional[str] = None
-    start_time: Optional[str] = None
-    end_time: Optional[str] = None
 
 
 class AdminProfileResponse(BaseModel):
@@ -44,17 +33,12 @@ class AdminProfileResponse(BaseModel):
     gender: Optional[int] = None
     emergency_contact: EmergencyContactInfo
 
-    department: Optional[DepartmentInfo] = None
     role: Optional[RoleInfo] = None
 
     employee_id: Optional[str] = None
-    qualification: Optional[str] = None
-    experience_years: Optional[int] = None
     joining_date: Optional[date] = None
     bio: Optional[str] = None
     languages: List[str] = Field(default_factory=list)
-
-    shift: Optional[ShiftInfo] = None
 
     profile_image_url: Optional[str] = None
     is_profile_completed: bool = False
@@ -84,10 +68,8 @@ class EmergencyContactUpdate(BaseModel):
 
 
 class AdminProfileUpdate(BaseModel):
-    """Hospital Admin-editable fields only."""
+    """Super Admin-editable fields only (lightweight identity)."""
 
-    qualification: Optional[str] = Field(None, max_length=255)
-    experience_years: Optional[int] = Field(None, ge=0, le=60)
     bio: Optional[str] = None
     languages: Optional[List[str]] = None
 

@@ -11,7 +11,7 @@ from Schemas.admin_profile_schema import (
 )
 from Services import admin_profile_service as service
 
-router = APIRouter(prefix="/admin", tags=["Admin Profile"])
+router = APIRouter(prefix="/admin", tags=["Super Admin Profile"])
 
 
 @router.get(

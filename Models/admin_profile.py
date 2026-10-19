@@ -1,4 +1,4 @@
-"""Hospital Admin professional profile (1:1 with users)."""
+"""Super Admin professional profile (1:1 with users) — lightweight identity."""
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -34,18 +34,12 @@ class AdminProfile(Base):
         index=True,
     )
 
-    qualification = Column(String(255), nullable=True)
     employee_id = Column(String(50), nullable=True, unique=True)
-    experience_years = Column(Integer, nullable=True)
     joining_date = Column(Date, nullable=True)
     bio = Column(Text, nullable=True)
     languages = Column(JSONB, nullable=False, server_default="[]")
     profile_image = Column(String(500), nullable=True)
     is_profile_completed = Column(Boolean, nullable=False, default=False)
-
-    shift_name = Column(String(100), nullable=True)
-    shift_start_time = Column(String(10), nullable=True)
-    shift_end_time = Column(String(10), nullable=True)
 
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
     updated_at = Column(

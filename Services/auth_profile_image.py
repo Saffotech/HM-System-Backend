@@ -29,6 +29,8 @@ def profile_image_url_for_user(user: User) -> Optional[str]:
         profile = user.pharmacist_profile
     elif role_name == "admin":
         profile = user.admin_profile
+    elif role_name == "manager":
+        profile = user.manager_profile
 
     if not profile:
         return None

@@ -15,7 +15,7 @@ def read_registrations(
     status: str = Query("agreed"),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("hospitals:create")),
+    _: bool = Depends(PermissionChecker("registrations:create")),
 ):
     return list_registrations(db, current_user, status)
 
@@ -25,7 +25,7 @@ def read_registration(
     lead_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("hospitals:create")),
+    _: bool = Depends(PermissionChecker("registrations:create")),
 ):
     return get_registration(db, current_user, lead_id)
 
@@ -36,6 +36,6 @@ def register_hospital_from_lead(
     data: RegisterFromLead,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("hospitals:create")),
+    _: bool = Depends(PermissionChecker("registrations:create")),
 ):
     return register_from_lead(db, current_user, lead_id, data)

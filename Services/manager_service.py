@@ -4,12 +4,12 @@ from sqlalchemy.orm import Session
 from Models.department import Department
 from Models.role import Role
 from Models.user import User
-from Schemas.admin_schema import AdminDashboardResponse, StaffByRoleItem
+from Schemas.manager_schema import ManagerDashboardResponse, StaffByRoleItem
 
 _STAFF_FILTER = User.deleted_at.is_(None)
 
 
-def get_dashboard(db: Session) -> AdminDashboardResponse:
+def get_dashboard(db: Session) -> ManagerDashboardResponse:
     total_staff, active_staff = (
         db.query(
             func.count(User.id),
@@ -36,7 +36,7 @@ def get_dashboard(db: Session) -> AdminDashboardResponse:
         .all()
     )
 
-    return AdminDashboardResponse(
+    return ManagerDashboardResponse(
         total_staff=total_staff,
         active_staff=active_staff,
         inactive_staff=total_staff - active_staff,

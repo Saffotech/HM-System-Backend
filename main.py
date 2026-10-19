@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from Models.subscription_invoice import SubscriptionInvoice  # noqa: F401
 from Models.tenant import Tenant, ensure_subscription_columns
 from config import settings
 from database import Base, engine
@@ -27,6 +28,7 @@ from Models.ipd import (  # noqa: F401
 from Models.ipd_profile import IpdProfile  # noqa: F401
 from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
+from Models.manager_profile import ManagerProfile  # noqa: F401
 from Models.doctor_lab_test_order import LabTestOrder  # noqa: F401
 from Models.lab_test import LabTest  # noqa: F401
 from Models.doctor_patient_queue import PatientQueue  # noqa: F401
@@ -49,11 +51,13 @@ from Models.nurse_other_visit import PatientOtherVisit  # noqa: F401
 from Models.pharmacy_dispensing import Dispensing, DispensingItem  # noqa: F401
 
 from Routers import auth
-from Routers.admin_reports_router import router as admin_reports_router
 from Routers.admin_router import router as admin_router
 from Routers.admin_profile_router import router as admin_profile_router
-from Routers.admin_notification_router import router as admin_notification_router
-from Routers.admin_users_router import router as admin_users_router
+from Routers.manager_reports_router import router as manager_reports_router
+from Routers.manager_router import router as manager_router
+from Routers.manager_profile_router import router as manager_profile_router
+from Routers.manager_notification_router import router as manager_notification_router
+from Routers.manager_users_router import router as manager_users_router
 from Routers.departments_router import router as departments_router
 from Routers.doctor_appointment_router import router as appointments_router
 from Routers.doctor_ipd_router import router as doctor_ipd_router
@@ -110,6 +114,7 @@ from Routers.roles import router as roles_router
 from Routers.tenant_router import router as tenant_router
 from Routers.lead_router import router as lead_router
 from Routers.registration_router import router as registration_router
+from Routers.invoice_router import router as invoice_router
 import Models.tenant_filter  # noqa: F401  registers hospital row filters
 
 Base.metadata.create_all(bind=engine)
@@ -129,9 +134,11 @@ app.add_middleware(
 app.include_router(auth.router)
 app.include_router(admin_router)
 app.include_router(admin_profile_router)
-app.include_router(admin_notification_router)
-app.include_router(admin_reports_router)
-app.include_router(admin_users_router)
+app.include_router(manager_router)
+app.include_router(manager_profile_router)
+app.include_router(manager_notification_router)
+app.include_router(manager_reports_router)
+app.include_router(manager_users_router)
 app.include_router(departments_router)
 app.include_router(roles_router)
 app.include_router(opd_router)
@@ -173,6 +180,7 @@ app.include_router(lab_technician_notification_router)
 app.include_router(tenant_router)
 app.include_router(lead_router)
 app.include_router(registration_router)
+app.include_router(invoice_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)

@@ -124,6 +124,7 @@ NOTIFICATION_INBOX_ROLES = frozenset(
         "opd_billing",
         "pharmacist",
         "admin",
+        "manager",
     }
 )
 

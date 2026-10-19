@@ -17,7 +17,7 @@ from Schemas.notification_schema import (
 from Services import notification_service as service
 
 router = APIRouter(
-    prefix="/admin/notifications", tags=["Admin Notifications"]
+    prefix="/manager/notifications", tags=["Manager Notifications"]
 )
 
 

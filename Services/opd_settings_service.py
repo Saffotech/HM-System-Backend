@@ -26,7 +26,7 @@ from Services import audit_service
 IST = ZoneInfo("Asia/Kolkata")
 
 # Roles that may delete even when OPD staff deletes are disabled.
-_ADMIN_OVERRIDE_ROLES = frozenset({"admin"})
+_ADMIN_OVERRIDE_ROLES = frozenset({"admin", "manager"})
 
 DEFAULT_PRICING: dict[str, Any] = {
     "registration_fee": 200.0,
@@ -616,7 +616,7 @@ def update_settings(
     if not requested:
         raise HTTPException(status_code=400, detail="No fields to update")
 
-    is_admin = _role_name(actor) == "admin"
+    is_admin = _role_name(actor) in {"admin", "manager"}
     extra = dict(row.extra) if isinstance(row.extra, dict) else {}
     updates = dict(requested)
     updates.pop("admin_edit", None)

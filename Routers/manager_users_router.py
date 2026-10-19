@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import PermissionChecker, get_current_user
 from Models.user import User
-from Schemas.admin_schema import (
+from Schemas.manager_schema import (
     StaffActionResponse,
     StaffActivateRequest,
     StaffDetailOut,

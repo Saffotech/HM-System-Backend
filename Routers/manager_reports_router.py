@@ -7,13 +7,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 from dependencies import PermissionChecker, get_current_user
 from Models.user import User
-from Schemas.admin_reports_schema import (
+from Schemas.manager_reports_schema import (
     AdminReportsOverviewResponse,
     AdminVisitsReportResponse,
 )
-from Services import admin_reports_service
+from Services import manager_reports_service
 
-router = APIRouter(prefix="/admin/reports", tags=["Admin - Reports"])
+router = APIRouter(prefix="/manager/reports", tags=["Manager - Reports"])
 
 
 @router.get("/overview", response_model=AdminReportsOverviewResponse)
@@ -24,7 +24,7 @@ def reports_overview(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("reports:view")),
 ):
-    return admin_reports_service.get_reports_overview(
+    return manager_reports_service.get_reports_overview(
         db, from_date=from_date, to_date=to_date
     )
 
@@ -40,7 +40,7 @@ def reports_visits(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("reports:view")),
 ):
-    return admin_reports_service.get_visits_report(
+    return manager_reports_service.get_visits_report(
         db,
         from_date=from_date,
         to_date=to_date,

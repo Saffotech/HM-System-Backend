@@ -95,7 +95,7 @@ def enqueue_after_payment_with_notifications(
         reason = describe_enqueue_failure(db, visit)
         if reason:
             from Services.opd_notification_helpers import notify_opd_enqueue_failed
-            from Services.admin_notification_helpers import (
+            from Services.manager_notification_helpers import (
                 notify_admins_queue_enqueue_failed,
             )
 

@@ -26,6 +26,7 @@ from Models.opd_billing_profile import OpdBillingProfile
 from Models.ipd_profile import IpdProfile
 from Models.pharmacist_profile import PharmacistProfile
 from Models.admin_profile import AdminProfile
+from Models.manager_profile import ManagerProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
 
@@ -103,6 +104,10 @@ PERMISSIONS_LIST = [
     "admin_profile:update",
     "admin_profile:upload_image",
     "admin_profile:delete_image",
+    "manager_profile:view",
+    "manager_profile:update",
+    "manager_profile:upload_image",
+    "manager_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "nurse_medication:view",
@@ -151,6 +156,8 @@ PERMISSIONS_LIST = [
     "ipd_profile:upload_image",
     "ipd_profile:delete_image",
     "leads:manage",
+    "registrations:create",
+    "invoices:manage",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -161,10 +168,10 @@ ADMIN_PERMISSIONS = [
     "users:delete",
     "roles:view",
     "reports:view",
-    "admin_profile:view",
-    "admin_profile:update",
-    "admin_profile:upload_image",
-    "admin_profile:delete_image",
+    "manager_profile:view",
+    "manager_profile:update",
+    "manager_profile:upload_image",
+    "manager_profile:delete_image",
     "notifications:view",
     "notifications:update",
     "bed_allocation:view",
@@ -181,8 +188,12 @@ ADMIN_PERMISSIONS = [
 
 ROLES_DATA = {
     "admin": {
-        "description": "Hospital administrator",
+        "description": "Hospital owner",
         "permissions": "__all__",
+    },
+    "manager": {
+        "description": "Hospital operations manager",
+        "permissions": ADMIN_PERMISSIONS,
     },
     "doctor": {
         "description": "Clinical doctor",
@@ -344,7 +355,8 @@ ROLES_DATA = {
     "accountant": {
         "description": "Platform accountant. No hospital; registers agreed leads as tenants.",
         "permissions": [
-            "hospitals:create",
+            "registrations:create",
+            "invoices:manage",
         ],
     },
 }
@@ -429,7 +441,7 @@ def _target_permission_ids(
     raw = role_data["permissions"]
     if raw == "__all__":
         # Hospital admin must not register other hospitals or work platform CRM leads.
-        skipped = {"hospitals:create", "leads:manage"} if role_name == "admin" else set()
+        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage"} if role_name == "admin" else set()
         return {
             pid
             for name, pid in perm_ids.items()
@@ -944,6 +956,43 @@ def ensure_admin_profiles(db, role_ids: dict[str, int]) -> None:
     )
 
 
+def ensure_manager_profiles(db, role_ids: dict[str, int]) -> None:
+    """Backfill empty manager_profiles for manager-role users missing a row."""
+    manager_role_id = role_ids.get("manager")
+    if not manager_role_id:
+        print("WARNING: manager role not found — skipped manager profile backfill")
+        return
+
+    managers = (
+        db.query(User)
+        .filter(User.role_id == manager_role_id, User.deleted_at.is_(None))
+        .all()
+    )
+    added = 0
+    for manager in managers:
+        exists = (
+            db.query(ManagerProfile.id)
+            .filter(ManagerProfile.user_id == manager.id)
+            .first()
+        )
+        if exists:
+            continue
+        db.add(
+            ManagerProfile(
+                user_id=manager.id,
+                languages=[],
+                is_profile_completed=False,
+            )
+        )
+        added += 1
+    if added:
+        db.commit()
+    print(
+        f"Manager profiles synced: {added} new "
+        f"({len(managers)} manager users)"
+    )
+
+
 CRM_EMAIL = "crm@saffocare.example"
 CRM_PASSWORD = "Demo1234"
 
@@ -1037,6 +1086,7 @@ def main() -> None:
         ensure_ipd_profiles(db, role_ids)
         ensure_pharmacist_profiles(db, role_ids)
         ensure_admin_profiles(db, role_ids)
+        ensure_manager_profiles(db, role_ids)
 
         # Beds are admin-managed (Settings → OPD → Beds & wards). No hardcoded seed.
         from Services.bed_service import seed_default_beds
@@ -1048,7 +1098,7 @@ def main() -> None:
         print("\nRole IDs:")
         for name, rid in role_ids.items():
             if ROLES_DATA[name]["permissions"] == "__all__":
-                skipped = {"hospitals:create", "leads:manage"} if name == "admin" else set()
+                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage"} if name == "admin" else set()
                 perm_count = len(PERMISSIONS_LIST) - len(skipped)
             else:
                 perm_count = len(ROLES_DATA[name]["permissions"])

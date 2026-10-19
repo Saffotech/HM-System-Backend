@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from Models.department import Department
 from Models.opd_billing import PaymentTransaction
 from Models.patient import OpdVisit, Patient
-from Schemas.admin_reports_schema import (
+from Schemas.manager_reports_schema import (
     AdminReportsOverviewResponse,
     AdminVisitsReportItem,
     AdminVisitsReportResponse,

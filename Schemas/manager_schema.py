@@ -70,7 +70,7 @@ class StaffByRoleItem(BaseModel):
     count: int
 
 
-class AdminDashboardResponse(BaseModel):
+class ManagerDashboardResponse(BaseModel):
     total_staff: int
     active_staff: int
     inactive_staff: int

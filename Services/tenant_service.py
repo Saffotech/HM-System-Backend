@@ -13,6 +13,7 @@ from Models.tenant import Tenant
 from Models.user import User
 from Schemas.tenant_schema import TenantRegisterRequest, TenantRegisterResponse
 from Services import audit_service
+from Services.invoice_service import create_first_invoice
 from hash import hash_password
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -133,9 +134,14 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User, *, co
         is_active=True,
     )
     db.add(admin)
+    db.flush()
+    from Services.admin_profile_service import create_empty_admin_profile
+
+    create_empty_admin_profile(db, admin.id)
     from seed import ensure_catalog_for_tenant
 
     ensure_catalog_for_tenant(db, tenant.id)
+    create_first_invoice(db, tenant)
     db.flush()
     if commit:
         db.commit()
