@@ -13,7 +13,8 @@ from Schemas.manager_reports_schema import (
 )
 from Services import manager_reports_service
 
-router = APIRouter(prefix="/manager/reports", tags=["Manager - Reports"])
+# this routes use two roles which is manager and admin
+router = APIRouter(prefix="/admin-manager/reports", tags=["Manager - Reports"])
 
 
 @router.get("/overview", response_model=AdminReportsOverviewResponse)

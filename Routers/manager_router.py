@@ -8,7 +8,7 @@ from Schemas.manager_schema import ManagerDashboardResponse
 from Schemas.opd_settings_schema import OpdSettingsOut, OpdSettingsUpdate
 from Services import manager_service, opd_settings_service
 
-router = APIRouter(prefix="/manager", tags=["Manager"])
+router = APIRouter(prefix="/admin-manager", tags=["Admin-Manager"])
 
 
 @router.get("/dashboard", response_model=ManagerDashboardResponse)

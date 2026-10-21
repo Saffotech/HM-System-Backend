@@ -16,8 +16,8 @@ from Schemas.nurse_workforce_schema import (
 from Services import nurse_workforce_service as svc
 
 router = APIRouter(
-    prefix="/manager/nurse-workforce",
-    tags=["Manager - Nurse Workforce"],
+    prefix="/admin-manager/nurse-workforce",
+    tags=["Admin-Manager - Nurse Workforce"],
 )
 
 
