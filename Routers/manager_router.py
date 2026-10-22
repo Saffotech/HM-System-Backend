@@ -17,7 +17,7 @@ def admin_dashboard(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:list")),
 ):
-    return manager_service.get_dashboard(db)
+    return manager_service.get_dashboard(db, tenant_id=current_user.tenant_id)
 
 
 @router.get("/settings/opd", response_model=OpdSettingsOut)

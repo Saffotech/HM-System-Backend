@@ -23,6 +23,7 @@ from Services.ipd_profile_service import create_empty_ipd_profile
 from Services.pharmacist_profile_service import create_empty_pharmacist_profile
 from Services.receptionist_profile_service import create_empty_receptionist_profile
 from Services.role_policy import assert_can_assign_role, caller_role_name
+from dependencies import PLATFORM_ROLES
 
 IST = ZoneInfo("Asia/Kolkata")
 
@@ -189,7 +190,8 @@ def _to_detail(user: User) -> StaffDetailOut:
 
 
 def _base_query(db: Session):
-    return (
+    hospital_role_ids = db.query(Role.id).filter(Role.name.notin_(tuple(PLATFORM_ROLES)))
+    query = (
         db.query(User)
         .options(
             joinedload(User.role_obj),
@@ -203,8 +205,15 @@ def _base_query(db: Session):
             joinedload(User.admin_profile),
             joinedload(User.manager_profile),
         )
-        .filter(User.deleted_at.is_(None))
+        .filter(
+            User.deleted_at.is_(None),
+            User.role_id.in_(hospital_role_ids),
+        )
     )
+    tenant_id = db.info.get("tenant_id")
+    if tenant_id is not None:
+        query = query.filter(User.tenant_id == tenant_id)
+    return query
 
 
 def _get_staff_or_404(db: Session, user_id: int) -> User:
