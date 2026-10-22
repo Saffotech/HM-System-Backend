@@ -6,6 +6,24 @@ After login, send `Authorization: Bearer <access_token>` on every call.
 
 `401` means sign in again. `403` means this role cannot call that API.
 
+## Super Admin — create CRM or accountant staff
+
+`POST /platform/staff`
+
+Only a logged-in `platform_admin` can call this. CRM, accountant, and hospital roles receive 403. The role must be `crm` or `accountant`. The account is created with `tenant_id` null.
+
+```json
+{
+  "first_name": "Meera",
+  "last_name": "Iyer",
+  "email": "meera@example.com",
+  "password": "Secret123",
+  "role": "crm"
+}
+```
+
+`201` returns `user_id`, `first_name`, `last_name`, `email`, `role`, `tenant_id`, and `is_active`. It does not return the password. `409` means that email is already registered. `422` means the role is not `crm` or `accountant`.
+
 ## Login
 
 `POST /auth/login`

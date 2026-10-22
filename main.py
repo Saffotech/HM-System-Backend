@@ -119,6 +119,7 @@ from Routers.tenant_router import router as tenant_router
 from Routers.lead_router import router as lead_router
 from Routers.registration_router import router as registration_router
 from Routers.invoice_router import router as invoice_router
+from Routers.platform_staff_router import router as platform_staff_router
 import Models.tenant_filter  # noqa: F401  registers hospital row filters
 
 Base.metadata.create_all(bind=engine)
@@ -187,6 +188,7 @@ app.include_router(tenant_router)
 app.include_router(lead_router)
 app.include_router(registration_router)
 app.include_router(invoice_router)
+app.include_router(platform_staff_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)
