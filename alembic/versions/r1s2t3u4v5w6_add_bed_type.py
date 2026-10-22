@@ -1,7 +1,7 @@
 """Add bed_type to beds (single / double).
 
 Revision ID: r1s2t3u4v5w6
-Revises: p9q0r1s2t3u4
+Revises:
 Create Date: 2026-09-02
 """
 from typing import Sequence, Union
@@ -10,7 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "r1s2t3u4v5w6"
-down_revision: Union[str, Sequence[str], None] = "p9q0r1s2t3u4"
+down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

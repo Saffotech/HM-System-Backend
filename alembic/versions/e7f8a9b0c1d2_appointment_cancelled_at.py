@@ -1,7 +1,7 @@
 """Store the time an appointment was cancelled.
 
 Revision ID: e7f8a9b0c1d2
-Revises: c2d3e4f5g6h7, ddf60eb3834f, laborder20260825, n4o5p6q7r8s9, o8p9q0r1s2t3
+Revises: ddf60eb3834f
 Create Date: 2026-10-06
 """
 from typing import Sequence, Union
@@ -10,13 +10,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e7f8a9b0c1d2"
-down_revision: Union[str, Sequence[str], None] = (
-    "c2d3e4f5g6h7",
-    "ddf60eb3834f",
-    "laborder20260825",
-    "n4o5p6q7r8s9",
-    "o8p9q0r1s2t3",
-)
+down_revision: Union[str, Sequence[str], None] = "ddf60eb3834f"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

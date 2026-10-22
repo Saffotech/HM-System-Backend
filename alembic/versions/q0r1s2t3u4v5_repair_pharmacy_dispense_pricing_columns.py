@@ -1,7 +1,7 @@
 """Repair missing pharmacy dispense pricing columns.
 
 Revision ID: q0r1s2t3u4v5
-Revises: p9q0r1s2t3u4
+Revises:
 Create Date: 2026-08-28
 
 k4l5m6n7o8p9 was already marked applied, but this database never received
@@ -14,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "q0r1s2t3u4v5"
-down_revision: Union[str, Sequence[str], None] = "p9q0r1s2t3u4"
+down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
