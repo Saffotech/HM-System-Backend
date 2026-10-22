@@ -16,9 +16,21 @@ def _role_name(user: User) -> str:
     return user.role_obj.name if user.role_obj else ""
 
 
+def require_token_version(payload: dict) -> int:
+    """Return the token's tv claim. Missing or non-integer claims are rejected."""
+    raw = payload.get("tv")
+    if type(raw) is not int:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return raw
+
+
 def _reject_if_token_stale(user: User, payload: dict) -> None:
+    claimed = require_token_version(payload)
     current = int(user.token_version or 0)
-    claimed = int(payload.get("tv") or 0)
     if claimed != current:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -7,8 +7,19 @@ from Models.user import User
 from Models.role import Role
 from Schemas.schemas import RefreshTokenRequest, UserCreate, UserLogin
 from hash import verify_password
-from jwt_token import create_access_token, create_refresh_token, decode_refresh_token
-from dependencies import PLATFORM_ROLES, PermissionChecker, get_current_user
+from jwt_token import (
+    create_access_token,
+    create_refresh_token,
+    decode_access_token,
+    decode_refresh_token,
+)
+from dependencies import (
+    PLATFORM_ROLES,
+    PermissionChecker,
+    get_current_user,
+    oauth2_scheme,
+    require_token_version,
+)
 from datetime import datetime
 from zoneinfo import ZoneInfo
 from Services.audit_helpers import client_ip, user_agent
@@ -76,7 +87,6 @@ def register(
 
 
 @router.post("/login")
-@router.post("/login")
 def login(
     request: Request,
     data: UserLogin,
@@ -140,6 +150,7 @@ def login(
         raise HTTPException(status_code=403, detail=detail)
     user.last_login = datetime.now(ZoneInfo("Asia/Kolkata"))
     user.login_count = (user.login_count or 0) + 1
+    user.token_version = int(user.token_version or 0) + 1
     db.commit()
 
     role_name = user.role_obj.name if user.role_obj else ""
@@ -163,7 +174,29 @@ def logout(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    token: str = Depends(oauth2_scheme),
 ):
+    try:
+        claimed = require_token_version(decode_access_token(token))
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Could not validate credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    # Advance the version only when this token is still the current session.
+    # A delayed logout from an older login then updates zero rows.
+    db.query(User).filter(
+        User.id == current_user.id,
+        User.token_version == claimed,
+    ).update(
+        {User.token_version: claimed + 1},
+        synchronize_session=False,
+    )
+    db.expire(current_user)
+    db.commit()
+
     audit_service.log_event(
         db,
         actor=current_user,
@@ -175,8 +208,6 @@ def logout(
         ip_address=client_ip(request),
         user_agent=user_agent(request),
     )
-    current_user.token_version = int(current_user.token_version or 0) + 1
-    db.commit()
     return {"message": "Logged out successfully"}
 
 
@@ -215,7 +246,14 @@ def refresh_tokens(data: RefreshTokenRequest, db: Session = Depends(get_db)):
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Account is deactivated",
         )
-    if int(payload.get("tv") or 0) != int(user.token_version or 0):
+    try:
+        claimed = require_token_version(payload)
+    except HTTPException:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+    if claimed != int(user.token_version or 0):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired refresh token",
