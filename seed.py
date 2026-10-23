@@ -4,6 +4,24 @@ Seed reference data: permissions, roles, departments, beds.
 Usage:
   python seed.py          Safe sync — upsert only (safe on existing DB)
   python seed.py --fresh  Wipe roles/permissions and reseed (empty DB only)
+
+One run assigns every role the permissions its screens check.
+Existing users keep their accounts. They do not need a new login for
+permission checks, because the API reads role permissions from this database.
+
+Who can open what:
+  admin            Hospital owner. Every hospital permission. Not CRM, invoices, or hospital registration.
+  manager          Hospital operations: staff, departments, reports, OPD settings, beds, roster.
+  doctor           Patients, prescriptions, labs, appointments, own profile.
+  nurse            Patients, vitals, notes, medication, handover, visits, own profile.
+  opd_billing      Patients, OPD visits, billing, appointments, own profile.
+  ipd              Admissions, beds, stay billing, discharge, own profile.
+  pharmacist       View and dispense prescriptions, own profile.
+  lab_technician   View and upload lab reports, own profile.
+  receptionist     Queues, doctor schedule, pricing, own profile.
+  crm              Platform. Leads only. No hospital.
+  accountant       Platform. Register agreed hospitals and manage subscription invoices.
+  platform_admin   Platform. Leads and direct hospital create (POST /tenants).
 """
 import argparse
 import sys
@@ -1145,7 +1163,12 @@ def main() -> None:
                 perm_count = len(ROLES_DATA[name]["permissions"])
             print(f"  role_id={rid} -> {name} ({perm_count} permissions)")
         print("\nAdmin panel role: admin")
-        print("\nExisting staff must re-login after permission changes.")
+        print("\nRole access:")
+        for name, rid in role_ids.items():
+            role = db.query(Role).filter(Role.id == rid).first()
+            names = sorted(permission.name for permission in (role.permissions or [])) if role else []
+            print(f"  {name}: {', '.join(names)}")
+        print("\nExisting staff keep working. Permission checks read the database, not the old token.")
     finally:
         db.close()
 
