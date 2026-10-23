@@ -15,9 +15,11 @@ from Schemas.tenant_schema import (
     TenantRegisterRequest,
     TenantRegisterResponse,
     TenantSummary,
+    TenantUpdate,
 )
 from Services import audit_service
 from Services.invoice_service import create_first_invoice
+from Services.plan_service import price_for
 from hash import hash_password
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -145,6 +147,7 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User, *, co
     from seed import ensure_catalog_for_tenant
 
     ensure_catalog_for_tenant(db, tenant.id)
+    tenant.subscription_amount = price_for(db, tenant.plan, tenant.billing_cycle)
     create_first_invoice(db, tenant)
     db.flush()
     if commit:
@@ -218,6 +221,7 @@ def _summary(tenant: Tenant, admin: User | None) -> TenantSummary:
         is_active=tenant.is_active,
         subscription_started_on=tenant.subscription_started_on,
         subscription_renews_on=tenant.subscription_renews_on,
+        subscription_amount=tenant.subscription_amount,
         created_at=tenant.created_at,
     )
 
@@ -271,6 +275,28 @@ def set_tenant_active(db: Session, actor: User, tenant_id: int, is_active: bool)
         tenant.tenant_status = "Active"
     if not is_active:
         tenant.tenant_status = "Suspended"
+    db.commit()
+    db.refresh(tenant)
+    admin = _admins_by_tenant(db, [tenant.id]).get(tenant.id)
+    return _summary(tenant, admin)
+
+
+def update_tenant(db: Session, actor: User, tenant_id: int, data: TenantUpdate) -> TenantSummary:
+    _assert_platform_staff(actor)
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant is None:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+    updates = data.model_dump(exclude_unset=True)
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    for field in ("name", "address", "phone", "plan", "billing_cycle", "subscription_renews_on"):
+        if field in updates:
+            setattr(tenant, field, updates[field])
+    plan_changed = "plan" in updates or "billing_cycle" in updates
+    if "subscription_amount" in updates:
+        tenant.subscription_amount = updates["subscription_amount"]
+    elif plan_changed:
+        tenant.subscription_amount = price_for(db, tenant.plan, tenant.billing_cycle)
     db.commit()
     db.refresh(tenant)
     admin = _admins_by_tenant(db, [tenant.id]).get(tenant.id)

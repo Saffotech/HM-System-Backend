@@ -75,6 +75,24 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    accountant_profile = relationship(
+        "AccountantProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    platform_admin_profile = relationship(
+        "PlatformAdminProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
+    crm_profile = relationship(
+        "CrmProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     manager_profile = relationship(
         "ManagerProfile",
         back_populates="user",

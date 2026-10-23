@@ -7,6 +7,8 @@ from pydantic import ValidationError
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from Models.accountant_profile import AccountantProfile  # noqa: F401
+from Models.crm_profile import CrmProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
 from Models.department import Department
 from Models.doctor_profile import DoctorProfile  # noqa: F401
@@ -17,6 +19,7 @@ from Models.nurse_profile import NurseProfile  # noqa: F401
 from Models.opd_billing_profile import OpdBillingProfile  # noqa: F401
 from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
+from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.role import Role
 from Models.tenant import Tenant
 from Models.user import User

@@ -1,10 +1,10 @@
 from fastapi import HTTPException
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.role import Role
 from Models.user import User
-from Schemas.platform_staff_schema import PlatformStaffCreate, PlatformStaffOut
+from Schemas.platform_staff_schema import PlatformStaffCreate, PlatformStaffItem, PlatformStaffOut
 from Services import audit_service
 from Services.role_policy import caller_role_name
 from hash import hash_password
@@ -12,9 +12,38 @@ from hash import hash_password
 PLATFORM_STAFF_ROLES = frozenset({"crm", "accountant"})
 
 
-def create_platform_staff(db: Session, data: PlatformStaffCreate, actor: User) -> PlatformStaffOut:
+def _require_platform_admin(actor: User) -> None:
     if caller_role_name(actor) != "platform_admin":
-        raise HTTPException(status_code=403, detail="Only a platform admin can create platform staff")
+        raise HTTPException(status_code=403, detail="Only a platform admin can manage platform staff")
+
+
+def list_platform_staff(db: Session, actor: User) -> list[PlatformStaffItem]:
+    _require_platform_admin(actor)
+    rows = (
+        db.query(User)
+        .options(joinedload(User.role_obj))
+        .execution_options(include_all_tenants=True)
+        .join(Role, User.role_id == Role.id)
+        .filter(User.tenant_id.is_(None), Role.name.in_(PLATFORM_STAFF_ROLES))
+        .order_by(User.id.desc())
+        .all()
+    )
+    return [
+        PlatformStaffItem(
+            user_id=user.id,
+            first_name=user.first_name,
+            last_name=user.last_name,
+            email=user.email,
+            role=user.role_obj.name,
+            tenant_id=None,
+            is_active=bool(user.is_active),
+        )
+        for user in rows
+    ]
+
+
+def create_platform_staff(db: Session, data: PlatformStaffCreate, actor: User) -> PlatformStaffOut:
+    _require_platform_admin(actor)
 
     role_name = data.role
     if role_name not in PLATFORM_STAFF_ROLES:

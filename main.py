@@ -2,14 +2,18 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
+from Models.accountant_profile import AccountantProfile  # noqa: F401
+from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
+from Models.crm_profile import CrmProfile  # noqa: F401
 from Models.subscription_invoice import SubscriptionInvoice  # noqa: F401
+from Models.subscription_plan import SubscriptionPlan  # noqa: F401
 from Models.tenant import (
     ensure_child_tenant_ids,
     ensure_subscription_columns,
     ensure_user_token_version,
 )
 from config import settings
-from database import Base, engine
+from database import Base, SessionLocal, engine
 
 # Models registered for create_all / metadata (import side-effect)
 from Models import department, opd_billing, patient, role, user  # noqa: F401
@@ -119,14 +123,56 @@ from Routers.tenant_router import router as tenant_router
 from Routers.lead_router import router as lead_router
 from Routers.registration_router import router as registration_router
 from Routers.invoice_router import router as invoice_router
+from Routers.accountant_profile_router import router as accountant_profile_router
+from Routers.plan_router import router as plan_router
+from Routers.platform_admin_profile_router import router as platform_admin_profile_router
+from Routers.crm_profile_router import router as crm_profile_router
+from Routers.crm_revenue_router import router as crm_revenue_router
+from Routers.platform_report_router import router as platform_report_router
 from Routers.platform_staff_router import router as platform_staff_router
+from Services.plan_service import ensure_default_plans
 import Models.tenant_filter  # noqa: F401  registers hospital row filters
+import logging
+import threading
+
+from Services.invoice_service import generate_renewal_invoices
+from database import SessionLocal
+
+logger = logging.getLogger(__name__)
+_renewal_started = False
+
+
+def _renewal_loop() -> None:
+    while True:
+        db = SessionLocal()
+        try:
+            generate_renewal_invoices(db)
+        except Exception:
+            db.rollback()
+            logger.exception("Subscription renewal billing failed")
+        finally:
+            db.close()
+        threading.Event().wait(3600)
+
+
+def start_renewal_billing() -> None:
+    global _renewal_started
+    if _renewal_started:
+        return
+    _renewal_started = True
+    threading.Thread(target=_renewal_loop, name="subscription-renewal", daemon=True).start()
+
 
 Base.metadata.create_all(bind=engine)
 ensure_activity_history_columns(engine)
 ensure_subscription_columns(engine)
 ensure_user_token_version(engine)
 ensure_child_tenant_ids(engine)
+_plan_db = SessionLocal()
+try:
+    ensure_default_plans(_plan_db)
+finally:
+    _plan_db.close()
 
 app = FastAPI(title="Hospital Management API")
 
@@ -188,7 +234,14 @@ app.include_router(tenant_router)
 app.include_router(lead_router)
 app.include_router(registration_router)
 app.include_router(invoice_router)
+app.include_router(accountant_profile_router)
+start_renewal_billing()
 app.include_router(platform_staff_router)
+app.include_router(plan_router)
+app.include_router(platform_report_router)
+app.include_router(platform_admin_profile_router)
+app.include_router(crm_profile_router)
+app.include_router(crm_revenue_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)

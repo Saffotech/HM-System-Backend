@@ -44,6 +44,9 @@ from Models.opd_billing_profile import OpdBillingProfile
 from Models.ipd_profile import IpdProfile
 from Models.pharmacist_profile import PharmacistProfile
 from Models.admin_profile import AdminProfile
+from Models.accountant_profile import AccountantProfile  # noqa: F401 — User relationship
+from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401 — User relationship
+from Models.crm_profile import CrmProfile  # noqa: F401 — User relationship
 from Models.manager_profile import ManagerProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
@@ -176,6 +179,18 @@ PERMISSIONS_LIST = [
     "leads:manage",
     "registrations:create",
     "invoices:manage",
+    "accountant_profile:view",
+    "accountant_profile:update",
+    "accountant_profile:upload_image",
+    "accountant_profile:delete_image",
+    "platform_admin_profile:view",
+    "platform_admin_profile:update",
+    "platform_admin_profile:upload_image",
+    "platform_admin_profile:delete_image",
+    "crm_profile:view",
+    "crm_profile:update",
+    "crm_profile:upload_image",
+    "crm_profile:delete_image",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -368,6 +383,10 @@ ROLES_DATA = {
         "description": "Platform CRM. No hospital; works leads across tenants.",
         "permissions": [
             "leads:manage",
+            "crm_profile:view",
+            "crm_profile:update",
+            "crm_profile:upload_image",
+            "crm_profile:delete_image",
         ],
     },
     "accountant": {
@@ -375,6 +394,10 @@ ROLES_DATA = {
         "permissions": [
             "registrations:create",
             "invoices:manage",
+            "accountant_profile:view",
+            "accountant_profile:update",
+            "accountant_profile:upload_image",
+            "accountant_profile:delete_image",
         ],
     },
     "platform_admin": {
@@ -382,6 +405,10 @@ ROLES_DATA = {
         "permissions": [
             "leads:manage",
             "hospitals:create",
+            "platform_admin_profile:view",
+            "platform_admin_profile:update",
+            "platform_admin_profile:upload_image",
+            "platform_admin_profile:delete_image",
         ],
     },
 }
@@ -466,7 +493,7 @@ def _target_permission_ids(
     raw = role_data["permissions"]
     if raw == "__all__":
         # Hospital admin must not register other hospitals or work platform CRM leads.
-        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage"} if role_name == "admin" else set()
+        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image"} if role_name == "admin" else set()
         return {
             pid
             for name, pid in perm_ids.items()
@@ -1157,7 +1184,7 @@ def main() -> None:
         print("\nRole IDs:")
         for name, rid in role_ids.items():
             if ROLES_DATA[name]["permissions"] == "__all__":
-                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage"} if name == "admin" else set()
+                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image"} if name == "admin" else set()
                 perm_count = len(PERMISSIONS_LIST) - len(skipped)
             else:
                 perm_count = len(ROLES_DATA[name]["permissions"])

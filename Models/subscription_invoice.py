@@ -2,7 +2,7 @@
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from database import Base
@@ -16,6 +16,10 @@ def _now():
 
 class SubscriptionInvoice(Base):
     __tablename__ = "subscription_invoices"
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "invoice_date", name="uq_subscription_invoice_period"),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     number = Column(String(30), unique=True, nullable=False, index=True)

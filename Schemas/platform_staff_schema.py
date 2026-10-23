@@ -20,3 +20,13 @@ class PlatformStaffOut(BaseModel):
     role: str
     tenant_id: Optional[int]
     is_active: bool
+
+
+class PlatformStaffItem(BaseModel):
+    user_id: int
+    first_name: str
+    last_name: Optional[str]
+    email: str
+    role: str
+    tenant_id: Optional[int]
+    is_active: bool

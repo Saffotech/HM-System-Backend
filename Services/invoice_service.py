@@ -1,4 +1,5 @@
 from datetime import datetime, timedelta
+from calendar import monthrange
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
@@ -9,14 +10,21 @@ from Models.tenant import Tenant
 from Models.user import User
 from Schemas.invoice_schema import PAYMENT_METHODS, InvoiceOut, RecordPayment
 from Services import audit_service
+from Services.plan_service import price_for
 
 IST = ZoneInfo("Asia/Kolkata")
 DUE_DAYS = 14
-PLAN_MONTHLY = {"Starter": 4999, "Professional": 8999, "Enterprise": 14999}
 
 
 def _today():
     return datetime.now(IST).date()
+
+
+def _add_months(start, months: int):
+    month_index = start.month - 1 + months
+    year = start.year + month_index // 12
+    month = month_index % 12 + 1
+    return start.replace(year=year, month=month, day=min(start.day, monthrange(year, month)[1]))
 
 
 def _assert_accountant(actor: User) -> None:
@@ -31,11 +39,12 @@ def _person_name(user: User | None) -> str | None:
     return name or None
 
 
-def invoice_amount(plan: str, billing_cycle: str) -> int:
-    monthly = PLAN_MONTHLY.get(plan, 0)
-    if billing_cycle == "Annual":
-        return monthly * 10
-    return monthly
+def invoice_amount(db: Session, tenant: Tenant) -> int:
+    """Amount for the next invoice. A stored contract wins over the live catalog."""
+    stored = getattr(tenant, "subscription_amount", None)
+    if stored:
+        return int(stored)
+    return price_for(db, tenant.plan, tenant.billing_cycle)
 
 
 def display_status(invoice: SubscriptionInvoice, today=None) -> str:
@@ -57,7 +66,7 @@ def create_first_invoice(db: Session, tenant: Tenant) -> SubscriptionInvoice | N
         tenant_id=tenant.id,
         plan=tenant.plan,
         billing_cycle=tenant.billing_cycle,
-        amount=invoice_amount(tenant.plan, tenant.billing_cycle),
+        amount=invoice_amount(db, tenant),
         invoice_date=started,
         due_date=started + timedelta(days=DUE_DAYS),
         status="Pending",
@@ -66,6 +75,79 @@ def create_first_invoice(db: Session, tenant: Tenant) -> SubscriptionInvoice | N
     db.flush()
     invoice.number = f"INV-{started.year}-{invoice.id:04d}"
     return invoice
+
+
+def _period_exists(db: Session, tenant_id: int, period) -> bool:
+    return (
+        db.query(SubscriptionInvoice.id)
+        .filter(
+            SubscriptionInvoice.tenant_id == tenant_id,
+            SubscriptionInvoice.invoice_date == period,
+        )
+        .first()
+        is not None
+    )
+
+
+def _add_period_invoice(db: Session, tenant: Tenant, period) -> bool:
+    if _period_exists(db, tenant.id, period):
+        return False
+    invoice = SubscriptionInvoice(
+        number=f"pending-{tenant.id}-{period.isoformat()}",
+        tenant_id=tenant.id,
+        plan=tenant.plan,
+        billing_cycle=tenant.billing_cycle,
+        amount=invoice_amount(db, tenant),
+        invoice_date=period,
+        due_date=period + timedelta(days=DUE_DAYS),
+        status="Pending",
+    )
+    db.add(invoice)
+    db.flush()
+    invoice.number = f"INV-{period.year}-{invoice.id:04d}"
+    return True
+
+
+def generate_renewal_invoices(db: Session) -> int:
+    """Create the next invoice for each active hospital whose period has ended.
+
+    Safe to run repeatedly: a period that already has an invoice is skipped,
+    and the renewal date moves forward only after that period is recorded.
+    """
+    today = _today()
+    due_ids = [
+        row.id
+        for row in db.query(Tenant.id)
+        .filter(
+            Tenant.subscription_status == "Active",
+            Tenant.is_active.is_(True),
+            Tenant.tenant_status == "Active",
+            Tenant.trial_period == "None",
+            Tenant.subscription_renews_on <= today,
+        )
+        .all()
+    ]
+    created = 0
+    for tenant_id in due_ids:
+        locked = db.query(Tenant).filter(Tenant.id == tenant_id).with_for_update().one()
+        guard = 0
+        while (
+            locked.subscription_status == "Active"
+            and locked.is_active
+            and locked.tenant_status == "Active"
+            and (locked.trial_period or "None") == "None"
+            and locked.subscription_renews_on is not None
+            and locked.subscription_renews_on <= today
+            and guard < 36
+        ):
+            period = locked.subscription_renews_on
+            if _add_period_invoice(db, locked, period):
+                created += 1
+            months = 12 if locked.billing_cycle == "Annual" else 1
+            locked.subscription_renews_on = _add_months(period, months)
+            guard += 1
+    db.commit()
+    return created
 
 
 def _out(invoice: SubscriptionInvoice) -> InvoiceOut:

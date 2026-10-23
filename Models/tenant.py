@@ -28,6 +28,7 @@ class Tenant(Base):
     subscription_status = Column(String(20), nullable=False, default="Active")
     subscription_started_on = Column(Date, nullable=False)
     subscription_renews_on = Column(Date, nullable=False)
+    subscription_amount = Column(Integer, nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(
         DateTime(timezone=True),
@@ -59,11 +60,13 @@ def ensure_subscription_columns(bind) -> None:
         ("subscription_status", "VARCHAR(20) NOT NULL DEFAULT 'Active'"),
         ("subscription_started_on", "DATE NOT NULL DEFAULT CURRENT_DATE"),
         ("subscription_renews_on", "DATE NOT NULL DEFAULT CURRENT_DATE"),
+        ("subscription_amount", "INTEGER"),
     )
     for name, definition in additions:
         if name not in columns:
             statements.append(f"ALTER TABLE tenants ADD COLUMN {name} {definition}")
-            statements.append(f"ALTER TABLE tenants ALTER COLUMN {name} DROP DEFAULT")
+            if "DEFAULT" in definition:
+                statements.append(f"ALTER TABLE tenants ALTER COLUMN {name} DROP DEFAULT")
     if not statements:
         return
     with bind.begin() as connection:

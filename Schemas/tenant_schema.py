@@ -1,6 +1,6 @@
 from datetime import date, datetime
 
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 from Schemas.lead_schema import BILLING_CYCLES, PLAN_NAMES
 
@@ -64,6 +64,59 @@ class TenantActiveUpdate(BaseModel):
     is_active: bool
 
 
+class TenantUpdate(BaseModel):
+    """Correct a hospital record. Identity, status, and invoices stay untouched."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str | None = Field(None, max_length=200)
+    address: str | None = None
+    phone: str | None = Field(None, max_length=30)
+    plan: str | None = Field(None, max_length=50)
+    billing_cycle: str | None = Field(None, max_length=20)
+    subscription_renews_on: date | None = None
+    subscription_amount: int | None = Field(None, ge=1, le=10_000_000)
+
+    @field_validator("name", "address", "phone", mode="before")
+    @classmethod
+    def required_text(cls, value):
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            raise ValueError("This field cannot be empty.")
+        return text
+
+    @field_validator("plan")
+    @classmethod
+    def known_plan_update(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if text not in PLAN_NAMES:
+            raise ValueError("Choose a subscription plan.")
+        return text
+
+    @field_validator("billing_cycle")
+    @classmethod
+    def known_cycle_update(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        text = value.strip()
+        if text not in BILLING_CYCLES:
+            raise ValueError("Choose a billing cycle.")
+        return text
+
+    @field_validator("subscription_renews_on")
+    @classmethod
+    def renewal_window(cls, value: date | None) -> date | None:
+        if value is None:
+            return None
+        if value.year < 2000 or value.year > date.today().year + 5:
+            raise ValueError("Choose a renewal date within the next five years.")
+        return value
+
+
 class TenantSummary(BaseModel):
     tenant_id: int
     name: str
@@ -85,6 +138,7 @@ class TenantSummary(BaseModel):
     is_active: bool
     subscription_started_on: date
     subscription_renews_on: date
+    subscription_amount: int | None = None
     created_at: datetime
 
 

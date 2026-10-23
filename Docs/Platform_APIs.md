@@ -99,3 +99,19 @@ Payment body:
 Methods: `Bank transfer`, `UPI`, `Card`, `Cheque`. `reference` is required except for `Card`.
 
 Prices: Starter 4999, Professional 8999, Enterprise 14999 per month. Annual is that price times 10. Due date is 14 days after the invoice date.
+
+Renewal invoices are created automatically when an active hospital's `subscription_renews_on` date is reached. The process runs when the API starts and then every hour. Trial and suspended hospitals are skipped. Running it again does not create a second invoice for the same period.
+
+## Accountant profile
+
+Permission on the accountant role. These routes change only the signed-in accountant. `GET /auth/me` is unchanged. After a photo upload, `profile_image_url` on `/auth/me` points at the new file.
+
+| Call | Body |
+|---|---|
+| `GET /platform/account/profile` | Current profile |
+| `PATCH /platform/account/profile` | `phone`, `phone_code`, `address`, `city`, `state`, `postal_code`, `job_title` |
+| `POST /platform/account/password` | `current_password`, `new_password` |
+| `POST /platform/account/profile/photo` | multipart file field `file` (JPG, PNG, or WEBP, up to 5 MB) |
+| `DELETE /platform/account/profile/photo` | Removes the photo |
+
+Email, role, permissions, and account status cannot be changed here.
