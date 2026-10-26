@@ -4,9 +4,11 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session
 
 from Models.lead import Lead
+from Models.role import Role
 from Models.subscription_invoice import SubscriptionInvoice
 from Models.user import User
 from Services.invoice_service import _today
+from Services.lead_service import _lead_query, _person_name, _summary
 from Services.role_policy import caller_role_name
 
 LEAD_STATUSES = ("New", "Contacted", "Agreed", "Registered", "Not Interested")
@@ -98,3 +100,51 @@ def crm_analytics(db: Session, actor: User) -> dict:
             counts[status] = int(count)
     counts["total"] = sum(counts.values())
     return {"statuses": counts}
+
+
+def crm_performance(db: Session, actor: User) -> dict:
+    """Every CRM lead and the paid invoices of hospitals those leads became.
+
+    The CRM lead list stays limited to the signed-in CRM user. This report is
+    only for the platform admin screen that compares employees.
+    """
+    _require_platform_admin(actor)
+    employees = (
+        db.query(User)
+        .join(Role, User.role_id == Role.id)
+        .filter(User.tenant_id.is_(None), Role.name == "crm")
+        .order_by(User.first_name.asc(), User.id.asc())
+        .all()
+    )
+    leads = _lead_query(db).order_by(Lead.created_at.desc(), Lead.id.desc()).all()
+    hospital_ids = {lead.hospital_id for lead in leads if lead.hospital_id}
+    invoices = []
+    if hospital_ids:
+        invoices = (
+            db.query(SubscriptionInvoice)
+            .filter(
+                SubscriptionInvoice.tenant_id.in_(hospital_ids),
+                SubscriptionInvoice.status == "Paid",
+            )
+            .all()
+        )
+    return {
+        "employees": [
+            {"id": user.id, "name": _person_name(user) or user.email}
+            for user in employees
+        ],
+        "leads": [
+            {**_summary(lead, actor).model_dump(), "assignee_name": _person_name(lead.assignee) or None}
+            for lead in leads
+        ],
+        "paid_invoices": [
+            {
+                "tenant_id": invoice.tenant_id,
+                "amount": invoice.amount,
+                "payment_amount": invoice.payment_amount,
+                "invoice_date": invoice.invoice_date.isoformat(),
+                "status": "Paid",
+            }
+            for invoice in invoices
+        ],
+    }
