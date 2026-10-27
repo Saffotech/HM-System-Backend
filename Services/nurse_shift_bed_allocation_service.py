@@ -339,6 +339,29 @@ def _notify_nurse_shift_change(
         except Exception:
             pass
 
+def _notify_nurse_bulk_shift_change(
+    db: Session,
+    *,
+    nurse_id: int,
+    shift_count: int,
+    start_date: date,
+    end_date: date,
+    allocation_id: int,
+    actor: User | None = None,
+) -> None:
+    _notify_nurse_shift_change(
+        db,
+        nurse_id=nurse_id,
+        title="Bulk shift roster assigned",
+        message=(
+            f"You have been assigned {shift_count} bed allocation(s) "
+            f"for {start_date:%d-%m-%Y} to {end_date:%d-%m-%Y}."
+        ),
+        allocation_id=allocation_id,
+        actor=actor,
+        priority=NotificationPriority.NORMAL,
+    )
+
 
 def create_allocation_service(
     db: Session,
@@ -560,11 +583,12 @@ def bulk_create_allocations_service(
             )
         else:
             notify_message = f"You were assigned {bed_count} bed(s) {dates}."
-        _notify_nurse_shift_change(
+        _notify_nurse_bulk_shift_change(
             db,
             nurse_id=nurse.id,
-            title="Shift assigned",
-            message=notify_message,
+            shift_count=len(created_ids),
+            start_date=data.shift_date,
+            end_date=assigned_until or data.shift_date,
             allocation_id=created_ids[0],
             actor=actor,
         )

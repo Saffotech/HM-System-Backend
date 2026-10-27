@@ -418,9 +418,11 @@ def _apply_sort(q, sort_key: str, order_key: str):
 
 def _search_filter_clauses(term: str):
     pattern = f"%{term.strip()}%"
+    full_name = func.concat_ws(" ", Patient.first_name, Patient.last_name)
     clauses = [
         Patient.first_name.ilike(pattern),
         Patient.last_name.ilike(pattern),
+        full_name.ilike(pattern),
         Patient.patient_uid.ilike(pattern),
         Patient.phone.ilike(pattern),
         Appointment.appointment_uid.ilike(pattern),

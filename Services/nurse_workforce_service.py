@@ -286,6 +286,7 @@ def create_roster_service(
     return {"success": True, "data": _roster_out(db, row)}
 
 
+
 def bulk_create_roster_service(
     db: Session,
     data: NurseWorkforceRosterBulkCreate,
@@ -293,56 +294,103 @@ def bulk_create_roster_service(
     assigned_by: int,
     actor: User | None = None,
 ) -> dict:
-    shift = db.query(NurseWorkforceShift).filter(NurseWorkforceShift.id == data.shift_id).first()
+    shift = (
+        db.query(NurseWorkforceShift)
+        .filter(NurseWorkforceShift.id == data.shift_id)
+        .first()
+    )
     if not shift or not shift.is_active:
-        raise HTTPException(status_code=400, detail="Shift not found or inactive")
+        raise HTTPException(
+            status_code=400,
+            detail="Shift not found or inactive",
+        )
 
     created = []
     skipped = 0
     errors = []
-    for nurse_id in dict.fromkeys(data.nurse_ids):
-        try:
-            nurse = _require_nurse(db, nurse_id)
-        except HTTPException as exc:
-            errors.append(str(exc.detail))
-            skipped += 1
-            continue
-        for roster_date in data.dates:
-            exists = (
-                db.query(NurseWorkforceRoster)
-                .filter(
-                    NurseWorkforceRoster.nurse_id == nurse.id,
-                    NurseWorkforceRoster.roster_date == roster_date,
-                    NurseWorkforceRoster.shift_id == shift.id,
-                    NurseWorkforceRoster.status != "cancelled",
-                )
-                .first()
-            )
-            if exists:
+
+    # Keep track of created entries separately for each nurse.
+    created_by_nurse: dict[int, list[tuple[int, date]]] = {}
+
+    try:
+        for nurse_id in dict.fromkeys(data.nurse_ids):
+            try:
+                nurse = _require_nurse(db, nurse_id)
+            except HTTPException as exc:
+                errors.append(str(exc.detail))
                 skipped += 1
                 continue
-            row = NurseWorkforceRoster(
-                nurse_id=nurse.id,
-                shift_id=shift.id,
-                department_id=data.department_id,
-                roster_date=roster_date,
-                status="scheduled",
-                notes=data.notes,
-                assigned_by=assigned_by,
+
+            for roster_date in dict.fromkeys(data.dates):
+                exists = (
+                    db.query(NurseWorkforceRoster)
+                    .filter(
+                        NurseWorkforceRoster.nurse_id == nurse.id,
+                        NurseWorkforceRoster.roster_date == roster_date,
+                        NurseWorkforceRoster.shift_id == shift.id,
+                        NurseWorkforceRoster.status != "cancelled",
+                    )
+                    .first()
+                )
+
+                if exists:
+                    skipped += 1
+                    continue
+
+                row = NurseWorkforceRoster(
+                    nurse_id=nurse.id,
+                    shift_id=shift.id,
+                    department_id=data.department_id,
+                    roster_date=roster_date,
+                    status="scheduled",
+                    notes=data.notes,
+                    assigned_by=assigned_by,
+                )
+
+                db.add(row)
+                db.flush()
+
+                created.append(row.id)
+                created_by_nurse.setdefault(nurse.id, []).append(
+                    (row.id, roster_date)
+                )
+
+        # Save all roster entries before sending notifications.
+        db.commit()
+
+    except Exception:
+        db.rollback()
+        raise
+
+    # IMPORTANT: one summary notification per nurse, outside both loops.
+    for nurse_id, entries in created_by_nurse.items():
+        roster_dates = [roster_date for _, roster_date in entries]
+        start_date = min(roster_dates)
+        end_date = max(roster_dates)
+
+        if start_date == end_date:
+            date_message = f"on {start_date:%d-%m-%Y}"
+        else:
+            date_message = (
+                f"from {start_date:%d-%m-%Y} "
+                f"to {end_date:%d-%m-%Y}"
             )
-            db.add(row)
-            db.flush()
-            created.append(row.id)
-            _notify_nurse(
-                db,
-                nurse_id=nurse.id,
-                title="Shift assigned",
-                message=f"You are rostered for {shift.name} on {roster_date}.",
-                actor=actor,
-                reference_type=ReferenceType.SCHEDULE,
-                reference_id=row.id,
-            )
-    db.commit()
+
+        _notify_nurse(
+            db,
+            nurse_id=nurse_id,
+            title="Shift assigned",
+            message=(
+                f"You have been rostered for {shift.name} "
+                f"for {len(entries)} date(s), {date_message}."
+            ),
+            actor=actor,
+            reference_type=ReferenceType.SCHEDULE,
+            reference_id=entries[0][0],
+            notification_type=NotificationType.SHIFT_UPDATED,
+            priority=NotificationPriority.NORMAL,
+        )
+
     return {
         "success": True,
         "created": len(created),
