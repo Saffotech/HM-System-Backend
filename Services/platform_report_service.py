@@ -1,7 +1,7 @@
 """Read-only platform totals. Invoice rows and lead rows are not changed."""
 from fastapi import HTTPException
 from sqlalchemy import case, func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from Models.lead import Lead
 from Models.role import Role
@@ -74,7 +74,13 @@ def revenue_report(db: Session, actor: User) -> dict:
         0,
     )
     failed_count = func.coalesce(func.sum(case((SubscriptionInvoice.status == "Failed", 1), else_=0)), 0)
-    row = db.query(collected, pending, overdue, paid_count, pending_count, overdue_count, failed_count).one()
+    failed_amount = func.coalesce(
+        func.sum(case((SubscriptionInvoice.status == "Failed", SubscriptionInvoice.amount), else_=0)),
+        0,
+    )
+    row = db.query(
+        collected, pending, overdue, paid_count, pending_count, overdue_count, failed_count, failed_amount
+    ).one()
     collected_amount = int(row[0] or 0)
     pending_amount = int(row[1] or 0)
     overdue_amount = int(row[2] or 0)
@@ -85,10 +91,62 @@ def revenue_report(db: Session, actor: User) -> dict:
         "pending_count": int(row[4] or 0),
         "overdue_amount": overdue_amount,
         "overdue_count": int(row[5] or 0),
+        "failed_amount": int(row[7] or 0),
         "failed_count": int(row[6] or 0),
         "outstanding_amount": pending_amount + overdue_amount,
         "invoice_count": int(row[3] or 0) + int(row[4] or 0) + int(row[5] or 0) + int(row[6] or 0),
+        "invoices": _revenue_invoices(db, today),
     }
+
+
+def _revenue_bucket(invoice: SubscriptionInvoice, today) -> str | None:
+    if invoice.status == "Paid":
+        return "collected"
+    if invoice.status == "Failed":
+        return "failed"
+    if invoice.status == "Pending":
+        return "overdue" if invoice.due_date < today else "pending"
+    return None
+
+
+def _revenue_invoices(db: Session, today) -> list[dict]:
+    rows = (
+        db.query(SubscriptionInvoice)
+        .options(joinedload(SubscriptionInvoice.hospital))
+        .order_by(SubscriptionInvoice.invoice_date.desc(), SubscriptionInvoice.id.desc())
+        .all()
+    )
+    invoices = []
+    for invoice in rows:
+        bucket = _revenue_bucket(invoice, today)
+        if bucket is None:
+            continue
+        hospital = invoice.hospital
+        paid_on = None
+        amount = invoice.amount
+        if bucket == "collected":
+            paid_on = (invoice.paid_at or invoice.invoice_date).isoformat()
+            amount = invoice.payment_amount if invoice.payment_amount is not None else invoice.amount
+        invoices.append(
+            {
+                "id": invoice.id,
+                "number": invoice.number,
+                "tenant_id": invoice.tenant_id,
+                "hospital_name": hospital.name if hospital else "",
+                "hospital_code": hospital.code if hospital else "",
+                "plan": invoice.plan,
+                "billing_cycle": invoice.billing_cycle,
+                "amount": int(amount),
+                "payment_amount": invoice.payment_amount,
+                "invoice_date": invoice.invoice_date.isoformat(),
+                "due_date": invoice.due_date.isoformat(),
+                "paid_at": paid_on,
+                "paid_date": paid_on,
+                "status": "Overdue" if bucket == "overdue" else invoice.status,
+                "bucket": bucket,
+            }
+        )
+    return invoices
 
 
 def crm_analytics(db: Session, actor: User) -> dict:

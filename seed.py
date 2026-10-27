@@ -405,6 +405,7 @@ ROLES_DATA = {
         "permissions": [
             "leads:manage",
             "hospitals:create",
+            "invoices:manage",
             "platform_admin_profile:view",
             "platform_admin_profile:update",
             "platform_admin_profile:upload_image",

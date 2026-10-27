@@ -29,6 +29,7 @@ from Models.user import User
 from Schemas.platform_admin_profile_schema import PlatformAdminProfileUpdate
 from Schemas.platform_staff_schema import PlatformStaffCreate
 from Schemas.tenant_schema import TenantUpdate
+from Services.invoice_service import list_invoices
 from Services.plan_service import ensure_default_plans, price_for
 from Services.platform_admin_profile_service import update_profile
 from Services.platform_report_service import crm_analytics, revenue_report
@@ -217,7 +218,127 @@ class PlatformAdminFeatureTests(unittest.TestCase):
         self.assertEqual(report["overdue_amount"], 25)
         self.assertEqual(report["outstanding_amount"], 65)
         self.assertEqual(report["failed_count"], 1)
+        self.assertEqual(report["failed_amount"], 999)
         self.assertEqual(report["invoice_count"], 4)
+        buckets = {row["bucket"] for row in report["invoices"]}
+        self.assertEqual(buckets, {"collected", "pending", "overdue", "failed"})
+        paid = next(row for row in report["invoices"] if row["bucket"] == "collected")
+        self.assertEqual(paid["hospital_name"], "Bill Care")
+        self.assertEqual(paid["paid_date"], today.isoformat())
+        self.assertEqual(paid["amount"], 100)
+
+    def test_platform_admin_invoice_list_includes_every_hospital(self):
+        today = date.today()
+        first = Tenant(
+            name="Bill Care",
+            code="BILL",
+            hospital_type="General",
+            plan="Starter",
+            billing_cycle="Monthly",
+            subscription_started_on=today,
+            subscription_renews_on=today,
+        )
+        second = Tenant(
+            name="Other Care",
+            code="OTHR",
+            hospital_type="General",
+            plan="Professional",
+            billing_cycle="Annual",
+            subscription_started_on=today,
+            subscription_renews_on=today,
+        )
+        self.db.add_all([first, second])
+        self.db.flush()
+        self.db.add_all(
+            [
+                SubscriptionInvoice(
+                    number="PAID",
+                    tenant_id=first.id,
+                    plan="Starter",
+                    billing_cycle="Monthly",
+                    amount=100,
+                    invoice_date=today,
+                    due_date=today,
+                    status="Paid",
+                    payment_amount=100,
+                    paid_at=today,
+                ),
+                SubscriptionInvoice(
+                    number="OPEN",
+                    tenant_id=first.id,
+                    plan="Starter",
+                    billing_cycle="Monthly",
+                    amount=40,
+                    invoice_date=date(2026, 9, 1),
+                    due_date=today,
+                    status="Pending",
+                ),
+                SubscriptionInvoice(
+                    number="LATE",
+                    tenant_id=first.id,
+                    plan="Starter",
+                    billing_cycle="Monthly",
+                    amount=25,
+                    invoice_date=date(2020, 1, 1),
+                    due_date=date(2020, 1, 15),
+                    status="Pending",
+                ),
+                SubscriptionInvoice(
+                    number="FAIL",
+                    tenant_id=first.id,
+                    plan="Starter",
+                    billing_cycle="Monthly",
+                    amount=999,
+                    invoice_date=date(2020, 2, 1),
+                    due_date=date(2020, 2, 15),
+                    status="Failed",
+                ),
+                SubscriptionInvoice(
+                    number="OTHER",
+                    tenant_id=second.id,
+                    plan="Professional",
+                    billing_cycle="Annual",
+                    amount=50,
+                    invoice_date=date(2026, 8, 1),
+                    due_date=date(2026, 8, 15),
+                    status="Paid",
+                    payment_amount=50,
+                ),
+            ]
+        )
+        self.db.commit()
+
+        listed = list_invoices(self.db, _actor("platform_admin"))
+        by_number = {row.number: row for row in listed}
+        self.assertEqual(set(by_number), {"PAID", "OPEN", "LATE", "FAIL", "OTHER"})
+        self.assertEqual(by_number["OTHER"].tenant_id, second.id)
+        self.assertNotEqual(by_number["OTHER"].tenant_id, first.id)
+        for number in ("PAID", "OPEN", "LATE", "FAIL"):
+            row = by_number[number]
+            self.assertEqual(row.tenant_id, first.id)
+            self.assertEqual(row.plan, "Starter")
+            self.assertEqual(row.billing_cycle, "Monthly")
+            self.assertIsNotNone(row.invoice_date)
+            self.assertIsNotNone(row.due_date)
+            self.assertIsNotNone(row.amount)
+        self.assertEqual(by_number["PAID"].status, "Paid")
+        self.assertEqual(by_number["PAID"].payment_amount, 100)
+        self.assertEqual(by_number["PAID"].paid_at, today)
+        self.assertEqual(by_number["OPEN"].status, "Pending")
+        self.assertEqual(by_number["LATE"].status, "Overdue")
+        self.assertEqual(self.db.query(SubscriptionInvoice).filter_by(number="LATE").one().status, "Pending")
+        self.assertEqual(by_number["FAIL"].status, "Failed")
+
+        one_hospital = list_invoices(self.db, _actor("platform_admin"), tenant_id=second.id)
+        self.assertEqual([row.number for row in one_hospital], ["OTHER"])
+
+        with self.assertRaises(HTTPException) as denied:
+            list_invoices(self.db, _actor("admin", tenant_id=first.id))
+        self.assertEqual(denied.exception.status_code, 403)
+
+        report = revenue_report(self.db, _actor("platform_admin"))
+        self.assertIn("collected_amount", report)
+        self.assertNotIn("rows", report)
 
     def test_crm_counts_include_empty_statuses(self):
         admin = User(

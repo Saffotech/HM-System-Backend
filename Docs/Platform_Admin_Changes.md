@@ -58,8 +58,9 @@ Company-wide subscription invoices. Failed invoices are counted, not added into 
 | `pending_amount`, `pending_count` | Pending and not past due |
 | `overdue_amount`, `overdue_count` | Pending and past due |
 | `outstanding_amount` | Pending + overdue |
-| `failed_count` | Failed |
+| `failed_amount`, `failed_count` | Failed. The amount is not added to collected, pending, or overdue. |
 | `invoice_count` | All of the above |
+| `invoices` | One row per invoice. `bucket` is `collected`, `pending`, `overdue`, or `failed`. Collected rows include `hospital_name`, `plan`, `paid_at`, `paid_date`, and the paid `amount`. The dashboard payments table uses `bucket === "collected"`. |
 
 ## CRM analytics
 
