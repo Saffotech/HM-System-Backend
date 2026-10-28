@@ -29,8 +29,9 @@ from Models.user import User
 from Schemas.platform_admin_profile_schema import PlatformAdminProfileUpdate
 from Schemas.platform_staff_schema import PlatformStaffCreate
 from Schemas.tenant_schema import TenantUpdate
+from Schemas.plan_schema import PlanCreate, PlanUpdate
 from Services.invoice_service import list_invoices
-from Services.plan_service import ensure_default_plans, price_for
+from Services.plan_service import create_plan, deactivate_plan, ensure_default_plans, list_plans, price_for, update_plan
 from Services.platform_admin_profile_service import update_profile
 from Services.platform_report_service import crm_analytics, revenue_report
 from Services.platform_staff_service import create_platform_staff, list_platform_staff
@@ -150,8 +151,11 @@ class PlatformAdminFeatureTests(unittest.TestCase):
             update_tenant(self.db, _actor("platform_admin", tenant_id=9), tenant.id, TenantUpdate(name="Nope"))
 
     def test_unknown_plan_rejected(self):
-        with self.assertRaises(ValidationError):
-            TenantUpdate(plan="Gold")
+        from Services.plan_service import price_for
+
+        with self.assertRaises(HTTPException) as rejected:
+            price_for(self.db, "Gold", "Monthly")
+        self.assertEqual(rejected.exception.status_code, 422)
 
     def test_revenue_splits_paid_pending_and_overdue(self):
         today = date.today()
@@ -226,6 +230,27 @@ class PlatformAdminFeatureTests(unittest.TestCase):
         self.assertEqual(paid["hospital_name"], "Bill Care")
         self.assertEqual(paid["paid_date"], today.isoformat())
         self.assertEqual(paid["amount"], 100)
+
+    def test_platform_admin_can_add_edit_and_deactivate_plans(self):
+        admin = _actor("platform_admin")
+        created = create_plan(self.db, admin, PlanCreate(name="Gold", monthly_price=2000))
+        self.assertEqual(created["name"], "Gold")
+        self.assertTrue(created["is_active"])
+        self.assertEqual(created["annual_price"], 20000)
+        self.assertEqual(price_for(self.db, "Gold", "Monthly"), 2000)
+        edited = update_plan(self.db, admin, created["id"], PlanUpdate(monthly_price=2500))
+        self.assertEqual(edited["monthly_price"], 2500)
+        self.assertEqual(price_for(self.db, "Gold", "Annual"), 25000)
+        inactive = deactivate_plan(self.db, admin, created["id"])
+        self.assertFalse(inactive["is_active"])
+        names = {row["name"]: row["is_active"] for row in list_plans(self.db, admin)}
+        self.assertFalse(names["Gold"])
+        with self.assertRaises(HTTPException) as rejected:
+            price_for(self.db, "Gold", "Monthly")
+        self.assertEqual(rejected.exception.status_code, 422)
+        with self.assertRaises(HTTPException) as denied:
+            create_plan(self.db, _actor("crm"), PlanCreate(name="Other", monthly_price=100))
+        self.assertEqual(denied.exception.status_code, 403)
 
     def test_platform_admin_invoice_list_includes_every_hospital(self):
         today = date.today()

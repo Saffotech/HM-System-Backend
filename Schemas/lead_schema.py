@@ -103,9 +103,12 @@ class LeadCreate(BaseModel):
     @field_validator("plan")
     @classmethod
     def known_plan(cls, value: str | None) -> str | None:
-        if value is not None and value not in PLAN_NAMES:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
             raise ValueError("Choose a subscription plan.")
-        return value
+        return text
 
     @field_validator("billing_cycle")
     @classmethod
@@ -249,9 +252,12 @@ class LeadUpdate(BaseModel):
     @field_validator("plan")
     @classmethod
     def known_plan(cls, value: str | None) -> str | None:
-        if value is not None and value not in PLAN_NAMES:
+        if value is None:
+            return None
+        text = value.strip()
+        if not text:
             raise ValueError("Choose a subscription plan.")
-        return value
+        return text
 
     @field_validator("billing_cycle")
     @classmethod
@@ -284,7 +290,7 @@ class LeadAgree(BaseModel):
     @classmethod
     def known_plan(cls, value: str) -> str:
         text = value.strip()
-        if text not in PLAN_NAMES:
+        if not text:
             raise ValueError("Choose a subscription plan.")
         return text
 

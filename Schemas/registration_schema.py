@@ -2,7 +2,7 @@ import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from Schemas.lead_schema import BILLING_CYCLES, PLAN_NAMES
+from Schemas.lead_schema import BILLING_CYCLES
 from Schemas.tenant_schema import TENANT_STATUSES, TRIAL_PERIODS
 
 
@@ -40,7 +40,7 @@ class RegisterFromLead(BaseModel):
     @classmethod
     def known_plan(cls, value: str) -> str:
         text = value.strip()
-        if text not in PLAN_NAMES:
+        if not text:
             raise ValueError("Choose a subscription plan.")
         return text
 

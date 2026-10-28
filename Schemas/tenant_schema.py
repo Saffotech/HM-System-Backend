@@ -2,7 +2,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
-from Schemas.lead_schema import BILLING_CYCLES, PLAN_NAMES
+from Schemas.lead_schema import BILLING_CYCLES
 
 TRIAL_PERIODS = ("None", "14 days", "30 days", "60 days")
 TENANT_STATUSES = ("Active", "Trial", "Suspended")
@@ -31,7 +31,7 @@ class TenantRegisterRequest(BaseModel):
     @classmethod
     def known_plan(cls, value: str) -> str:
         text = value.strip()
-        if text not in PLAN_NAMES:
+        if not text:
             raise ValueError("Choose a subscription plan.")
         return text
 
@@ -93,7 +93,7 @@ class TenantUpdate(BaseModel):
         if value is None:
             return None
         text = value.strip()
-        if text not in PLAN_NAMES:
+        if not text:
             raise ValueError("Choose a subscription plan.")
         return text
 
