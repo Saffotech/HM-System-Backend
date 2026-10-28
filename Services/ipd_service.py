@@ -330,10 +330,7 @@ def admission_text_search_filter(search: str, *extra_columns):
     if key.startswith("IPD-"):
         return IpdAdmission.admission_no.ilike(f"%{raw}%")
     term = f"%{raw}%"
-    full_name = func.concat(
-        Patient.first_name,
-        " ",
-        Patient.last_name)
+    full_name = func.concat_ws(Patient.first_name," ",Patient.last_name)
     clauses = [
         full_name.ilike(term),
         Patient.first_name.ilike(term),
