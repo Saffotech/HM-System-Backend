@@ -35,6 +35,7 @@ from Services.plan_service import (
     activate_plan,
     create_plan,
     deactivate_plan,
+    delete_plan,
     ensure_default_plans,
     list_plans,
     price_for,
@@ -262,6 +263,29 @@ class PlatformAdminFeatureTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as already:
             activate_plan(self.db, admin, created["id"])
         self.assertEqual(already.exception.status_code, 409)
+        delete_plan(self.db, admin, created["id"])
+        self.assertNotIn("Gold", {row["name"] for row in list_plans(self.db, admin)})
+        with self.assertRaises(HTTPException) as missing:
+            delete_plan(self.db, admin, created["id"])
+        self.assertEqual(missing.exception.status_code, 404)
+        kept = create_plan(self.db, admin, PlanCreate(name="Kept", monthly_price=3000))
+        today = date.today()
+        self.db.add(
+            Tenant(
+                name="Kept Care",
+                code="KEPT",
+                hospital_type="General",
+                plan="Kept",
+                billing_cycle="Monthly",
+                subscription_started_on=today,
+                subscription_renews_on=today,
+            )
+        )
+        self.db.commit()
+        with self.assertRaises(HTTPException) as in_use:
+            delete_plan(self.db, admin, kept["id"])
+        self.assertEqual(in_use.exception.status_code, 409)
+        self.assertIn("Kept", {row["name"] for row in list_plans(self.db, admin)})
         with self.assertRaises(HTTPException) as denied:
             create_plan(self.db, _actor("crm"), PlanCreate(name="Other", monthly_price=100))
         self.assertEqual(denied.exception.status_code, 403)

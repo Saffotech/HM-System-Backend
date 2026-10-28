@@ -2,7 +2,10 @@
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from Models.lead import Lead
+from Models.subscription_invoice import SubscriptionInvoice
 from Models.subscription_plan import SubscriptionPlan
+from Models.tenant import Tenant
 from Models.user import User
 from Schemas.lead_schema import BILLING_CYCLES, PLAN_NAMES
 from Schemas.plan_schema import PlanCreate, PlanUpdate
@@ -151,3 +154,23 @@ def activate_plan(db: Session, actor: User, plan_id: int) -> dict:
     db.commit()
     db.refresh(row)
     return _plan_row(row)
+
+
+def delete_plan(db: Session, actor: User, plan_id: int) -> None:
+    """Remove a catalog plan that no hospital, lead, or invoice still names."""
+    _require_platform_admin(actor)
+    row = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    used = (
+        db.query(Tenant.id).filter(Tenant.plan == row.name).first()
+        or db.query(Lead.id).filter(Lead.plan == row.name).first()
+        or db.query(SubscriptionInvoice.id).filter(SubscriptionInvoice.plan == row.name).first()
+    )
+    if used:
+        raise HTTPException(
+            status_code=409,
+            detail="This plan is still used by a hospital, lead, or invoice. Deactivate it instead.",
+        )
+    db.delete(row)
+    db.commit()

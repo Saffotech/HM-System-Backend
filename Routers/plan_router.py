@@ -3,7 +3,14 @@ from sqlalchemy.orm import Session
 
 from Models.user import User
 from Schemas.plan_schema import PlanCreate, PlanUpdate
-from Services.plan_service import activate_plan, create_plan, deactivate_plan, list_plans, update_plan
+from Services.plan_service import (
+    activate_plan,
+    create_plan,
+    deactivate_plan,
+    delete_plan,
+    list_plans,
+    update_plan,
+)
 from database import get_db
 from dependencies import get_current_user
 
@@ -53,3 +60,12 @@ def activate(
     current_user: User = Depends(get_current_user),
 ):
     return activate_plan(db, current_user, plan_id)
+
+
+@router.delete("/{plan_id}", status_code=204)
+def remove_plan(
+    plan_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    delete_plan(db, current_user, plan_id)
