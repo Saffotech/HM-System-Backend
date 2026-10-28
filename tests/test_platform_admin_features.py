@@ -31,7 +31,15 @@ from Schemas.platform_staff_schema import PlatformStaffCreate
 from Schemas.tenant_schema import TenantUpdate
 from Schemas.plan_schema import PlanCreate, PlanUpdate
 from Services.invoice_service import list_invoices
-from Services.plan_service import create_plan, deactivate_plan, ensure_default_plans, list_plans, price_for, update_plan
+from Services.plan_service import (
+    activate_plan,
+    create_plan,
+    deactivate_plan,
+    ensure_default_plans,
+    list_plans,
+    price_for,
+    update_plan,
+)
 from Services.platform_admin_profile_service import update_profile
 from Services.platform_report_service import crm_analytics, revenue_report
 from Services.platform_staff_service import create_platform_staff, list_platform_staff
@@ -248,6 +256,12 @@ class PlatformAdminFeatureTests(unittest.TestCase):
         with self.assertRaises(HTTPException) as rejected:
             price_for(self.db, "Gold", "Monthly")
         self.assertEqual(rejected.exception.status_code, 422)
+        active = activate_plan(self.db, admin, created["id"])
+        self.assertTrue(active["is_active"])
+        self.assertEqual(price_for(self.db, "Gold", "Monthly"), 2500)
+        with self.assertRaises(HTTPException) as already:
+            activate_plan(self.db, admin, created["id"])
+        self.assertEqual(already.exception.status_code, 409)
         with self.assertRaises(HTTPException) as denied:
             create_plan(self.db, _actor("crm"), PlanCreate(name="Other", monthly_price=100))
         self.assertEqual(denied.exception.status_code, 403)

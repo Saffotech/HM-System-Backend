@@ -137,3 +137,17 @@ def deactivate_plan(db: Session, actor: User, plan_id: int) -> dict:
     db.commit()
     db.refresh(row)
     return _plan_row(row)
+
+
+def activate_plan(db: Session, actor: User, plan_id: int) -> dict:
+    """Offer the plan for new sales again. Existing hospital amounts are not rewritten."""
+    _require_platform_admin(actor)
+    row = db.query(SubscriptionPlan).filter(SubscriptionPlan.id == plan_id).first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Plan not found")
+    if row.is_active:
+        raise HTTPException(status_code=409, detail="This plan is already active.")
+    row.is_active = True
+    db.commit()
+    db.refresh(row)
+    return _plan_row(row)
