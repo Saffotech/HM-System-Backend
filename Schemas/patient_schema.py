@@ -80,6 +80,7 @@ class PatientOut(BaseModel):
     address: Optional[str]
     state: Optional[str]
     aadhaar_number: Optional[str] = None
+    registration_source: Optional[str] = None
     is_active: bool
     created_at: Optional[datetime] = None
 

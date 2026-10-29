@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Optional
 from zoneinfo import ZoneInfo
-
+from sqlalchemy import func
 from fastapi import HTTPException
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
@@ -241,12 +241,14 @@ def list_staff(
 ) -> dict:
     q = _base_query(db)
 
+    full_name = func.concat_ws(" " ,User.first_name , User.last_name)
     if search:
         term = f"%{search.strip()}%"
         q = q.filter(
             User.first_name.ilike(term)
             | User.last_name.ilike(term)
             | User.email.ilike(term)
+            | full_name.ilike(term)
         )
 
     if role_id is not None:

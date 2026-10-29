@@ -298,53 +298,119 @@ def _latest_queue_subquery(db: Session):
 def _receptionist_appointments_query(
     db: Session,
     *,
-    date_from: date,
-    date_to: date | None = None,
+    date_from: Optional[date] = None,
+    date_to: Optional[date] = None,
     doctor_id: Optional[int] = None,
     department_id: Optional[int] = None,
     payment_filter: Optional[str] = None,
     include_cancelled: bool = False,
 ):
-    """Appointments in range with latest visit and single queue row for that day."""
-    date_to = date_to or date_from
-    range_start = datetime.combine(date_from, time.min, tzinfo=IST)
-    range_end = datetime.combine(date_to, time.max, tzinfo=IST)
+    """Appointments in an optional date range, with latest visit and queue row."""
+
+    # Preserve existing behavior: if only date_from is provided,
+    # treat it as a single-day query.
+    if date_from is not None and date_to is None:
+        date_to = date_from
+
     latest_visit = _latest_visit_subquery(db)
     latest_queue = _latest_queue_subquery(db)
+
     Visit = aliased(OpdVisit)
     Queue = aliased(PatientQueue)
 
-    status_filters = [Appointment.status != AppointmentStatus.no_show]
+    status_filters = [
+        Appointment.status != AppointmentStatus.no_show
+    ]
+
     if not include_cancelled:
-        status_filters.append(Appointment.status != AppointmentStatus.cancelled)
+        status_filters.append(
+            Appointment.status != AppointmentStatus.cancelled
+        )
+
+    # Apply date filters only when the corresponding date is supplied.
+    date_filters = []
+
+    if date_from is not None:
+        range_start = datetime.combine(
+            date_from, time.min, tzinfo=IST
+        )
+        date_filters.append(
+            Appointment.scheduled_at >= range_start
+        )
+
+    if date_to is not None:
+        range_end = datetime.combine(
+            date_to, time.max, tzinfo=IST
+        )
+        date_filters.append(
+            Appointment.scheduled_at <= range_end
+        )
 
     q = (
-        db.query(Appointment, Patient, Visit, Queue, User, Department)
-        .join(Patient, Appointment.patient_id == Patient.id)
-        .outerjoin(latest_visit, latest_visit.c.appointment_id == Appointment.id)
-        .outerjoin(Visit, Visit.id == latest_visit.c.visit_id)
+        db.query(
+            Appointment,
+            Patient,
+            Visit,
+            Queue,
+            User,
+            Department,
+        )
+        .join(
+            Patient,
+            Appointment.patient_id == Patient.id,
+        )
+        .outerjoin(
+            latest_visit,
+            latest_visit.c.appointment_id == Appointment.id,
+        )
+        .outerjoin(
+            Visit,
+            Visit.id == latest_visit.c.visit_id,
+        )
         .outerjoin(
             latest_queue,
             and_(
                 latest_queue.c.appointment_id == Appointment.id,
                 latest_queue.c.queue_date
-                == func.date(func.timezone("Asia/Kolkata", Appointment.scheduled_at)),
+                == func.date(
+                    func.timezone(
+                        "Asia/Kolkata",
+                        Appointment.scheduled_at,
+                    )
+                ),
             ),
         )
-        .outerjoin(Queue, Queue.id == latest_queue.c.queue_id)
-        .outerjoin(User, Appointment.doctor_id == User.id)
-        .outerjoin(Department, Appointment.department_id == Department.id)
-        .filter(
-            Appointment.scheduled_at >= range_start,
-            Appointment.scheduled_at <= range_end,
-            *status_filters,
+        .outerjoin(
+            Queue,
+            Queue.id == latest_queue.c.queue_id,
         )
+        .outerjoin(
+            User,
+            Appointment.doctor_id == User.id,
+        )
+        .outerjoin(
+            Department,
+            Appointment.department_id == Department.id,
+        )
+        .filter(*date_filters, *status_filters)
     )
+
     if doctor_id is not None:
-        q = q.filter(Appointment.doctor_id == doctor_id)
+        q = q.filter(
+            Appointment.doctor_id == doctor_id
+        )
+
     if department_id is not None:
-        q = q.filter(Appointment.department_id == department_id)
-    q = apply_receptionist_payment_filter(q, payment_filter, visit_model=Visit)
+        q = q.filter(
+            Appointment.department_id == department_id
+        )
+
+    q = apply_receptionist_payment_filter(
+        q,
+        payment_filter,
+        visit_model=Visit,
+    )
+
     return q, Visit
 
 
@@ -870,10 +936,6 @@ def _queue_history_query(
 ):
     if single_date:
         date_from = date_to = single_date
-    if not date_from:
-        date_from = _today()
-    if not date_to:
-        date_to = date_from
 
     q, Visit = _receptionist_appointments_query(
         db,
@@ -884,7 +946,15 @@ def _queue_history_query(
         payment_filter=None,
         include_cancelled=(status == "cancelled" or status is None),
     )
-    q = _apply_receptionist_status_filter(q, status)
+    if status is not None:
+        q = _apply_receptionist_status_filter(q, status)
+    else:
+        q = q.filter(
+            Appointment.status.in_([
+                AppointmentStatus.completed,
+                AppointmentStatus.cancelled,
+            ])
+        )
     if search:
         q = q.filter(_appointment_search_filter(search, include_doctor=True))
     return q, Visit, date_from, date_to, payment_filter

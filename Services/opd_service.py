@@ -6,7 +6,7 @@ from typing import List, Optional
 from fastapi import HTTPException
 from sqlalchemy import String, case, cast, func
 from sqlalchemy.orm import Session
-
+from Models.ipd import IpdAdmission
 from Models.department import Department
 from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient, RegistrationSource
@@ -61,6 +61,27 @@ def _finalize_visit_appointment_and_queue(
     if visit.payment_status in ("pending", "partial"):
         notify_opd_payment_pending(db, visit, created_by=handled_by)
 
+def _ensure_patient_not_active_in_ipd(
+    db: Session,
+    patient_id: int,
+) -> None:
+    active_admission = (
+        db.query(IpdAdmission.id)
+        .filter(
+            IpdAdmission.patient_id == patient_id,
+            IpdAdmission.status == "admitted",
+        )
+        .first()
+    )
+
+    if active_admission:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "This patient currently has an active IPD admission. "
+                "A new OPD visit cannot be booked through normal OPD billing."
+            ),
+        )
 
 def build_bill_preview(db: Session, data: BillPreviewRequest) -> BillPreviewResponse:
     """Preview using Admin OPD pricing (same resolver as create_visit)."""
@@ -201,6 +222,8 @@ def create_visit(
     transaction_reference: Optional[str] = None,
     bill_from_selection: bool = False,
 ) -> OpdVisit:
+    # Prevent normal OPD visits for currently admitted IPD patients.
+    _ensure_patient_not_active_in_ipd(db, patient.id)
     h.get_department(db, billing.department_id)
     doctor = h.get_doctor_in_department(db, billing.doctor_id, billing.department_id)
 
@@ -1174,6 +1197,7 @@ def _recent_patients_for_dashboard(db: Session) -> list[DashboardRecentPatient]:
             patient_uid=p.patient_uid,
             name=h.display_name(p.first_name, p.last_name),
             phone=p.phone,
+            registration_source=p.registration_source,
             created_at=p.created_at.isoformat() if p.created_at else None,
         )
         for p in rows
