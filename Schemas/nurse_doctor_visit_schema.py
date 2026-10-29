@@ -53,6 +53,10 @@ class NurseDoctorVisitResponse(BaseModel):
     updated_by_name: Optional[str] = None
     updated_at: Optional[datetime] = None
     is_voided: bool = False
+    void_reason: Optional[str] = None
+    voided_at: Optional[datetime] = None
+    voided_by: Optional[int] = None
+    voided_by_name: Optional[str] = None
 
     model_config = {"from_attributes": True}
 

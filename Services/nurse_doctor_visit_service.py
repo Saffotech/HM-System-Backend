@@ -158,16 +158,26 @@ def _resolve_visit_department(
     return None, None
 
 
-def _visit_query(db: Session):
-    return (
+def _visit_query(
+    db: Session,
+    *,
+    include_voided: bool = False,
+):
+    query = (
         db.query(NurseDoctorVisit)
         .options(
             joinedload(NurseDoctorVisit.patient),
             joinedload(NurseDoctorVisit.doctor).joinedload(User.department),
             joinedload(NurseDoctorVisit.department),
         )
-        .filter(NurseDoctorVisit.is_voided.is_(False))
     )
+
+    if not include_voided:
+        query = query.filter(
+            NurseDoctorVisit.is_voided.is_(False)
+        )
+
+    return query
 
 
 def _visit_date_filter(query, visit_date: date | None):
@@ -320,6 +330,10 @@ def _serialize_visit(
         updated_by_name=visit.updated_by_name,
         updated_at=visit.updated_at,
         is_voided=visit.is_voided,
+        void_reason=visit.void_reason,
+        voided_at=visit.voided_at,
+        voided_by=visit.voided_by,
+        voided_by_name=visit.voided_by_name,
     )
 
 
@@ -736,17 +750,22 @@ def get_doctor_patient_visits_service(
         )
 
     on_date = visit_date or _now().date()
+    # Doctors still see nurse-deleted (voided) visits. Counts and visit numbers
+    # stay on active rows so IPD "No of visits" does not include cancellations.
     visits = (
         _visit_date_filter(
-            _visit_query(db).filter(NurseDoctorVisit.patient_id == patient.id),
+            _visit_query(db, include_voided=True).filter(
+                NurseDoctorVisit.patient_id == patient.id
+            ),
             on_date,
         )
         .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
         .all()
     )
-    numbers = _assign_visit_numbers(visits)
+    active_visits = [visit for visit in visits if not visit.is_voided]
+    numbers = _assign_visit_numbers(active_visits)
     billing = _billing_map(db, [v.id for v in visits])
-    day_count = len(visits)
+    day_count = len(active_visits)
     serialized = [
         _serialize_visit(
             visit,
