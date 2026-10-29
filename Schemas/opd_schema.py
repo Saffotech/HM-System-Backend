@@ -55,7 +55,7 @@ class PatientRegisterRequest(PatientFields, VisitBillingFields):
                 "doctor_id": 2,
                 "registration_fee": 200.0,
                 "consultation_fee": 800.0,
-                "gst_percent": 5.0,
+                "gst_percent": 8.0,
                 "scheduled_at": "2026-07-14T13:00:00+05:30",
             }
         }
@@ -281,6 +281,7 @@ class DashboardRecentPatient(BaseModel):
     patient_uid: str
     name: str
     phone: Optional[str] = None
+    registration_source: Optional[str] = "OPD"
     created_at: Optional[str] = None
 
 

@@ -1196,6 +1196,7 @@ def _recent_patients_for_dashboard(db: Session) -> list[DashboardRecentPatient]:
             patient_uid=p.patient_uid,
             name=h.display_name(p.first_name, p.last_name),
             phone=p.phone,
+            registration_source=p.registration_source,
             created_at=p.created_at.isoformat() if p.created_at else None,
         )
         for p in rows
