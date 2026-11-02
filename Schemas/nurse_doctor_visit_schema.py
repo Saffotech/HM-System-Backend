@@ -1,10 +1,11 @@
-from datetime import date, datetime
+from datetime import date, datetime , timezone
 from typing import List, Optional
 
 from pydantic import BaseModel, Field, model_validator
 
 
 class NurseDoctorVisitCreate(BaseModel):
+
     patient_id: Optional[int] = None
     appointment_id: Optional[int] = None
     doctor_id: int = Field(..., ge=1)
@@ -13,9 +14,22 @@ class NurseDoctorVisitCreate(BaseModel):
     notes: Optional[str] = None
 
     @model_validator(mode="after")
-    def require_appointment_or_patient(self):
-        if not self.appointment_id and not self.patient_id:
+    def validate_visit_datetime(self):
+
+        if self.appointment_id is None and self.patient_id is None:
             raise ValueError("Provide appointment_id or patient_id")
+
+        if self.visited_at is not None:
+            now = datetime.now(timezone.utc)
+
+            visit_time = self.visited_at
+
+            if visit_time.tzinfo is None:
+                visit_time = visit_time.replace(tzinfo=timezone.utc)
+
+            if visit_time > now:
+                raise ValueError("Future doctor visits are not allowed")
+
         return self
 
 

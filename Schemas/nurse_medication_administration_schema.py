@@ -128,6 +128,7 @@ class MedicationHistoryResponse(BaseModel):
     ward_name: Optional[str] = None
 
     remarks: Optional[str] = None
+    scheduled_time: Optional[datetime] = None
 
     administered_at: datetime
 

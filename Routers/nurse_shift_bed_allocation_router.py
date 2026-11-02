@@ -1,7 +1,7 @@
-"""Admin APIs for nurse shift bed allocations (+ Phase 6 reports/history).
+"""Admin APIs for nurse shift bed allocations.
 
-Existing CRUD contracts unchanged. New routes are additive and registered
-before /{allocation_id} to avoid path conflicts.
+CRUD routes used by the manager screens. /bulk is registered before
+/{allocation_id} so the path is not captured as an id.
 """
 from datetime import date
 
@@ -19,26 +19,12 @@ from Schemas.nurse_shift_bed_allocation_schema import (
     NurseShiftBedAllocationListResponse,
     NurseShiftBedAllocationUpdate,
 )
-from Services.nurse_bed_allocation_reports_service import (
-    detect_allocation_conflicts_service,
-    get_allocation_dashboard_summary_service,
-    get_daily_allocation_report_service,
-    get_department_allocation_report_service,
-    get_shift_allocation_report_service,
-    get_unallocated_beds_report_service,
-    get_unassigned_nurses_report_service,
-    get_workload_analytics_service,
-    list_allocation_history_service,
-)
 from Services.nurse_shift_bed_allocation_service import (
     bulk_create_allocations_service,
     create_allocation_service,
     deactivate_allocation_service,
     delete_allocation_service,
     get_allocation_service,
-    list_allocations_by_bed_service,
-    list_allocations_by_nurse_service,
-    list_allocations_by_shift_service,
     list_allocations_service,
     update_allocation_service,
 )
@@ -87,239 +73,6 @@ def list_allocations(
         ward_name=ward_name,
         is_active=is_active,
         search=search,
-        page=page,
-        page_size=page_size,
-    )
-
-
-# —— Phase 6 additive endpoints (must stay above /{allocation_id}) ——
-
-@router.get("/history")
-def list_history(
-    allocation_id: int | None = Query(None, ge=1),
-    actor_id: int | None = Query(None, ge=1),
-    action: str | None = Query(None),
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    nurse_id: int | None = Query(None, ge=1),
-    bed_id: int | None = Query(None, ge=1),
-    search: str | None = Query(None),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return list_allocation_history_service(
-        db,
-        allocation_id=allocation_id,
-        actor_id=actor_id,
-        action=action,
-        shift_date=shift_date,
-        shift_name=shift_name,
-        nurse_id=nurse_id,
-        bed_id=bed_id,
-        search=search,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get("/dashboard-summary")
-def dashboard_summary(
-    shift_date: date | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_allocation_dashboard_summary_service(db, shift_date=shift_date)
-
-
-@router.get("/conflicts")
-def list_conflicts(
-    shift_date: date | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return detect_allocation_conflicts_service(db, shift_date=shift_date)
-
-
-@router.get("/analytics/workload")
-def workload_analytics(
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_workload_analytics_service(
-        db, shift_date=shift_date, shift_name=shift_name
-    )
-
-
-@router.get("/reports/daily")
-def report_daily(
-    shift_date: date | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_daily_allocation_report_service(db, shift_date=shift_date)
-
-
-@router.get("/reports/shift")
-def report_shift(
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_shift_allocation_report_service(
-        db, shift_date=shift_date, shift_name=shift_name
-    )
-
-
-@router.get("/reports/department")
-def report_department(
-    shift_date: date | None = Query(None),
-    department_id: int | None = Query(None, ge=1),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_department_allocation_report_service(
-        db, shift_date=shift_date, department_id=department_id
-    )
-
-
-@router.get("/reports/nurse-workload")
-def report_nurse_workload(
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_workload_analytics_service(
-        db, shift_date=shift_date, shift_name=shift_name
-    )
-
-
-@router.get("/reports/unallocated-beds")
-def report_unallocated_beds(
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_unallocated_beds_report_service(
-        db, shift_date=shift_date, shift_name=shift_name
-    )
-
-
-@router.get("/reports/unassigned-nurses")
-def report_unassigned_nurses(
-    shift_date: date | None = Query(None),
-    shift_name: str | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return get_unassigned_nurses_report_service(
-        db, shift_date=shift_date, shift_name=shift_name
-    )
-
-
-@router.get("/reports/occupied-coverage")
-def report_occupied_coverage(
-    shift_date: date | None = Query(None),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    summary = get_allocation_dashboard_summary_service(db, shift_date=shift_date)
-    return {
-        "success": True,
-        "report_type": "occupied_coverage",
-        "shift_date": summary["shift_date"],
-        "occupied_assigned_beds": summary["occupied_assigned_beds"],
-        "occupied_unassigned_beds": summary["occupied_unassigned_beds"],
-        "allocated_beds": summary["allocated_beds"],
-        "unallocated_beds": summary["unallocated_beds"],
-        "coverage_percentage": summary["coverage_percentage"],
-    }
-
-
-@router.get(
-    "/by-nurse/{nurse_id}",
-    response_model=NurseShiftBedAllocationListResponse,
-)
-def list_by_nurse(
-    nurse_id: int = Path(..., ge=1),
-    shift_date: date | None = Query(None),
-    is_active: bool | None = Query(True),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return list_allocations_by_nurse_service(
-        db,
-        nurse_id,
-        shift_date=shift_date,
-        is_active=is_active,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get(
-    "/by-bed/{bed_id}",
-    response_model=NurseShiftBedAllocationListResponse,
-)
-def list_by_bed(
-    bed_id: int = Path(..., ge=1),
-    shift_date: date | None = Query(None),
-    is_active: bool | None = Query(True),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return list_allocations_by_bed_service(
-        db,
-        bed_id,
-        shift_date=shift_date,
-        is_active=is_active,
-        page=page,
-        page_size=page_size,
-    )
-
-
-@router.get(
-    "/by-shift",
-    response_model=NurseShiftBedAllocationListResponse,
-)
-def list_by_shift(
-    shift_date: date = Query(...),
-    shift_name: str | None = Query(None),
-    is_active: bool | None = Query(True),
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-    _: bool = Depends(PermissionChecker("bed_allocation:view")),
-):
-    return list_allocations_by_shift_service(
-        db,
-        shift_date=shift_date,
-        shift_name=shift_name,
-        is_active=is_active,
         page=page,
         page_size=page_size,
     )

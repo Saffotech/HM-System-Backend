@@ -94,6 +94,53 @@ def _parse_visited_at(value: datetime | None) -> datetime:
         return value.replace(tzinfo=IST)
     return value.astimezone(IST)
 
+def _validate_visit_datetime(
+    db: Session,
+    patient_id: int,
+    visited_at: datetime,
+) -> datetime:
+
+    visited_at = _parse_visited_at(visited_at)
+    now = _now()
+
+    # Reject future visits
+    if visited_at > now:
+        raise HTTPException(
+            status_code=422,
+            detail="Future doctor visits are not allowed."
+        )
+
+    # Find the patient's active IPD admission
+    admission = (
+        db.query(IpdAdmission)
+        .filter(
+            IpdAdmission.patient_id == patient_id,
+            IpdAdmission.status == "admitted",
+        )
+        .order_by(IpdAdmission.id.desc())
+        .first()
+    )
+
+    # Validate against admission datetime when an active
+    # IPD admission exists.
+    if admission:
+        admission_at = admission.admitted_at
+
+        if admission_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Patient admission date is unavailable."
+            )
+
+        admission_at = _parse_visited_at(admission_at)
+
+        if visited_at < admission_at:
+            raise HTTPException(
+                status_code=422,
+                detail="Doctor visit cannot be before patient admission."
+            )
+
+    return visited_at
 
 def _active_doctor(db: Session, doctor_id: int) -> User:
     doctor = (
@@ -360,7 +407,7 @@ def create_doctor_visit_service(
         doctor_name=doctor_display(db, doctor.id) or _user_display_name(doctor),
         department_id=department_id,
         department_name=department_name,
-        visited_at=_parse_visited_at(payload.visited_at),
+        visited_at=_validate_visit_datetime(db,patient.id,payload.visited_at or _now(),),
         notes=(payload.notes or "").strip() or None,
         recorded_by=nurse.id,
         recorded_by_name=_user_display_name(nurse),
@@ -562,7 +609,11 @@ def update_doctor_visit_service(
         )
 
     if "visited_at" in update_data:
-        visit.visited_at = _parse_visited_at(update_data["visited_at"])
+        visit.visited_at = _validate_visit_datetime(
+            db,
+            visit.patient_id,
+            update_data["visited_at"],
+        )
 
     if "notes" in update_data:
         visit.notes = (update_data["notes"] or "").strip() or None

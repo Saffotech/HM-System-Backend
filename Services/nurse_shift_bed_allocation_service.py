@@ -978,65 +978,6 @@ def list_allocations_service(
     }
 
 
-def list_allocations_by_nurse_service(
-    db: Session,
-    nurse_id: int,
-    *,
-    shift_date: date | None = None,
-    is_active: bool | None = True,
-    page: int = 1,
-    page_size: int = 20,
-) -> dict:
-    _is_nurse_user(db, nurse_id)
-    return list_allocations_service(
-        db,
-        nurse_id=nurse_id,
-        shift_date=shift_date,
-        is_active=is_active,
-        page=page,
-        page_size=page_size,
-    )
-
-
-def list_allocations_by_bed_service(
-    db: Session,
-    bed_id: int,
-    *,
-    shift_date: date | None = None,
-    is_active: bool | None = True,
-    page: int = 1,
-    page_size: int = 20,
-) -> dict:
-    _get_bed(db, bed_id)
-    return list_allocations_service(
-        db,
-        bed_id=bed_id,
-        shift_date=shift_date,
-        is_active=is_active,
-        page=page,
-        page_size=page_size,
-    )
-
-
-def list_allocations_by_shift_service(
-    db: Session,
-    *,
-    shift_date: date,
-    shift_name: str | None = None,
-    is_active: bool | None = True,
-    page: int = 1,
-    page_size: int = 20,
-) -> dict:
-    return list_allocations_service(
-        db,
-        shift_date=shift_date,
-        shift_name=shift_name,
-        is_active=is_active,
-        page=page,
-        page_size=page_size,
-    )
-
-
 # ==========================================================
 # Phase 4 helpers — used by nurse dashboard optional filter
 # ==========================================================
