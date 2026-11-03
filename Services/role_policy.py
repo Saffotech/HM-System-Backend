@@ -14,6 +14,9 @@ MANAGER_REGISTERABLE_ROLES = frozenset({
     "lab_technician",
 })
 
+# Hospital owners. A manager must not deactivate or remove these accounts.
+OWNER_ROLES = frozenset({"admin", "super_admin"})
+
 
 def caller_role_name(user: User) -> str:
     return user.role_obj.name if user.role_obj else ""
@@ -37,3 +40,11 @@ def assert_can_assign_role(caller_role: str, target_role_name: str) -> None:
         )
 
     raise HTTPException(status_code=403, detail="Not allowed to register staff")
+
+
+def assert_can_deactivate_staff(caller_role: str, target_role_name: str) -> None:
+    if caller_role == "manager" and target_role_name in OWNER_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Manager cannot deactivate an Admin account",
+        )

@@ -42,6 +42,7 @@ def list_departments_service(
             id=department.id,
             name=department.name,
             code=department.code,
+            kind=department.kind,
         )
         for department in departments
     ]

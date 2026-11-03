@@ -7,6 +7,7 @@ class DepartmentOption(BaseModel):
     id: int
     name: str
     code: Optional[str] = None
+    kind: Optional[str] = None
 
 
 class DepartmentListResponse(BaseModel):
