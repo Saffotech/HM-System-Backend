@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from Enums.notification import (
@@ -65,6 +66,50 @@ def _require_nurse(db: Session, nurse_id: int) -> User:
     return user
 
 
+def _session_tenant_id(db: Session) -> int | None:
+    return db.info.get("tenant_id")
+
+
+def _find_roster_row(
+    db: Session,
+    *,
+    nurse_id: int,
+    roster_date: date,
+    shift_id: int,
+) -> NurseWorkforceRoster | None:
+    """Find the unique roster slot even when its hospital id was never stamped."""
+    return (
+        db.query(NurseWorkforceRoster)
+        .execution_options(include_all_tenants=True)
+        .filter(
+            NurseWorkforceRoster.nurse_id == nurse_id,
+            NurseWorkforceRoster.roster_date == roster_date,
+            NurseWorkforceRoster.shift_id == shift_id,
+        )
+        .first()
+    )
+
+
+def _reactivate_roster_row(
+    db: Session,
+    row: NurseWorkforceRoster,
+    *,
+    department_id: int | None,
+    notes: str | None,
+    assigned_by: int,
+    status: str = "scheduled",
+) -> NurseWorkforceRoster:
+    row.status = status or "scheduled"
+    row.department_id = department_id
+    row.notes = notes
+    row.assigned_by = assigned_by
+    row.updated_at = _now()
+    tenant_id = _session_tenant_id(db)
+    if tenant_id is not None and row.tenant_id is None:
+        row.tenant_id = tenant_id
+    return row
+
+
 def _notify_nurse(
     db: Session,
     *,
@@ -92,7 +137,9 @@ def _notify_nurse(
             priority=priority,
         )
     except Exception:
-        pass
+        # The roster row is already committed. Clear the failed notification
+        # transaction so this request can still finish.
+        db.rollback()
 
 
 # =========================================================
@@ -248,30 +295,40 @@ def create_roster_service(
         if not db.query(Department).filter(Department.id == data.department_id).first():
             raise HTTPException(status_code=404, detail="Department not found")
 
-    exists = (
-        db.query(NurseWorkforceRoster)
-        .filter(
-            NurseWorkforceRoster.nurse_id == nurse.id,
-            NurseWorkforceRoster.roster_date == data.roster_date,
-            NurseWorkforceRoster.shift_id == shift.id,
-            NurseWorkforceRoster.status != "cancelled",
-        )
-        .first()
-    )
-    if exists:
-        raise HTTPException(status_code=400, detail="Roster entry already exists")
-
-    row = NurseWorkforceRoster(
+    existing = _find_roster_row(
+        db,
         nurse_id=nurse.id,
-        shift_id=shift.id,
-        department_id=data.department_id,
         roster_date=data.roster_date,
-        status=data.status or "scheduled",
-        notes=data.notes,
-        assigned_by=assigned_by,
+        shift_id=shift.id,
     )
-    db.add(row)
-    db.commit()
+    if existing and existing.status != "cancelled":
+        raise HTTPException(status_code=400, detail="Roster entry already exists")
+    if existing:
+        row = _reactivate_roster_row(
+            db,
+            existing,
+            department_id=data.department_id,
+            notes=data.notes,
+            assigned_by=assigned_by,
+            status=data.status or "scheduled",
+        )
+    else:
+        row = NurseWorkforceRoster(
+            nurse_id=nurse.id,
+            shift_id=shift.id,
+            department_id=data.department_id,
+            roster_date=data.roster_date,
+            status=data.status or "scheduled",
+            notes=data.notes,
+            assigned_by=assigned_by,
+            tenant_id=_session_tenant_id(db),
+        )
+        db.add(row)
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Roster entry already exists") from None
     db.refresh(row)
     _notify_nurse(
         db,
@@ -322,33 +379,48 @@ def bulk_create_roster_service(
                 continue
 
             for roster_date in dict.fromkeys(data.dates):
-                exists = (
-                    db.query(NurseWorkforceRoster)
-                    .filter(
-                        NurseWorkforceRoster.nurse_id == nurse.id,
-                        NurseWorkforceRoster.roster_date == roster_date,
-                        NurseWorkforceRoster.shift_id == shift.id,
-                        NurseWorkforceRoster.status != "cancelled",
-                    )
-                    .first()
+                existing = _find_roster_row(
+                    db,
+                    nurse_id=nurse.id,
+                    roster_date=roster_date,
+                    shift_id=shift.id,
                 )
-
-                if exists:
+                if existing and existing.status != "cancelled":
                     skipped += 1
                     continue
+                if existing:
+                    row = _reactivate_roster_row(
+                        db,
+                        existing,
+                        department_id=data.department_id,
+                        notes=data.notes,
+                        assigned_by=assigned_by,
+                    )
+                    created.append(row.id)
+                    created_by_nurse.setdefault(nurse.id, []).append(
+                        (row.id, roster_date)
+                    )
+                    continue
 
-                row = NurseWorkforceRoster(
-                    nurse_id=nurse.id,
-                    shift_id=shift.id,
-                    department_id=data.department_id,
-                    roster_date=roster_date,
-                    status="scheduled",
-                    notes=data.notes,
-                    assigned_by=assigned_by,
-                )
-
-                db.add(row)
-                db.flush()
+                nested = db.begin_nested()
+                try:
+                    row = NurseWorkforceRoster(
+                        nurse_id=nurse.id,
+                        shift_id=shift.id,
+                        department_id=data.department_id,
+                        roster_date=roster_date,
+                        status="scheduled",
+                        notes=data.notes,
+                        assigned_by=assigned_by,
+                        tenant_id=_session_tenant_id(db),
+                    )
+                    db.add(row)
+                    db.flush()
+                    nested.commit()
+                except IntegrityError:
+                    nested.rollback()
+                    skipped += 1
+                    continue
 
                 created.append(row.id)
                 created_by_nurse.setdefault(nurse.id, []).append(

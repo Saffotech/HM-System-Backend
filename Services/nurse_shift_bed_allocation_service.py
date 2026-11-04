@@ -27,6 +27,7 @@ from Schemas.nurse_shift_bed_allocation_schema import (
     NurseShiftBedAllocationFilter,
     NurseShiftBedAllocationUpdate,
 )
+from Models.nurse_workforce import NurseWorkforceRoster
 from Services import audit_service as audit_service_mod
 from Services.notification_service import create_notification
 
@@ -228,6 +229,31 @@ def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
         "updated_at": row.updated_at,
     }
 
+def _validate_nurse_roster(
+    db: Session,
+    nurse_id: int,
+    allocation_date: date,
+) -> None:
+
+    roster = (
+        db.query(NurseWorkforceRoster)
+        .filter(
+            NurseWorkforceRoster.nurse_id == nurse_id,
+            NurseWorkforceRoster.roster_date == allocation_date,
+            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+        )
+        .first()
+    )
+
+    if roster is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot assign bed. No valid roster entry exists "
+                "for the selected nurse and date."
+            ),
+        )
+
 
 def _record_history(
     db: Session,
@@ -372,6 +398,7 @@ def create_allocation_service(
     ip_address: str | None = None,
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
+    _validate_nurse_roster(db,nurse_id=nurse.id,allocation_date=data.shift_date,)
     bed = _get_bed(db, data.bed_id)
     shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
 
@@ -409,7 +436,6 @@ def create_allocation_service(
             status_code=400,
             detail="Assigned until must be on or after assigned from date",
         )
-
     row = NurseShiftBedAllocation(
         nurse_id=nurse.id,
         bed_id=bed.id,
@@ -485,6 +511,7 @@ def bulk_create_allocations_service(
     ip_address: str | None = None,
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
+    _validate_nurse_roster(db,nurse_id=nurse.id,allocation_date=data.shift_date,)
     shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
 
     if data.department_id is not None:

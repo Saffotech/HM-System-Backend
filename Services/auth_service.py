@@ -1,7 +1,7 @@
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
+from Models.department import Department
 from Models.role import Role
 from Models.user import User
 from Schemas.schemas import UserCreate
@@ -29,6 +29,22 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         raise HTTPException(status_code=404, detail=f"Role with id {data.role_id} not found")
 
     assert_can_assign_role(caller_role_name(actor), role.name)
+    # Validate that the selected department exists and is active.
+    if data.department_id is not None:
+        department = (
+            db.query(Department)
+            .filter(
+                Department.id == data.department_id,
+                Department.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if not department:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected department is inactive or does not exist.",
+            )
 
     if role.name == "doctor" and not data.department_id:
         raise HTTPException(status_code=400, detail="department_id required for doctor")

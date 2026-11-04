@@ -80,6 +80,7 @@ def create_notification(
         reference_id=reference_id,
         created_by=created_by,
         created_by_name=created_by_name,
+        tenant_id=db.info.get("tenant_id"),
     )
     db.add(notification)
     db.commit()
