@@ -191,6 +191,7 @@ PERMISSIONS_LIST = [
     "crm_profile:update",
     "crm_profile:upload_image",
     "crm_profile:delete_image",
+    "legal:review",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -400,6 +401,12 @@ ROLES_DATA = {
             "accountant_profile:delete_image",
         ],
     },
+    "legal_finance": {
+        "description": "Platform Legal and Finance. Reviews an agreed hospital lead before Accounts registers it.",
+        "permissions": [
+            "legal:review",
+        ],
+    },
     "platform_admin": {
         "description": "Platform admin. No hospital; manages leads and hospital registration.",
         "permissions": [
@@ -494,7 +501,7 @@ def _target_permission_ids(
     raw = role_data["permissions"]
     if raw == "__all__":
         # Hospital admin must not register other hospitals or work platform CRM leads.
-        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image"} if role_name == "admin" else set()
+        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal:review"} if role_name == "admin" else set()
         return {
             pid
             for name, pid in perm_ids.items()
@@ -1185,7 +1192,7 @@ def main() -> None:
         print("\nRole IDs:")
         for name, rid in role_ids.items():
             if ROLES_DATA[name]["permissions"] == "__all__":
-                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image"} if name == "admin" else set()
+                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal:review"} if name == "admin" else set()
                 perm_count = len(PERMISSIONS_LIST) - len(skipped)
             else:
                 perm_count = len(ROLES_DATA[name]["permissions"])

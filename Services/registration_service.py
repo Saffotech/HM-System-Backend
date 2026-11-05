@@ -5,11 +5,13 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from Models.lead import Lead, LeadActivity
+from Models.legal_case import LegalCase
 from Models.tenant import Tenant
 from Models.user import User
 from Schemas.registration_schema import RegisterFromLead, RegistrationOut
 from Schemas.tenant_schema import TenantRegisterRequest
 from Services import audit_service
+from Services.legal_case_service import case_approved, case_ready_for_registration
 from Services.tenant_service import register_tenant
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -71,13 +73,18 @@ def list_registrations(db: Session, actor: User, status: str) -> list[Registrati
     lead_status = QUEUE_STATUSES.get(status)
     if lead_status is None:
         raise HTTPException(status_code=422, detail="Status must be agreed or registered.")
-    leads = (
+    query = (
         db.query(Lead)
         .options(joinedload(Lead.agreed_by_user), joinedload(Lead.registered_by_user))
         .filter(Lead.status == lead_status)
-        .order_by(Lead.agreed_at.asc() if lead_status == "Agreed" else Lead.registered_at.desc())
-        .all()
     )
+    if lead_status == "Agreed":
+        query = query.join(LegalCase, LegalCase.lead_id == Lead.id).filter(
+            LegalCase.status == "Approved",
+        )
+    leads = query.order_by(
+        Lead.agreed_at.asc() if lead_status == "Agreed" else Lead.registered_at.desc()
+    ).all()
     hospital_ids = [lead.hospital_id for lead in leads if lead.hospital_id is not None]
     codes = {}
     if hospital_ids:
@@ -92,6 +99,8 @@ def get_registration(db: Session, actor: User, lead_id: int) -> RegistrationOut:
     _assert_accountant(actor)
     lead = _load(db, lead_id)
     if lead is None or lead.status not in ("Agreed", "Registered"):
+        raise HTTPException(status_code=404, detail="Registration not found")
+    if lead.status == "Agreed" and not case_approved(db, lead.id):
         raise HTTPException(status_code=404, detail="Registration not found")
     code = None
     if lead.hospital_id is not None:
@@ -112,6 +121,11 @@ def register_from_lead(db: Session, actor: User, lead_id: int, data: RegisterFro
         raise HTTPException(status_code=404, detail="Registration not found")
     if lead.status != "Agreed" or lead.hospital_id is not None:
         raise HTTPException(status_code=409, detail="This hospital is already registered.")
+    if not case_ready_for_registration(db, lead.id):
+        raise HTTPException(
+            status_code=409,
+            detail="Register this hospital only after Legal and Finance approves it and Accounts records the advance.",
+        )
     if not lead.contact_email:
         raise HTTPException(status_code=422, detail="Contact email is required on the lead before it can be registered.")
     if not (lead.state or "").strip():

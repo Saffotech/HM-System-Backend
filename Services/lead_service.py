@@ -23,6 +23,7 @@ from Schemas.lead_schema import (
     LeadUpdate,
 )
 from Services import audit_service
+from Services.legal_case_service import open_case_for_agreed_lead
 
 IST = ZoneInfo("Asia/Kolkata")
 CLAIM_LIMIT = 5
@@ -509,7 +510,8 @@ def agree_lead(db: Session, lead_id: int, data: LeadAgree, actor: User) -> LeadD
     lead.agreed_by = actor.id
     lead.follow_up_date = None
     lead.next_action = None
-    note = f"Hospital agreed to register on {data.plan} · {data.billing_cycle}. Sent to accounts."
+    open_case_for_agreed_lead(db, lead)
+    note = f"Hospital agreed to register on {data.plan} · {data.billing_cycle}. Sent to Legal and Finance."
     if data.note:
         note = f"{note} {data.note}"
     _activity(db, lead, actor, "Agreed", note)
@@ -518,7 +520,7 @@ def agree_lead(db: Session, lead_id: int, data: LeadAgree, actor: User) -> LeadD
         lead,
         actor,
         "lead.agree",
-        f"Sent {lead.hospital_name} to Accounts",
+        f"Sent {lead.hospital_name} to Legal and Finance",
         {"plan": data.plan, "billing_cycle": data.billing_cycle},
     )
 

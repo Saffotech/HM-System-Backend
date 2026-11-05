@@ -9,7 +9,7 @@ from Services import audit_service
 from Services.role_policy import caller_role_name
 from hash import hash_password
 
-PLATFORM_STAFF_ROLES = frozenset({"crm", "accountant"})
+PLATFORM_STAFF_ROLES = frozenset({"crm", "accountant", "legal_finance"})
 
 
 def _require_platform_admin(actor: User) -> None:
@@ -47,7 +47,7 @@ def create_platform_staff(db: Session, data: PlatformStaffCreate, actor: User) -
 
     role_name = data.role
     if role_name not in PLATFORM_STAFF_ROLES:
-        raise HTTPException(status_code=400, detail="Role must be crm or accountant")
+        raise HTTPException(status_code=400, detail="Role must be crm, accountant, or legal_finance")
 
     email = str(data.email).strip().lower()
     existing = (

@@ -5,6 +5,7 @@ from pathlib import Path
 from Models.accountant_profile import AccountantProfile  # noqa: F401
 from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.crm_profile import CrmProfile  # noqa: F401
+from Models.legal_case import LegalCase, ensure_legal_case_columns  # noqa: F401
 from Models.subscription_invoice import SubscriptionInvoice  # noqa: F401
 from Models.subscription_plan import SubscriptionPlan  # noqa: F401
 from Models.tenant import (
@@ -122,6 +123,7 @@ from Routers.roles import router as roles_router
 from Routers.tenant_router import router as tenant_router
 from Routers.lead_router import router as lead_router
 from Routers.registration_router import router as registration_router
+from Routers.legal_case_router import router as legal_case_router
 from Routers.invoice_router import router as invoice_router
 from Routers.accountant_profile_router import router as accountant_profile_router
 from Routers.plan_router import router as plan_router
@@ -168,6 +170,7 @@ ensure_activity_history_columns(engine)
 ensure_subscription_columns(engine)
 ensure_user_token_version(engine)
 ensure_child_tenant_ids(engine)
+ensure_legal_case_columns(engine)
 _plan_db = SessionLocal()
 try:
     ensure_default_plans(_plan_db)
@@ -233,6 +236,7 @@ app.include_router(lab_technician_notification_router)
 app.include_router(tenant_router)
 app.include_router(lead_router)
 app.include_router(registration_router)
+app.include_router(legal_case_router)
 app.include_router(invoice_router)
 app.include_router(accountant_profile_router)
 start_renewal_billing()

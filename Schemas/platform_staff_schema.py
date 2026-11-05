@@ -8,7 +8,7 @@ class PlatformStaffCreate(BaseModel):
     last_name: Optional[str] = Field(None, max_length=100)
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=128)
-    role: Literal["crm", "accountant"]
+    role: Literal["crm", "accountant", "legal_finance"]
 
 
 class PlatformStaffOut(BaseModel):
