@@ -18,6 +18,7 @@ from Enums.notification import (
 from Models.department import Department
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_shift_bed_allocation_history import NurseShiftBedAllocationHistory
+from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
 from Models.opd_billing import Bed
 from Models.role import Role
 from Models.user import User
@@ -190,6 +191,57 @@ def expire_stale_allocations(db: Session, *, actor_id: int | None = None) -> int
     return len(rows)
 
 
+def _hhmm(value: time | None) -> str | None:
+    if value is None:
+        return None
+    return value.strftime("%H:%M")
+
+
+def _roster_date_for_allocation(row: NurseShiftBedAllocation) -> date:
+    today = _now_ist().date()
+    start = row.shift_date
+    end = getattr(row, "assigned_until", None)
+    if start and today >= start and (end is None or today <= end):
+        return today
+    return start
+
+
+def _roster_shift_for_allocation(db: Session, row: NurseShiftBedAllocation) -> dict | None:
+    """Shift name and times from the nurse roster, not the allocation row."""
+    on_date = _roster_date_for_allocation(row)
+    if on_date is None:
+        return None
+    matches = (
+        db.query(NurseWorkforceShift)
+        .join(NurseWorkforceRoster, NurseWorkforceRoster.shift_id == NurseWorkforceShift.id)
+        .filter(
+            NurseWorkforceRoster.nurse_id == row.nurse_id,
+            NurseWorkforceRoster.roster_date == on_date,
+            NurseWorkforceRoster.status != "cancelled",
+        )
+        .order_by(NurseWorkforceShift.start_time.asc(), NurseWorkforceShift.name.asc())
+        .all()
+    )
+    if not matches:
+        return None
+    if len(matches) == 1:
+        shift = matches[0]
+        return {
+            "shift_name": shift.name,
+            "shift_start": shift.start_time,
+            "shift_end": shift.end_time,
+        }
+    parts = []
+    for shift in matches:
+        start = _hhmm(shift.start_time)
+        end = _hhmm(shift.end_time)
+        if start and end:
+            parts.append(f"{shift.name} ({start}–{end})")
+        else:
+            parts.append(shift.name)
+    return {"shift_name": " · ".join(parts), "shift_start": None, "shift_end": None}
+
+
 def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
     nurse = db.query(User).filter(User.id == row.nurse_id).first()
     bed = db.query(Bed).filter(Bed.id == row.bed_id).first()
@@ -203,6 +255,14 @@ def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
         if row.assigned_by
         else None
     )
+    roster_shift = _roster_shift_for_allocation(db, row)
+    shift_name = row.shift_name or ""
+    shift_start = row.shift_start
+    shift_end = row.shift_end
+    if roster_shift:
+        shift_name = roster_shift["shift_name"] or shift_name
+        shift_start = roster_shift["shift_start"]
+        shift_end = roster_shift["shift_end"]
     return {
         "id": row.id,
         "nurse_id": row.nurse_id,
@@ -213,9 +273,9 @@ def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
         "ward_name": bed.ward_name if bed else None,
         "shift_date": row.shift_date,  # assigned_from
         "assigned_until": getattr(row, "assigned_until", None),
-        "shift_name": row.shift_name or "",
-        "shift_start": row.shift_start,
-        "shift_end": row.shift_end,
+        "shift_name": shift_name,
+        "shift_start": shift_start,
+        "shift_end": shift_end,
         "department_id": row.department_id,
         "department_name": dept.name if dept else None,
         "assigned_by": row.assigned_by,
