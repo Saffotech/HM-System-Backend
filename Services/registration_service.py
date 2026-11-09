@@ -124,7 +124,7 @@ def register_from_lead(db: Session, actor: User, lead_id: int, data: RegisterFro
     if not case_ready_for_registration(db, lead.id):
         raise HTTPException(
             status_code=409,
-            detail="Register this hospital only after Legal and Finance approves it and Accounts records the advance.",
+            detail="Register this hospital only after Legal and Finance approves it.",
         )
     if not lead.contact_email:
         raise HTTPException(status_code=422, detail="Contact email is required on the lead before it can be registered.")

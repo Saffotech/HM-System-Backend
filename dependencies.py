@@ -9,7 +9,7 @@ from jwt_token import decode_access_token
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 
-PLATFORM_ROLES = frozenset({"platform_admin", "crm", "accountant"})
+PLATFORM_ROLES = frozenset({"platform_admin", "crm", "accountant", "legal_finance"})
 
 
 def _role_name(user: User) -> str:

@@ -169,7 +169,7 @@ def _out(case: LegalCase, lead: Lead) -> LegalCaseOut:
         finance=_finance_out(case.finance),
         decision=_decision_out(case.decision),
         advance_received=bool(case.advance_received),
-        ready_to_register=approved and bool(case.advance_received),
+        ready_to_register=approved,
     )
 
 
@@ -448,4 +448,4 @@ def case_approved(db: Session, lead_id: int) -> bool:
 
 def case_ready_for_registration(db: Session, lead_id: int) -> bool:
     case = db.query(LegalCase).filter(LegalCase.lead_id == lead_id).first()
-    return case is not None and case.status == "Approved" and bool(case.advance_received)
+    return case is not None and case.status == "Approved"

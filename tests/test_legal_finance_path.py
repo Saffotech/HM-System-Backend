@@ -164,7 +164,8 @@ class LegalFinancePathTests(unittest.TestCase):
         self.assertEqual(approved.decision.status, "Approved")
         self.assertEqual(approved.finance.discount, 18)
         self.assertFalse(approved.advance_received)
-        self.assertFalse(approved.ready_to_register)
+        self.assertTrue(approved.ready_to_register)
+        self.assertTrue(case_ready_for_registration(self.db, self.lead.id))
         self.assertEqual([row.id for row in list_registrations(self.db, _actor("accountant"), "agreed")], [self.lead.id])
 
         ready = confirm_advance(self.db, _actor("accountant"), first.id)
