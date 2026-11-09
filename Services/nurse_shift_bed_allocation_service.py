@@ -1,12 +1,14 @@
 """Nurse shift bed allocation — admin foundation (Phase 2).
 
 Responsibility assignments only. Does not modify beds/patients or nurse workflows.
+One active nurse per bed per shift. The shift is taken from the nurse roster.
 """
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
 from sqlalchemy import or_
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
 from Enums.notification import (
@@ -27,7 +29,7 @@ from Schemas.nurse_shift_bed_allocation_schema import (
     NurseShiftBedAllocationFilter,
     NurseShiftBedAllocationUpdate,
 )
-from Models.nurse_workforce import NurseWorkforceRoster
+from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift
 from Services import audit_service as audit_service_mod
 from Services.notification_service import create_notification
 
@@ -85,19 +87,6 @@ def _normalize_shift_name(name: str | None) -> str:
     return (name or "").strip()
 
 
-def _resolve_shift_times(
-    shift_name: str,
-    shift_start: time | None,
-    shift_end: time | None,
-) -> tuple[time | None, time | None]:
-    if shift_start is not None or shift_end is not None:
-        return shift_start, shift_end
-    defaults = DEFAULT_SHIFT_TIMES.get(shift_name)
-    if defaults:
-        return defaults
-    return None, None
-
-
 def _is_nurse_user(db: Session, user_id: int) -> User:
     """Validate target user is an active nurse. Does not use department_id."""
     user = (
@@ -131,34 +120,183 @@ def _get_department(db: Session, department_id: int) -> Department:
     return dept
 
 
+def _roster_shifts_for_nurse(
+    db: Session,
+    nurse_id: int,
+    allocation_date: date,
+) -> list[NurseWorkforceShift]:
+    """Scheduled or confirmed roster shifts for one nurse on one date."""
+    rows = (
+        db.query(NurseWorkforceShift)
+        .join(
+            NurseWorkforceRoster,
+            NurseWorkforceRoster.shift_id == NurseWorkforceShift.id,
+        )
+        .filter(
+            NurseWorkforceRoster.nurse_id == nurse_id,
+            NurseWorkforceRoster.roster_date == allocation_date,
+            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+        )
+        .all()
+    )
+    distinct: dict[str, NurseWorkforceShift] = {}
+    for shift in rows:
+        key = (shift.name or "").strip().lower()
+        if key and key not in distinct:
+            distinct[key] = shift
+    return list(distinct.values())
+
+
+def _resolve_roster_shift(
+    db: Session,
+    nurse_id: int,
+    allocation_date: date,
+    requested_name: str | None = None,
+) -> NurseWorkforceShift:
+    """Shift name and times come from the nurse roster, not the allocation form.
+
+    A requested name must match one rostered shift. With no name, the nurse
+    must have exactly one roster shift on that date.
+    """
+    shifts = _roster_shifts_for_nurse(db, nurse_id, allocation_date)
+    if not shifts:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Cannot assign bed. No valid roster entry exists "
+                "for the selected nurse and date."
+            ),
+        )
+
+    requested = _normalize_shift_name(requested_name).lower()
+    if requested:
+        for shift in shifts:
+            if (shift.name or "").strip().lower() == requested:
+                return shift
+        names = ", ".join(shift.name for shift in shifts)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Selected nurse is rostered for {names} on "
+                f"{allocation_date.isoformat()}, not {requested_name.strip()}."
+            ),
+        )
+
+    if len(shifts) > 1:
+        names = ", ".join(shift.name for shift in shifts)
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Selected nurse has more than one roster shift on "
+                f"{allocation_date.isoformat()} ({names}). "
+                "Pass shift_name to choose one."
+            ),
+        )
+    return shifts[0]
+
+
+def _effective_shift_name(db: Session, row: NurseShiftBedAllocation) -> str:
+    """Stored shift, or the nurse's single roster shift when the row has none.
+
+    Does not write the row. Older allocations were saved without a shift.
+    """
+    stored = _normalize_shift_name(row.shift_name)
+    if stored:
+        return stored
+    if row.shift_date is None:
+        return ""
+    shifts = _roster_shifts_for_nurse(db, row.nurse_id, row.shift_date)
+    if len(shifts) == 1:
+        return (shifts[0].name or "").strip()
+    return ""
+
+
+def _allocation_conflict_detail(
+    db: Session,
+    bed: Bed,
+    conflict: NurseShiftBedAllocation,
+    shift_name: str,
+) -> str:
+    nurse = conflict.nurse if getattr(conflict, "nurse", None) is not None else None
+    if nurse is None:
+        nurse = db.query(User).filter(User.id == conflict.nurse_id).first()
+    nurse_name = (
+        _display_name(nurse.first_name, nurse.last_name)
+        if nurse
+        else f"nurse #{conflict.nurse_id}"
+    )
+    label = _normalize_shift_name(shift_name) or "that shift"
+    return (
+        f"Bed {bed.bed_number} is already assigned to {nurse_name} for {label}. "
+        "Another nurse can take this bed on a different shift. "
+        "Change or deactivate this assignment to reuse the same shift."
+    )
+
+
+def _commit_allocation(db: Session) -> None:
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "This bed already has an active assignment for that shift. "
+                "Choose a nurse on another shift, or deactivate the existing assignment."
+            ),
+        )
+
+
 def _find_active_conflict(
     db: Session,
     *,
     bed_id: int,
+    shift_name: str,
+    shift_date: date,
+    assigned_until: date | None = None,
     exclude_id: int | None = None,
 ) -> NurseShiftBedAllocation | None:
-    """One active nurse responsibility per bed (persistent until admin changes)."""
-    expire_stale_allocations(db)
-    today = _now_ist().date()
+    """One active nurse per bed per shift when the date ranges overlap.
+
+    A Morning assignment does not block Evening or Night on the same bed.
+    """
+    expire_stale_allocations(db, commit=False)
+    wanted = _normalize_shift_name(shift_name).lower()
+    if not wanted or shift_date is None:
+        return None
+
+    range_end = assigned_until or date.max
     q = db.query(NurseShiftBedAllocation).filter(
         NurseShiftBedAllocation.bed_id == bed_id,
         NurseShiftBedAllocation.is_active.is_(True),
-        NurseShiftBedAllocation.shift_date <= today,
+        NurseShiftBedAllocation.shift_date <= range_end,
         or_(
             NurseShiftBedAllocation.assigned_until.is_(None),
-            NurseShiftBedAllocation.assigned_until >= today,
+            NurseShiftBedAllocation.assigned_until >= shift_date,
         ),
     )
     if exclude_id is not None:
         q = q.filter(NurseShiftBedAllocation.id != exclude_id)
-    return q.first()
+
+    for row in q.all():
+        if _effective_shift_name(db, row).lower() == wanted:
+            return row
+    return None
 
 
-def expire_stale_allocations(db: Session, *, actor_id: int | None = None) -> int:
+def expire_stale_allocations(
+    db: Session,
+    *,
+    actor_id: int | None = None,
+    commit: bool = True,
+) -> int:
     """Deactivate allocations whose assigned_until date has already passed (IST).
 
     Beds become free for reassignment. Inclusive end date: active through
     assigned_until; expired when today > assigned_until.
+
+    ``commit=False`` keeps the expiry in the caller's transaction so a later
+    conflict error does not persist an in-progress edit.
     """
     today = _now_ist().date()
     rows = (
@@ -187,7 +325,10 @@ def expire_stale_allocations(db: Session, *, actor_id: int | None = None) -> int
                 "has passed"
             ),
         )
-    db.commit()
+    if commit:
+        db.commit()
+    else:
+        db.flush()
     return len(rows)
 
 
@@ -228,32 +369,6 @@ def _allocation_out(db: Session, row: NurseShiftBedAllocation) -> dict:
         "created_at": row.created_at,
         "updated_at": row.updated_at,
     }
-
-def _validate_nurse_roster(
-    db: Session,
-    nurse_id: int,
-    allocation_date: date,
-) -> None:
-
-    roster = (
-        db.query(NurseWorkforceRoster)
-        .filter(
-            NurseWorkforceRoster.nurse_id == nurse_id,
-            NurseWorkforceRoster.roster_date == allocation_date,
-            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
-        )
-        .first()
-    )
-
-    if roster is None:
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                "Cannot assign bed. No valid roster entry exists "
-                "for the selected nurse and date."
-            ),
-        )
-
 
 def _record_history(
     db: Session,
@@ -398,37 +513,18 @@ def create_allocation_service(
     ip_address: str | None = None,
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
-    _validate_nurse_roster(db,nurse_id=nurse.id,allocation_date=data.shift_date,)
     bed = _get_bed(db, data.bed_id)
-    shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
+    roster_shift = _resolve_roster_shift(
+        db,
+        nurse.id,
+        data.shift_date,
+        getattr(data, "shift_name", None),
+    )
+    shift_name = (roster_shift.name or "").strip()
+    start, end = roster_shift.start_time, roster_shift.end_time
 
     if data.department_id is not None:
         _get_department(db, data.department_id)
-
-    conflict = _find_active_conflict(
-        db,
-        bed_id=bed.id,
-    )
-    if conflict:
-        conflict_nurse = _display_name(
-            conflict.nurse.first_name if conflict.nurse else None,
-            conflict.nurse.last_name if conflict.nurse else None,
-        ) if hasattr(conflict, "nurse") else None
-        if not conflict_nurse:
-            cn = db.query(User).filter(User.id == conflict.nurse_id).first()
-            conflict_nurse = (
-                _display_name(cn.first_name, cn.last_name) if cn else f"nurse #{conflict.nurse_id}"
-            )
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"Bed {bed.bed_number} is already assigned to {conflict_nurse}. "
-                f"Change or deactivate that assignment first."
-            ),
-        )
-
-    start, end = _resolve_shift_times(shift_name, data.shift_start, data.shift_end)
-    dept_id = data.department_id if data.department_id is not None else bed.department_id
 
     assigned_until = getattr(data, "assigned_until", None)
     if assigned_until is not None and assigned_until < data.shift_date:
@@ -436,6 +532,21 @@ def create_allocation_service(
             status_code=400,
             detail="Assigned until must be on or after assigned from date",
         )
+
+    conflict = _find_active_conflict(
+        db,
+        bed_id=bed.id,
+        shift_name=shift_name,
+        shift_date=data.shift_date,
+        assigned_until=assigned_until,
+    )
+    if conflict:
+        raise HTTPException(
+            status_code=400,
+            detail=_allocation_conflict_detail(db, bed, conflict, shift_name),
+        )
+
+    dept_id = data.department_id if data.department_id is not None else bed.department_id
     row = NurseShiftBedAllocation(
         nurse_id=nurse.id,
         bed_id=bed.id,
@@ -460,7 +571,7 @@ def create_allocation_service(
         new_bed_id=row.bed_id,
         remarks=data.notes,
     )
-    db.commit()
+    _commit_allocation(db)
     db.refresh(row)
     out = _allocation_out(db, row)
     bed_label = out.get("bed_number") or f"#{out.get('bed_id')}"
@@ -511,13 +622,18 @@ def bulk_create_allocations_service(
     ip_address: str | None = None,
 ) -> dict:
     nurse = _is_nurse_user(db, data.nurse_id)
-    _validate_nurse_roster(db,nurse_id=nurse.id,allocation_date=data.shift_date,)
-    shift_name = _normalize_shift_name(getattr(data, "shift_name", None))
+    roster_shift = _resolve_roster_shift(
+        db,
+        nurse.id,
+        data.shift_date,
+        getattr(data, "shift_name", None),
+    )
+    shift_name = (roster_shift.name or "").strip()
+    start, end = roster_shift.start_time, roster_shift.end_time
 
     if data.department_id is not None:
         _get_department(db, data.department_id)
 
-    start, end = _resolve_shift_times(shift_name, data.shift_start, data.shift_end)
     assigned_until = getattr(data, "assigned_until", None)
     if assigned_until is not None and assigned_until < data.shift_date:
         raise HTTPException(
@@ -541,22 +657,12 @@ def bulk_create_allocations_service(
         conflict = _find_active_conflict(
             db,
             bed_id=bed.id,
+            shift_name=shift_name,
+            shift_date=data.shift_date,
+            assigned_until=assigned_until,
         )
         if conflict:
-            if conflict.nurse_id == nurse.id:
-                errors.append(
-                    f"Bed {bed.bed_number}: already assigned to this nurse"
-                )
-            else:
-                cn = db.query(User).filter(User.id == conflict.nurse_id).first()
-                conflict_nurse = (
-                    _display_name(cn.first_name, cn.last_name)
-                    if cn
-                    else f"nurse #{conflict.nurse_id}"
-                )
-                errors.append(
-                    f"Bed {bed.bed_number}: already assigned to {conflict_nurse}"
-                )
+            errors.append(_allocation_conflict_detail(db, bed, conflict, shift_name))
             skipped += 1
             continue
 
@@ -590,7 +696,7 @@ def bulk_create_allocations_service(
         created_ids.append(row.id)
         created_items.append(_allocation_out(db, row))
 
-    db.commit()
+    _commit_allocation(db)
     if created_ids:
         _audit_allocation(
             db,
@@ -677,15 +783,6 @@ def update_allocation_service(
     if "shift_date" in payload and payload["shift_date"] is not None:
         row.shift_date = payload["shift_date"]
 
-    if "shift_name" in payload and payload["shift_name"] is not None:
-        row.shift_name = _normalize_shift_name(payload["shift_name"])
-
-    if "shift_start" in payload:
-        row.shift_start = payload["shift_start"]
-
-    if "shift_end" in payload:
-        row.shift_end = payload["shift_end"]
-
     if "department_id" in payload:
         if payload["department_id"] is not None:
             _get_department(db, payload["department_id"])
@@ -716,19 +813,56 @@ def update_allocation_service(
             detail="Assigned until must be on or after assigned from date",
         )
 
+    nurse_changed = (
+        "nurse_id" in payload
+        and payload["nurse_id"] is not None
+        and payload["nurse_id"] != old_nurse_id
+    )
+    date_changed = (
+        "shift_date" in payload
+        and payload["shift_date"] is not None
+        and payload["shift_date"] != old_shift_date
+    )
+    shift_requested = "shift_name" in payload and payload["shift_name"] is not None
+    reactivated = (not was_active) and row.is_active
+    if row.is_active and (
+        nurse_changed
+        or date_changed
+        or shift_requested
+        or reactivated
+        or not _normalize_shift_name(row.shift_name)
+    ):
+        roster_shift = _resolve_roster_shift(
+            db,
+            row.nurse_id,
+            row.shift_date,
+            payload.get("shift_name") if shift_requested else None,
+        )
+        row.shift_name = (roster_shift.name or "").strip()
+        row.shift_start = roster_shift.start_time
+        row.shift_end = roster_shift.end_time
+    else:
+        if shift_requested:
+            row.shift_name = _normalize_shift_name(payload["shift_name"])
+        if "shift_start" in payload:
+            row.shift_start = payload["shift_start"]
+        if "shift_end" in payload:
+            row.shift_end = payload["shift_end"]
+
     if row.is_active:
         conflict = _find_active_conflict(
             db,
             bed_id=row.bed_id,
+            shift_name=row.shift_name,
+            shift_date=row.shift_date,
+            assigned_until=getattr(row, "assigned_until", None),
             exclude_id=row.id,
         )
         if conflict:
+            bed = _get_bed(db, row.bed_id)
             raise HTTPException(
                 status_code=400,
-                detail=(
-                    "Another active assignment already exists for this bed. "
-                    "Deactivate or reassign that bed first."
-                ),
+                detail=_allocation_conflict_detail(db, bed, conflict, row.shift_name),
             )
 
     if history_action:
@@ -756,7 +890,7 @@ def update_allocation_service(
     )
 
     row.updated_at = _now_ist()
-    db.commit()
+    _commit_allocation(db)
     db.refresh(row)
     out = _allocation_out(db, row)
 

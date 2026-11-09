@@ -24,10 +24,12 @@ def _now():
 
 
 class NurseShiftBedAllocation(TenantScoped):
-    """Persistent bed responsibility for a nurse until admin changes it.
+    """Bed responsibility for one nurse on one shift until admin changes it.
 
     Does not modify beds.patient_id or imply patient ownership.
     shift_date = assigned_from; assigned_until set when deactivated/reassigned.
+    The same bed may be assigned to another nurse on a different shift.
+    shift_name and times are taken from that nurse's roster for shift_date.
     """
 
     __tablename__ = "nurse_shift_bed_allocations"
