@@ -489,6 +489,9 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
     from Services.nurse_shift_bed_allocation_service import (
         get_nurse_allocation_summary_service,
     )
+    from Services.nurse_workforce_service import complete_finished_roster_entries
+
+    complete_finished_roster_entries(db)
 
     today = _today_ist()
     # Upcoming only: today through ~2 weeks (never include past days).
@@ -521,7 +524,7 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
         .join(NurseWorkforceShift, NurseWorkforceShift.id == NurseWorkforceRoster.shift_id)
         .filter(
             NurseWorkforceRoster.nurse_id == nurse_id,
-            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+            NurseWorkforceRoster.status.in_(["scheduled", "completed"]),
             NurseWorkforceRoster.roster_date >= roster_lookback_from,
             NurseWorkforceRoster.roster_date <= roster_to,
         )

@@ -125,7 +125,11 @@ def _roster_shifts_for_nurse(
     nurse_id: int,
     allocation_date: date,
 ) -> list[NurseWorkforceShift]:
-    """Scheduled or confirmed roster shifts for one nurse on one date."""
+    """Roster shifts for one nurse on one date, including a shift that already finished."""
+    from Services.nurse_workforce_service import complete_finished_roster_entries
+
+    # Do not commit here. Allocation create/update may already have pending changes.
+    complete_finished_roster_entries(db, commit=False)
     rows = (
         db.query(NurseWorkforceShift)
         .join(
@@ -135,7 +139,7 @@ def _roster_shifts_for_nurse(
         .filter(
             NurseWorkforceRoster.nurse_id == nurse_id,
             NurseWorkforceRoster.roster_date == allocation_date,
-            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+            NurseWorkforceRoster.status.in_(["scheduled", "completed"]),
         )
         .all()
     )

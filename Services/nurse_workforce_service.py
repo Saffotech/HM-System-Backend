@@ -1,11 +1,11 @@
 """Nurse Workforce Management — shifts, roster, and dashboard."""
 from __future__ import annotations
 
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -42,6 +42,57 @@ DEFAULT_SHIFTS = [
 
 def _now() -> datetime:
     return datetime.now(IST)
+
+
+def _shift_end_at(roster_date: date, start_time: time, end_time: time) -> datetime:
+    """Instant the assignment finishes, from the shift's configured times.
+
+    When the end time is not after the start time, the shift crosses midnight
+    and finishes on the next calendar day (for example 22:00–06:00).
+    """
+    start = start_time.replace(tzinfo=None)
+    end = end_time.replace(tzinfo=None)
+    end_date = roster_date if end > start else roster_date + timedelta(days=1)
+    return datetime.combine(end_date, end, tzinfo=IST)
+
+
+def complete_finished_roster_entries(db: Session, *, commit: bool = True) -> int:
+    """Apply the roster lifecycle: scheduled, then completed once the shift ends.
+
+    New assignments are scheduled. This marks one completed when the current
+    time reaches the shift's configured end. Any leftover confirmed row is
+    moved to scheduled, or to completed if that shift has already ended.
+    Cancelled rows are left as they are.
+    """
+    now = _now()
+    rows = (
+        db.query(NurseWorkforceRoster, NurseWorkforceShift)
+        .join(NurseWorkforceShift, NurseWorkforceShift.id == NurseWorkforceRoster.shift_id)
+        .filter(
+            or_(
+                NurseWorkforceRoster.status == "confirmed",
+                and_(
+                    NurseWorkforceRoster.status == "scheduled",
+                    NurseWorkforceRoster.roster_date <= now.date(),
+                ),
+            )
+        )
+        .all()
+    )
+    changed = 0
+    for roster, shift in rows:
+        finished = now >= _shift_end_at(roster.roster_date, shift.start_time, shift.end_time)
+        next_status = "completed" if finished else "scheduled"
+        if roster.status != next_status:
+            roster.status = next_status
+            roster.updated_at = now
+            changed += 1
+    if changed:
+        if commit:
+            db.commit()
+        else:
+            db.flush()
+    return changed
 
 
 def _display_name(user: User | None) -> str | None:
@@ -310,7 +361,7 @@ def create_roster_service(
             department_id=data.department_id,
             notes=data.notes,
             assigned_by=assigned_by,
-            status=data.status or "scheduled",
+            status="scheduled",
         )
     else:
         row = NurseWorkforceRoster(
@@ -318,7 +369,7 @@ def create_roster_service(
             shift_id=shift.id,
             department_id=data.department_id,
             roster_date=data.roster_date,
-            status=data.status or "scheduled",
+            status="scheduled",
             notes=data.notes,
             assigned_by=assigned_by,
             tenant_id=_session_tenant_id(db),
@@ -340,6 +391,7 @@ def create_roster_service(
         reference_id=row.id,
         notification_type=NotificationType.SHIFT_UPDATED,
     )
+    complete_finished_roster_entries(db)
     return {"success": True, "data": _roster_out(db, row)}
 
 
@@ -463,6 +515,7 @@ def bulk_create_roster_service(
             priority=NotificationPriority.NORMAL,
         )
 
+    complete_finished_roster_entries(db)
     return {
         "success": True,
         "created": len(created),
@@ -483,6 +536,7 @@ def list_roster_service(
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
+    complete_finished_roster_entries(db)
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
     q = db.query(NurseWorkforceRoster).filter(NurseWorkforceRoster.status != "cancelled")
@@ -521,6 +575,14 @@ def delete_roster_service(
     row = db.query(NurseWorkforceRoster).filter(NurseWorkforceRoster.id == roster_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Roster entry not found")
+    if row.roster_date < _now().date():
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Past roster shifts cannot be cancelled. "
+                f"{row.roster_date.isoformat()} is already in the past."
+            ),
+        )
     row.status = "cancelled"
     row.updated_at = _now()
     db.commit()
@@ -560,6 +622,7 @@ def _current_shift(db: Session) -> NurseWorkforceShift | None:
 
 def get_workforce_dashboard_service(db: Session, *, target_date: date | None = None) -> dict:
     day = target_date or _now().date()
+    complete_finished_roster_entries(db)
     ensure_default_shifts_service(db)
     current = _current_shift(db)
 
@@ -568,7 +631,7 @@ def get_workforce_dashboard_service(db: Session, *, target_date: date | None = N
         for r in db.query(NurseWorkforceRoster.nurse_id)
         .filter(
             NurseWorkforceRoster.roster_date == day,
-            NurseWorkforceRoster.status.in_(["scheduled", "confirmed"]),
+            NurseWorkforceRoster.status.in_(["scheduled", "completed"]),
         )
         .distinct()
         .all()

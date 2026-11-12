@@ -72,7 +72,7 @@ class NurseWorkforceRoster(TenantScoped):
     )
     roster_date = Column(Date, nullable=False, index=True)
     status = Column(String(30), nullable=False, default="scheduled", index=True)
-    # scheduled | confirmed | cancelled | completed
+    # scheduled | cancelled | completed
     notes = Column(Text, nullable=True)
     assigned_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now, nullable=False)
