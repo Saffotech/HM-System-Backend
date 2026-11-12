@@ -253,9 +253,72 @@ def list_shifts_service(db: Session, *, is_active: bool | None = True) -> dict:
     return {"success": True, "total": len(rows), "items": [_shift_out(r) for r in rows]}
 
 
+def _clock_minutes(value: time) -> int:
+    clock = value.replace(tzinfo=None)
+    return clock.hour * 60 + clock.minute
+
+
+def _format_shift_clock(value: time) -> str:
+    clock = value.replace(tzinfo=None)
+    return f"{clock.hour:02d}:{clock.minute:02d}"
+
+
+def _shift_intervals(start_time: time, end_time: time) -> list[tuple[int, int]]:
+    """Half-open minute ranges covered by a shift.
+
+    A shift that ends at the next shift's start does not overlap it.
+    A shift whose end is not after its start crosses midnight.
+    """
+    start = _clock_minutes(start_time)
+    end = _clock_minutes(end_time)
+    if start < end:
+        return [(start, end)]
+    if start > end:
+        return [(start, 24 * 60), (0, end)]
+    return [(0, 24 * 60)]
+
+
+def _intervals_overlap(
+    left: list[tuple[int, int]],
+    right: list[tuple[int, int]],
+) -> bool:
+    return any(start_a < end_b and start_b < end_a for start_a, end_a in left for start_b, end_b in right)
+
+
+def _reject_overlapping_shift(
+    db: Session,
+    start_time: time,
+    end_time: time,
+    *,
+    exclude_id: int | None = None,
+) -> None:
+    """Active shifts must not cover the same part of the day."""
+    incoming = _shift_intervals(start_time, end_time)
+    rows = (
+        db.query(NurseWorkforceShift)
+        .filter(NurseWorkforceShift.is_active.is_(True))
+        .order_by(NurseWorkforceShift.start_time.asc())
+        .all()
+    )
+    for row in rows:
+        if exclude_id is not None and row.id == exclude_id:
+            continue
+        if not _intervals_overlap(incoming, _shift_intervals(row.start_time, row.end_time)):
+            continue
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Shift timings overlap an existing shift "
+                f"({row.name}, {_format_shift_clock(row.start_time)}–{_format_shift_clock(row.end_time)})."
+            ),
+        )
+
+
 def create_shift_service(db: Session, data: NurseWorkforceShiftCreate) -> dict:
     if db.query(NurseWorkforceShift).filter(NurseWorkforceShift.name == data.name.strip()).first():
         raise HTTPException(status_code=400, detail="Shift name already exists")
+    if data.is_active:
+        _reject_overlapping_shift(db, data.start_time, data.end_time)
     row = NurseWorkforceShift(
         name=data.name.strip(),
         code=(data.code or None),
@@ -281,6 +344,16 @@ def update_shift_service(db: Session, shift_id: int, data: NurseWorkforceShiftUp
     payload = data.model_dump(exclude_unset=True)
     if "name" in payload and payload["name"]:
         payload["name"] = payload["name"].strip()
+    start_time = payload.get("start_time") or row.start_time
+    end_time = payload.get("end_time") or row.end_time
+    is_active = payload["is_active"] if payload.get("is_active") is not None else row.is_active
+    if is_active:
+        _reject_overlapping_shift(
+            db,
+            start_time,
+            end_time,
+            exclude_id=row.id,
+        )
     for key, value in payload.items():
         setattr(row, key, value)
     row.updated_at = _now()
