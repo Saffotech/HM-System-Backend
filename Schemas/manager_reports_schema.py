@@ -23,7 +23,7 @@ class AdminReportsOverviewResponse(BaseModel):
     new_patients_in_period: int
     total_visits: int
     completed_visits: int
-    pending_payments: int
+    pending_payments: float
     total_revenue: float
     collected_revenue: float
     outstanding_revenue: float
