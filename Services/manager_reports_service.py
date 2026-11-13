@@ -280,73 +280,216 @@ def get_reports_overview(
     )
 
 
+IPD_REPORT_ID_OFFSET = 1_000_000_000
+
+
+def _iso_ist(value) -> Optional[str]:
+    if value is None:
+        return None
+    if getattr(value, "tzinfo", None) is None:
+        value = value.replace(tzinfo=IST)
+    return value.astimezone(IST).isoformat()
+
+
+def _patient_fields(patient: Optional[Patient]) -> tuple[Optional[str], Optional[str]]:
+    if patient is None:
+        return None, None
+    return patient.patient_uid, display_name(patient.first_name, patient.last_name)
+
+
+def _doctor_names(db: Session, doctor_ids: set[int]) -> dict[int, str]:
+    names: dict[int, str] = {}
+    if not doctor_ids:
+        return names
+    for doctor in db.query(User).filter(User.id.in_(doctor_ids)).all():
+        name = display_name(doctor.first_name, doctor.last_name, prefix="Dr. ")
+        if name and name != "Dr.":
+            names[doctor.id] = name
+    return names
+
+
+def _report_source(source: Optional[str]) -> str:
+    key = (source or "all").strip().lower()
+    if key not in {"opd", "ipd", "all"}:
+        return "all"
+    return key
+
+
+def _opd_visit_status(visit: OpdVisit, completed_appointment_ids: set[int]) -> str:
+    raw = (visit.status or "").strip().lower()
+    if raw in {"complete", "completed"}:
+        return "complete"
+    if raw in {"admit", "admitted"}:
+        return "admit"
+    if raw == "discharged":
+        return "discharged"
+    if raw == "cancelled":
+        return "cancelled"
+    if visit.appointment_id and visit.appointment_id in completed_appointment_ids:
+        return "complete"
+    return raw
+
+
+def _ipd_visit_status(status: Optional[str]) -> str:
+    raw = (status or "").strip().lower()
+    if raw in {"admit", "admitted"}:
+        return "admit"
+    if raw == "discharged":
+        return "discharged"
+    return raw
+
+
+def _latest_ipd_bills(db: Session, admission_ids: list[int]) -> dict[int, IpdBill]:
+    latest: dict[int, IpdBill] = {}
+    if not admission_ids:
+        return latest
+    rows = (
+        db.query(IpdBill)
+        .filter(
+            IpdBill.admission_id.in_(admission_ids),
+            IpdBill.status != "void",
+        )
+        .order_by(IpdBill.generated_at.desc(), IpdBill.id.desc())
+        .all()
+    )
+    for bill in rows:
+        latest.setdefault(bill.admission_id, bill)
+    return latest
+
+
 def get_visits_report(
     db: Session,
     from_date: Optional[date] = None,
     to_date: Optional[date] = None,
     department_id: Optional[int] = None,
+    source: Optional[str] = None,
     page: int = 1,
     limit: int = 20,
 ) -> AdminVisitsReportResponse:
     start_day, end_day, period_start, period_end, bounded = _period_bounds(from_date, to_date)
+    include = _report_source(source)
+    visits: list[AdminVisitsReportItem] = []
 
-    query = (
-        db.query(OpdVisit, Department.name)
-        .join(Department, Department.id == OpdVisit.department_id)
-    )
-    if bounded:
-        query = query.filter(
-            OpdVisit.visit_date >= period_start,
-            OpdVisit.visit_date <= period_end,
+    if include in {"opd", "all"}:
+        opd_query = (
+            db.query(OpdVisit, Department.name, Patient)
+            .outerjoin(Department, Department.id == OpdVisit.department_id)
+            .outerjoin(Patient, Patient.id == OpdVisit.patient_id)
         )
-    if department_id is not None:
-        query = query.filter(OpdVisit.department_id == department_id)
-
-    total = int(query.count())
-    rows = (
-        query.order_by(OpdVisit.visit_date.desc())
-        .offset((page - 1) * limit)
-        .limit(limit)
-        .all()
-    )
-
-    doctor_ids = {visit.doctor_id for visit, _dept_name in rows if visit.doctor_id}
-    doctor_names = {}
-    if doctor_ids:
-        for doctor in db.query(User).filter(User.id.in_(doctor_ids)).all():
-            name = display_name(doctor.first_name, doctor.last_name, prefix="Dr. ")
-            if name and name != "Dr.":
-                doctor_names[doctor.id] = name
-
-    visits = [
-        AdminVisitsReportItem(
-            visit_id=visit.id,
-            bill_number=visit.bill_number,
-            token_number=visit.token_number,
-            patient_id=visit.patient_id,
-            department_id=visit.department_id,
-            department_name=dept_name,
-            doctor_id=visit.doctor_id,
-            grand_total=float(visit.grand_total or 0),
-            paid_amount=float(visit.paid_amount) if visit.paid_amount is not None else None,
-            payment_status=visit.payment_status,
-            status=(
-                doctor_names.get(visit.doctor_id)
-                if (visit.status or "").strip().lower() == "doctor_assigned"
-                and visit.doctor_id in doctor_names
-                else visit.status
-            ),
-            visit_date=visit.visit_date.isoformat() if visit.visit_date else None,
+        if bounded:
+            opd_query = opd_query.filter(
+                OpdVisit.visit_date >= period_start,
+                OpdVisit.visit_date <= period_end,
+            )
+        if department_id is not None:
+            opd_query = opd_query.filter(OpdVisit.department_id == department_id)
+        opd_rows = opd_query.all()
+        completed_appointment_ids = {
+            appointment_id
+            for (appointment_id,) in db.query(Appointment.id)
+            .filter(Appointment.status == AppointmentStatus.completed)
+            .all()
+            if appointment_id
+        }
+        doctor_names = _doctor_names(
+            db, {visit.doctor_id for visit, _dept, _patient in opd_rows if visit.doctor_id}
         )
-        for visit, dept_name in rows
-    ]
+        for visit, dept_name, patient in opd_rows:
+            patient_uid, patient_name = _patient_fields(patient)
+            visits.append(
+                AdminVisitsReportItem(
+                    visit_id=visit.id,
+                    bill_number=visit.bill_number,
+                    token_number=visit.token_number,
+                    patient_id=visit.patient_id,
+                    patient_uid=patient_uid,
+                    patient_name=patient_name,
+                    department_id=visit.department_id,
+                    department_name=dept_name or "",
+                    doctor_id=visit.doctor_id,
+                    doctor_name=doctor_names.get(visit.doctor_id),
+                    grand_total=float(visit.grand_total or 0),
+                    paid_amount=(
+                        float(visit.paid_amount) if visit.paid_amount is not None else None
+                    ),
+                    payment_status=visit.payment_status,
+                    status=_opd_visit_status(visit, completed_appointment_ids),
+                    visit_date=_iso_ist(visit.visit_date),
+                    source="opd",
+                )
+            )
+
+    if include in {"ipd", "all"}:
+        ipd_query = (
+            db.query(IpdAdmission, Department.name, Patient)
+            .outerjoin(Department, Department.id == IpdAdmission.department_id)
+            .outerjoin(Patient, Patient.id == IpdAdmission.patient_id)
+            .filter(IpdAdmission.status != "cancelled")
+        )
+        if bounded:
+            ipd_query = ipd_query.filter(
+                IpdAdmission.admitted_at >= period_start,
+                IpdAdmission.admitted_at <= period_end,
+            )
+        if department_id is not None:
+            ipd_query = ipd_query.filter(IpdAdmission.department_id == department_id)
+        ipd_rows = ipd_query.all()
+        bills = _latest_ipd_bills(db, [admission.id for admission, _dept, _patient in ipd_rows])
+        doctor_names = _doctor_names(
+            db,
+            {
+                admission.doctor_id
+                for admission, _dept, _patient in ipd_rows
+                if admission.doctor_id
+            },
+        )
+        for admission, dept_name, patient in ipd_rows:
+            patient_uid, patient_name = _patient_fields(patient)
+            bill = bills.get(admission.id)
+            visits.append(
+                AdminVisitsReportItem(
+                    visit_id=IPD_REPORT_ID_OFFSET + admission.id,
+                    bill_number=(bill.bill_number if bill else admission.admission_no),
+                    token_number=admission.admission_no,
+                    patient_id=admission.patient_id,
+                    patient_uid=patient_uid,
+                    patient_name=patient_name,
+                    department_id=admission.department_id or 0,
+                    department_name=dept_name or admission.ward_name or "",
+                    doctor_id=admission.doctor_id,
+                    doctor_name=doctor_names.get(admission.doctor_id),
+                    grand_total=float(bill.grand_total or 0) if bill else 0.0,
+                    paid_amount=(
+                        float(bill.paid_amount) if bill and bill.paid_amount is not None else None
+                    ),
+                    payment_status=bill.payment_status if bill else "pending",
+                    status=_ipd_visit_status(admission.status),
+                    visit_date=_iso_ist(admission.admitted_at),
+                    source="ipd",
+                )
+            )
+
+    visits.sort(key=lambda row: row.visit_date or "", reverse=True)
+    total = len(visits)
+    start = max(0, (page - 1) * limit)
+    visits = visits[start : start + limit]
 
     if not bounded:
-        earliest = db.query(func.min(OpdVisit.visit_date)).scalar()
-        if earliest is not None:
+        earliest_values = [
+            db.query(func.min(OpdVisit.visit_date)).scalar(),
+            db.query(func.min(IpdAdmission.admitted_at))
+            .filter(IpdAdmission.status != "cancelled")
+            .scalar(),
+        ]
+        earliest_dates = []
+        for earliest in earliest_values:
+            if earliest is None:
+                continue
             if earliest.tzinfo is None:
                 earliest = earliest.replace(tzinfo=IST)
-            start_day = earliest.astimezone(IST).date()
+            earliest_dates.append(earliest.astimezone(IST).date())
+        if earliest_dates:
+            start_day = min(earliest_dates)
 
     return AdminVisitsReportResponse(
         from_date=start_day,
