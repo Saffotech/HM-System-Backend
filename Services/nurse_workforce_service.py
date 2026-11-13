@@ -721,13 +721,17 @@ def get_workforce_dashboard_service(db: Session, *, target_date: date | None = N
     alloc_beds = {
         r[0]
         for r in db.query(NurseShiftBedAllocation.bed_id)
+        .join(Bed, Bed.id == NurseShiftBedAllocation.bed_id)
         .filter(
             NurseShiftBedAllocation.is_active.is_(True),
+            Bed.is_active.is_(True),
         )
         .distinct()
         .all()
     }
-    total_beds = db.query(func.count(Bed.id)).scalar() or 0
+    total_beds = (
+        db.query(func.count(Bed.id)).filter(Bed.is_active.is_(True)).scalar() or 0
+    )
     coverage = round((len(alloc_beds) / total_beds) * 100, 1) if total_beds else 0.0
 
     return {

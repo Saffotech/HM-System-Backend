@@ -142,6 +142,7 @@ def get_medication_patients_service(
         )
         .filter(
             Bed.status == "occupied",
+            Bed.is_active.is_(True),
             Patient.is_active == True
         )
     )
@@ -337,7 +338,8 @@ def get_patient_medications_service(
         db.query(Bed)
         .filter(
             Bed.patient_id == patient_id,
-            Bed.status == "occupied"
+            Bed.status == "occupied",
+            Bed.is_active.is_(True),
         ).order_by(Bed.admitted_at.desc())
          .first()
     )
@@ -450,7 +452,8 @@ def administer_medication_service(
         db.query(Bed)
         .filter(
             Bed.patient_id == prescription.patient_id,
-            Bed.status == "occupied"
+            Bed.status == "occupied",
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .first()

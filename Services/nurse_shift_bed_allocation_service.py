@@ -3,11 +3,11 @@
 Responsibility assignments only. Does not modify beds/patients or nurse workflows.
 One active nurse per bed per shift. The shift is taken from the nurse roster.
 """
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import or_
+from sqlalchemy import func, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, aliased
 
@@ -110,6 +110,8 @@ def _get_bed(db: Session, bed_id: int) -> Bed:
     bed = db.query(Bed).filter(Bed.id == bed_id).first()
     if not bed:
         raise HTTPException(status_code=404, detail="Bed not found")
+    if not bed.is_active:
+        raise HTTPException(status_code=400, detail="Bed is inactive")
     return bed
 
 
@@ -1046,6 +1048,31 @@ def get_allocation_service(db: Session, allocation_id: int) -> dict:
     return {"success": True, "data": _allocation_out(db, row)}
 
 
+def _exclude_superseded_inactive_allocations(db: Session, query):
+    """Hide older inactive batches for the same nurse and shift.
+
+    Beds saved together are inserted within a few seconds of each other.
+    A later save for that nurse and shift replaces the earlier one in the
+    list. Stored rows are not deleted, and active rows are left as they are.
+    """
+    newer = aliased(NurseShiftBedAllocation)
+    same_shift = func.lower(func.btrim(func.coalesce(newer.shift_name, ""))) == func.lower(
+        func.btrim(func.coalesce(NurseShiftBedAllocation.shift_name, ""))
+    )
+    superseded = (
+        db.query(newer.id)
+        .filter(
+            newer.nurse_id == NurseShiftBedAllocation.nurse_id,
+            newer.is_active.is_(False),
+            same_shift,
+            newer.created_at
+            > NurseShiftBedAllocation.created_at + timedelta(seconds=30),
+        )
+        .exists()
+    )
+    return query.filter(or_(NurseShiftBedAllocation.is_active.is_(True), ~superseded))
+
+
 def list_allocations_service(
     db: Session,
     filters: NurseShiftBedAllocationFilter | None = None,
@@ -1120,6 +1147,9 @@ def list_allocations_service(
             search_filters.append(NurseShiftBedAllocation.bed_id == int(term))
             search_filters.append(NurseShiftBedAllocation.department_id == int(term))
         query = query.filter(or_(*search_filters))
+
+    if is_active is not True:
+        query = _exclude_superseded_inactive_allocations(db, query)
 
     total = query.count()
     rows = (
@@ -1332,6 +1362,7 @@ def get_allocated_patient_ids_for_nurse(
         .filter(
             Bed.id.in_(bed_ids),
             Bed.status == "occupied",
+            Bed.is_active.is_(True),
             Bed.patient_id.isnot(None),
         )
         .distinct()
@@ -1364,6 +1395,7 @@ def get_nurse_allocation_summary_service(
             .filter(
                 Bed.id.in_(bed_ids),
                 Bed.status == "occupied",
+                Bed.is_active.is_(True),
                 Bed.patient_id.isnot(None),
             )
             .count()

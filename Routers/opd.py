@@ -1,6 +1,6 @@
 """OPD & billing API — routes only; logic in Services/."""
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
@@ -622,12 +622,22 @@ def list_beds(
     ward: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
+    status_filter: Literal["active", "inactive", "all"] = Query(
+        "active",
+        description="Inventory lifecycle. active, inactive, or all. Not occupancy.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:list")),
 ):
     """Admin Settings → OPD: bed inventory list (not IPD occupancy workflows)."""
-    return bed_service.list_beds(db, ward=ward, status=status, search=search)
+    return bed_service.list_beds(
+        db,
+        ward=ward,
+        status=status,
+        search=search,
+        status_filter=status_filter,
+    )
 
 
 @router.get("/beds/inventory-summary")

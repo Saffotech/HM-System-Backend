@@ -139,6 +139,7 @@ def _base_bed_patients_query(
         .filter(
             Bed.status == "occupied",
             Bed.patient_id.isnot(None),
+            Bed.is_active.is_(True),
             Patient.is_active.is_(True),
         )
     )
@@ -611,6 +612,7 @@ def get_nurse_my_duty_service(db: Session, nurse_id: int) -> dict:
             NurseShiftBedAllocation.nurse_id == nurse_id,
             NurseShiftBedAllocation.shift_name == shift_name,
             NurseShiftBedAllocation.is_active.is_(True),
+            Bed.is_active.is_(True),
             NurseShiftBedAllocation.shift_date <= today,
             or_(
                 NurseShiftBedAllocation.assigned_until.is_(None),

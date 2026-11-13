@@ -405,7 +405,8 @@ def bulk_add_handover_patients_service(
 
         bed = (db.query(Bed)
             .filter(Bed.patient_id == patient.id,
-                Bed.status == "occupied"
+                Bed.status == "occupied",
+                Bed.is_active.is_(True),
             ).order_by(Bed.admitted_at.desc())
             .first()
         )
