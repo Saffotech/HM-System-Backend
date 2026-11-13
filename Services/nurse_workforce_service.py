@@ -56,6 +56,10 @@ def _shift_end_at(roster_date: date, start_time: time, end_time: time) -> dateti
     return datetime.combine(end_date, end, tzinfo=IST)
 
 
+def _shift_has_ended(roster_date: date, start_time: time, end_time: time) -> bool:
+    return _now() >= _shift_end_at(roster_date, start_time, end_time)
+
+
 def complete_finished_roster_entries(db: Session, *, commit: bool = True) -> int:
     """Apply the roster lifecycle: scheduled, then completed once the shift ends.
 
@@ -415,6 +419,11 @@ def create_roster_service(
     shift = db.query(NurseWorkforceShift).filter(NurseWorkforceShift.id == data.shift_id).first()
     if not shift or not shift.is_active:
         raise HTTPException(status_code=400, detail="Shift not found or inactive")
+    if _shift_has_ended(data.roster_date, shift.start_time, shift.end_time):
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot assign a shift after it has already ended.",
+        )
     if data.department_id is not None:
         if not db.query(Department).filter(Department.id == data.department_id).first():
             raise HTTPException(status_code=404, detail="Department not found")
@@ -504,6 +513,8 @@ def bulk_create_roster_service(
                 continue
 
             for roster_date in dict.fromkeys(data.dates):
+                if _shift_has_ended(roster_date, shift.start_time, shift.end_time):
+                    continue
                 existing = _find_roster_row(
                     db,
                     nurse_id=nurse.id,
@@ -559,6 +570,12 @@ def bulk_create_roster_service(
         db.rollback()
         raise
 
+    if not created and not skipped and not errors:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot assign a shift after it has already ended.",
+        )
+
     # IMPORTANT: one summary notification per nurse, outside both loops.
     for nurse_id, entries in created_by_nurse.items():
         roster_dates = [roster_date for _, roster_date in entries]
@@ -598,6 +615,104 @@ def bulk_create_roster_service(
     }
 
 
+def _roster_base_query(
+    db: Session,
+    *,
+    nurse_id: int | None = None,
+    shift_id: int | None = None,
+    department_id: int | None = None,
+):
+    q = db.query(NurseWorkforceRoster).filter(NurseWorkforceRoster.status != "cancelled")
+    if nurse_id:
+        q = q.filter(NurseWorkforceRoster.nurse_id == nurse_id)
+    if shift_id:
+        q = q.filter(NurseWorkforceRoster.shift_id == shift_id)
+    if department_id:
+        q = q.filter(NurseWorkforceRoster.department_id == department_id)
+    return q
+
+
+def _contiguous_span_overlaps(
+    rows: list[NurseWorkforceRoster],
+    date_from: date | None,
+    date_to: date | None,
+) -> bool:
+    start = rows[0].roster_date
+    end = rows[-1].roster_date
+    window_start = date_from or start
+    window_end = date_to or end
+    return start <= window_end and end >= window_start
+
+
+def _expand_roster_spans(
+    db: Session,
+    *,
+    date_from: date | None,
+    date_to: date | None,
+    nurse_id: int | None,
+    shift_id: int | None,
+    department_id: int | None,
+) -> list[NurseWorkforceRoster]:
+    """Include every consecutive day of an assignment that overlaps the filter."""
+    window = _roster_base_query(
+        db, nurse_id=nurse_id, shift_id=shift_id, department_id=department_id
+    )
+    if date_from:
+        window = window.filter(NurseWorkforceRoster.roster_date >= date_from)
+    if date_to:
+        window = window.filter(NurseWorkforceRoster.roster_date <= date_to)
+    keys = {
+        (nurse_id, shift_id)
+        for nurse_id, shift_id in window.with_entities(
+            NurseWorkforceRoster.nurse_id, NurseWorkforceRoster.shift_id
+        ).distinct()
+    }
+    if not keys:
+        return []
+
+    keyed = (
+        _roster_base_query(db, nurse_id=nurse_id, shift_id=shift_id, department_id=department_id)
+        .filter(
+            or_(
+                *[
+                    and_(
+                        NurseWorkforceRoster.nurse_id == nid,
+                        NurseWorkforceRoster.shift_id == sid,
+                    )
+                    for nid, sid in keys
+                ]
+            )
+        )
+        .order_by(
+            NurseWorkforceRoster.nurse_id.asc(),
+            NurseWorkforceRoster.shift_id.asc(),
+            NurseWorkforceRoster.roster_date.asc(),
+        )
+        .all()
+    )
+    expanded: list[NurseWorkforceRoster] = []
+    current: list[NurseWorkforceRoster] = []
+    current_key: tuple[int, int] | None = None
+    for row in keyed:
+        key = (row.nurse_id, row.shift_id)
+        consecutive = (
+            current
+            and current_key == key
+            and (row.roster_date - current[-1].roster_date).days == 1
+        )
+        if consecutive:
+            current.append(row)
+            continue
+        if current and _contiguous_span_overlaps(current, date_from, date_to):
+            expanded.extend(current)
+        current = [row]
+        current_key = key
+    if current and _contiguous_span_overlaps(current, date_from, date_to):
+        expanded.extend(current)
+    expanded.sort(key=lambda row: (row.roster_date, row.shift_id, row.nurse_id))
+    return expanded
+
+
 def list_roster_service(
     db: Session,
     *,
@@ -612,24 +727,26 @@ def list_roster_service(
     complete_finished_roster_entries(db)
     page = max(page, 1)
     page_size = min(max(page_size, 1), 200)
-    q = db.query(NurseWorkforceRoster).filter(NurseWorkforceRoster.status != "cancelled")
-    if date_from:
-        q = q.filter(NurseWorkforceRoster.roster_date >= date_from)
-    if date_to:
-        q = q.filter(NurseWorkforceRoster.roster_date <= date_to)
-    if nurse_id:
-        q = q.filter(NurseWorkforceRoster.nurse_id == nurse_id)
-    if shift_id:
-        q = q.filter(NurseWorkforceRoster.shift_id == shift_id)
-    if department_id:
-        q = q.filter(NurseWorkforceRoster.department_id == department_id)
-    total = q.count()
-    rows = (
-        q.order_by(NurseWorkforceRoster.roster_date.asc(), NurseWorkforceRoster.shift_id.asc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
-    )
+    if date_from or date_to:
+        rows = _expand_roster_spans(
+            db,
+            date_from=date_from,
+            date_to=date_to,
+            nurse_id=nurse_id,
+            shift_id=shift_id,
+            department_id=department_id,
+        )
+    else:
+        rows = (
+            _roster_base_query(
+                db, nurse_id=nurse_id, shift_id=shift_id, department_id=department_id
+            )
+            .order_by(NurseWorkforceRoster.roster_date.asc(), NurseWorkforceRoster.shift_id.asc())
+            .all()
+        )
+    total = len(rows)
+    start = (page - 1) * page_size
+    rows = rows[start : start + page_size]
     return {
         "success": True,
         "total": total,
@@ -637,6 +754,33 @@ def list_roster_service(
         "page_size": page_size,
         "items": [_roster_out(db, r) for r in rows],
     }
+
+
+def _has_active_shift_beds(
+    db: Session,
+    *,
+    nurse_id: int,
+    shift_name: str | None,
+    roster_date: date,
+) -> bool:
+    if not shift_name:
+        return False
+    name = shift_name.strip().lower()
+    return (
+        db.query(NurseShiftBedAllocation.id)
+        .filter(
+            NurseShiftBedAllocation.nurse_id == nurse_id,
+            NurseShiftBedAllocation.is_active.is_(True),
+            func.lower(NurseShiftBedAllocation.shift_name) == name,
+            NurseShiftBedAllocation.shift_date <= roster_date,
+            or_(
+                NurseShiftBedAllocation.assigned_until.is_(None),
+                NurseShiftBedAllocation.assigned_until >= roster_date,
+            ),
+        )
+        .first()
+        is not None
+    )
 
 
 def delete_roster_service(
@@ -648,12 +792,35 @@ def delete_roster_service(
     row = db.query(NurseWorkforceRoster).filter(NurseWorkforceRoster.id == roster_id).first()
     if not row:
         raise HTTPException(status_code=404, detail="Roster entry not found")
+    if (row.status or "").strip().lower() == "completed":
+        raise HTTPException(
+            status_code=400,
+            detail="Completed roster shifts cannot be cancelled.",
+        )
     if row.roster_date < _now().date():
         raise HTTPException(
             status_code=400,
             detail=(
                 f"Past roster shifts cannot be cancelled. "
                 f"{row.roster_date.isoformat()} is already in the past."
+            ),
+        )
+    shift = (
+        db.query(NurseWorkforceShift)
+        .filter(NurseWorkforceShift.id == row.shift_id)
+        .first()
+    )
+    if _has_active_shift_beds(
+        db,
+        nurse_id=row.nurse_id,
+        shift_name=shift.name if shift else None,
+        roster_date=row.roster_date,
+    ):
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Deactivate this nurse's bed allocations for this shift "
+                "before cancelling the roster."
             ),
         )
     row.status = "cancelled"
