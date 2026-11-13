@@ -327,6 +327,8 @@ def _opd_visit_status(visit: OpdVisit, completed_appointment_ids: set[int]) -> s
         return "cancelled"
     if visit.appointment_id and visit.appointment_id in completed_appointment_ids:
         return "complete"
+    if raw == "doctor_assigned":
+        return "Missed Appointment"
     return raw
 
 
