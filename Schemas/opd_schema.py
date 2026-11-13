@@ -312,6 +312,7 @@ class BedOut(BaseModel):
     patient_uid: Optional[str]
     status: str
     is_active: bool = True
+    has_patient_history: bool = False
     admitted_at: Optional[str]
 
 

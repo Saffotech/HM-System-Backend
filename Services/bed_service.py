@@ -4,10 +4,11 @@ from typing import Optional
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
-from sqlalchemy import case, func
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from Models.department import Department
+from Models.ipd import IpdAdmission
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation
 from Models.nurse_shift_bed_allocation_history import NurseShiftBedAllocationHistory
 from Models.opd_billing import Bed
@@ -26,9 +27,60 @@ def _normalize_bed_type(bed_type: Optional[str]) -> str:
     return value
 
 
-def _bed_out(db: Session, bed: Bed) -> BedOut:
+def _occupied_now(bed: Bed) -> bool:
+    return bed.patient_id is not None or (bed.status or "").strip().lower() == "occupied"
+
+
+def _patient_history_ids(db: Session, bed_ids: list[int]) -> set[int]:
+    """Beds that have a current patient or an admitted/discharged stay."""
+    if not bed_ids:
+        return set()
+    found = {
+        bed_id
+        for (bed_id,) in db.query(IpdAdmission.bed_id)
+        .filter(
+            IpdAdmission.bed_id.in_(bed_ids),
+            IpdAdmission.status.in_(("admitted", "discharged")),
+        )
+        .distinct()
+        .all()
+        if bed_id
+    }
+    found.update(
+        bed_id
+        for (bed_id,) in db.query(Bed.id)
+        .filter(
+            Bed.id.in_(bed_ids),
+            or_(Bed.patient_id.isnot(None), func.lower(Bed.status) == "occupied"),
+        )
+        .all()
+    )
+    return found
+
+
+def _has_patient_history(db: Session, bed: Bed) -> bool:
+    if _occupied_now(bed):
+        return True
+    stay = (
+        db.query(IpdAdmission.id)
+        .filter(
+            IpdAdmission.bed_id == bed.id,
+            IpdAdmission.status.in_(("admitted", "discharged")),
+        )
+        .first()
+    )
+    return stay is not None
+
+
+def _bed_out(
+    db: Session,
+    bed: Bed,
+    has_patient_history: bool | None = None,
+) -> BedOut:
     patient = db.query(Patient).filter(Patient.id == bed.patient_id).first() if bed.patient_id else None
     dept = db.query(Department).filter(Department.id == bed.department_id).first()
+    if has_patient_history is None:
+        has_patient_history = _has_patient_history(db, bed)
     return BedOut(
         id=bed.id,
         bed_number=bed.bed_number,
@@ -41,8 +93,14 @@ def _bed_out(db: Session, bed: Bed) -> BedOut:
         patient_uid=patient.patient_uid if patient else None,
         status=bed.status,
         is_active=bool(bed.is_active),
+        has_patient_history=bool(has_patient_history),
         admitted_at=bed.admitted_at.isoformat() if bed.admitted_at else None,
     )
+
+
+def _beds_out(db: Session, beds: list[Bed]) -> list[BedOut]:
+    history_ids = _patient_history_ids(db, [bed.id for bed in beds])
+    return [_bed_out(db, bed, bed.id in history_ids) for bed in beds]
 
 
 def _inventory_filter(status_filter: Optional[str]) -> str:
@@ -166,7 +224,7 @@ def list_beds(
 
     return {
         "stats": {"total": total, "available": available, "occupied": occupied},
-        "beds": [_bed_out(db, b) for b in beds],
+        "beds": _beds_out(db, beds),
     }
 
 
@@ -182,7 +240,7 @@ def ward_status(db: Session, ward_name: str) -> dict:
         "ward_name": ward_name,
         "occupancy_percent": round((occupied := total - available) / total * 100, 1) if total else 0,
         "stats": {"total": total, "available": available, "occupied": occupied},
-        "beds": [_bed_out(db, b) for b in beds],
+        "beds": _beds_out(db, beds),
     }
 
 
@@ -346,6 +404,36 @@ def update_bed(db: Session, bed_id: int, data) -> BedOut:
     return _bed_out(db, bed)
 
 
+def _purge_unused_bed(db: Session, bed: Bed) -> None:
+    """Remove a bed that never had a patient, including nurse rows that point at it."""
+    allocation_ids = [
+        row_id
+        for (row_id,) in db.query(NurseShiftBedAllocation.id)
+        .filter(NurseShiftBedAllocation.bed_id == bed.id)
+        .all()
+    ]
+    if allocation_ids:
+        db.query(NurseShiftBedAllocationHistory).filter(
+            NurseShiftBedAllocationHistory.allocation_id.in_(allocation_ids)
+        ).delete(synchronize_session=False)
+        db.query(NurseShiftBedAllocation).filter(
+            NurseShiftBedAllocation.id.in_(allocation_ids)
+        ).delete(synchronize_session=False)
+    db.query(NurseShiftBedAllocationHistory).filter(
+        NurseShiftBedAllocationHistory.old_bed_id == bed.id
+    ).update(
+        {NurseShiftBedAllocationHistory.old_bed_id: None},
+        synchronize_session=False,
+    )
+    db.query(NurseShiftBedAllocationHistory).filter(
+        NurseShiftBedAllocationHistory.new_bed_id == bed.id
+    ).update(
+        {NurseShiftBedAllocationHistory.new_bed_id: None},
+        synchronize_session=False,
+    )
+    db.delete(bed)
+
+
 def delete_bed(db: Session, bed_id: int) -> dict:
     bed = db.query(Bed).filter(Bed.id == bed_id).first()
     if not bed or not bed.is_active:
@@ -358,19 +446,49 @@ def delete_bed(db: Session, bed_id: int) -> dict:
 
     number = bed.bed_number
     ward = bed.ward_name
-    _deactivate_allocations(db, [bed.id])
-    bed.is_active = False
+    if _has_patient_history(db, bed):
+        _deactivate_allocations(db, [bed.id])
+        bed.is_active = False
+        _commit(db)
+        return {
+            "message": "Bed deactivated successfully",
+            "bed_number": number,
+            "ward_name": ward,
+            "is_active": False,
+            "has_patient_history": True,
+        }
+
+    _purge_unused_bed(db, bed)
     _commit(db)
     return {
-        "message": "Bed deactivated successfully",
+        "message": "Bed deleted",
         "bed_number": number,
         "ward_name": ward,
         "is_active": False,
+        "has_patient_history": False,
+    }
+
+
+def activate_bed(db: Session, bed_id: int) -> dict:
+    bed = db.query(Bed).filter(Bed.id == bed_id).first()
+    if not bed:
+        raise HTTPException(status_code=404, detail="Bed not found")
+    if bed.is_active:
+        raise HTTPException(status_code=400, detail="Bed is already active")
+
+    bed.is_active = True
+    _commit(db)
+    return {
+        "message": "Bed activated successfully",
+        "bed_number": bed.bed_number,
+        "ward_name": bed.ward_name,
+        "is_active": True,
+        "has_patient_history": _has_patient_history(db, bed),
     }
 
 
 def delete_ward(db: Session, ward_name: str) -> dict:
-    """Deactivate every active bed in a ward. Blocked if any active bed is occupied."""
+    """Remove or deactivate a whole ward. Occupied active beds block the action."""
     ward = _normalize_ward(ward_name)
     beds = db.query(Bed).filter(func.lower(Bed.ward_name) == ward.lower()).all()
     active_beds = [bed for bed in beds if bed.is_active]
@@ -389,16 +507,46 @@ def delete_ward(db: Session, ward_name: str) -> dict:
             ),
         )
 
-    _deactivate_allocations(db, [bed.id for bed in active_beds])
-    for bed in active_beds:
-        bed.is_active = False
+    history_ids = _patient_history_ids(db, [bed.id for bed in beds])
+    if history_ids:
+        _deactivate_allocations(db, [bed.id for bed in active_beds])
+        for bed in active_beds:
+            bed.is_active = False
+        deleted = 0
+        deactivated = len(active_beds)
+        message = "Ward deactivated successfully"
+    else:
+        for bed in active_beds:
+            _purge_unused_bed(db, bed)
+        deleted = len(active_beds)
+        deactivated = 0
+        message = "Ward deleted"
     _commit(db)
-    deleted = len(active_beds)
     return {
-        "message": "Ward deactivated successfully",
+        "message": message,
         "ward_name": ward,
         "deleted_beds": deleted,
-        "deactivated_beds": deleted,
+        "deactivated_beds": deactivated,
+    }
+
+
+def activate_ward(db: Session, ward_name: str) -> dict:
+    """Turn every inactive bed in the ward back on."""
+    ward = _normalize_ward(ward_name)
+    beds = db.query(Bed).filter(func.lower(Bed.ward_name) == ward.lower()).all()
+    if not beds:
+        raise HTTPException(status_code=404, detail=f"Ward '{ward}' not found")
+    inactive_beds = [bed for bed in beds if not bed.is_active]
+    if not inactive_beds:
+        raise HTTPException(status_code=400, detail=f"Ward '{ward}' is already active")
+
+    for bed in inactive_beds:
+        bed.is_active = True
+    _commit(db)
+    return {
+        "message": "Ward activated successfully",
+        "ward_name": ward,
+        "activated_beds": len(inactive_beds),
     }
 
 
