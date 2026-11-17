@@ -1308,7 +1308,12 @@ def get_dashboard(db: Session) -> OpdDashboardResponse:
     today = h.today_start_ist()
     visits_today = db.query(func.count(OpdVisit.id)).filter(OpdVisit.visit_date >= today).scalar() or 0
     patients_total = (
-        db.query(func.count(Patient.id)).filter(Patient.is_active.is_(True)).scalar() or 0
+            db.query(func.count(Patient.id))
+            .filter(
+                Patient.is_active.is_(True),
+                Patient.registration_source == RegistrationSource.OPD,
+            )
+            .scalar() or 0
     )
     pending_bills = (
         db.query(func.count(OpdVisit.id))
