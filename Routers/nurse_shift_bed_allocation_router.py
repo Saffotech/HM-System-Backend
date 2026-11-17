@@ -18,6 +18,7 @@ from Schemas.nurse_shift_bed_allocation_schema import (
     NurseShiftBedAllocationDetailResponse,
     NurseShiftBedAllocationListResponse,
     NurseShiftBedAllocationUpdate,
+    AllocationStatus,
 )
 from Services.nurse_shift_bed_allocation_service import (
     bulk_create_allocations_service,
@@ -53,6 +54,7 @@ def list_allocations(
     department_id: int | None = Query(None, ge=1),
     ward_name: str | None = Query(None),
     is_active: bool | None = Query(None),
+    status: AllocationStatus | None = Query(None),
     search: str | None = Query(
         None,
         description="Nurse, bed, ward, shift, or allocation/nurse/bed/department ID",
@@ -72,6 +74,7 @@ def list_allocations(
         department_id=department_id,
         ward_name=ward_name,
         is_active=is_active,
+        status=status,
         search=search,
         page=page,
         page_size=page_size,
