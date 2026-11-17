@@ -1,7 +1,7 @@
 """Legal and Finance sits between an agreed CRM lead and hospital registration."""
 import os
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePath
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -45,6 +45,21 @@ DOCUMENT_CATEGORIES = (
 )
 ALLOWED_SUFFIXES = {".pdf", ".jpg", ".jpeg", ".png", ".webp"}
 MAX_BYTES = 5 * 1024 * 1024
+
+# A document category and the checklist row that reviews it stay on the same status.
+CATEGORY_CHECKLIST = {
+    "Hospital Registration": "Hospital registration documents reviewed",
+    "Entity Registration": "Legal entity identity verified",
+    "Authorized Representative": "Authorized signatory verified",
+    "Hospital License": "Relevant licenses checked (where applicable)",
+    "Service Agreement": "Agreement and data protection terms reviewed",
+}
+CHECKLIST_CATEGORY = {label: category for category, label in CATEGORY_CHECKLIST.items()}
+DOCUMENT_STATUS_FOR_CHECKLIST = {
+    "Verified": "Verified",
+    "Pending": "Pending Review",
+    "Issue Found": "Changes Requested",
+}
 
 
 def _now():
@@ -129,8 +144,139 @@ def _decision_out(decision: LegalCaseDecision | None) -> LegalDecisionOut | None
     )
 
 
-def _out(case: LegalCase, lead: Lead) -> LegalCaseOut:
+def _person_name(user: User | None) -> str | None:
+    if user is None:
+        return None
+    name = " ".join(part for part in (user.first_name, user.last_name) if part).strip()
+    return name or None
+
+
+def _display_file_name(value: str | None) -> str:
+    name = PurePath(str(value or "").replace("\\", "/")).name.strip()
+    return name or "Document"
+
+
+def _unique_rows(rows):
+    seen = set()
+    unique = []
+    for row in rows:
+        if row.id in seen:
+            continue
+        seen.add(row.id)
+        unique.append(row)
+    return unique
+
+
+def _uploader_names(db: Session, documents) -> dict[int, str]:
+    ids = {doc.uploaded_by for doc in documents if doc.uploaded_by is not None}
+    if not ids:
+        return {}
+    rows = db.query(User).filter(User.id.in_(ids)).all()
+    return {row.id: name for row in rows if (name := _person_name(row))}
+
+
+def _checklist_status_for_documents(documents) -> str | None:
+    if not documents:
+        return None
+    if any(doc.status == "Changes Requested" for doc in documents):
+        return "Issue Found"
+    if any(doc.status != "Verified" for doc in documents):
+        return "Pending"
+    return "Verified"
+
+
+def _set_checklist_status(item: LegalChecklistItem, status: str, actor: User) -> None:
+    if item.status == status:
+        return
+    item.status = status
+    item.updated_by = actor.id
+    item.updated_at = _now()
+
+
+def _sync_checklist_from_documents(case: LegalCase, actor: User, categories: set[str]) -> None:
+    """A document upload or review moves the matching checklist row with it."""
+    by_label = {item.label: item for item in case.checklist}
+    for category in categories:
+        item = by_label.get(CATEGORY_CHECKLIST.get(category, ""))
+        if item is None:
+            continue
+        status = _checklist_status_for_documents(
+            [doc for doc in case.documents if doc.category == category]
+        )
+        if status:
+            _set_checklist_status(item, status, actor)
+
+
+def _as_utc(value):
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=IST)
+    return value
+
+
+def _reconcile_linked_reviews(case: LegalCase, actor: User) -> bool:
+    """Make a document category and its checklist row agree, keeping the later change."""
+    changed = False
+    by_label = {item.label: item for item in case.checklist}
+    for category, label in CATEGORY_CHECKLIST.items():
+        item = by_label.get(label)
+        docs = [doc for doc in case.documents if doc.category == category]
+        if item is None or not docs:
+            continue
+        from_docs = _checklist_status_for_documents(docs)
+        if item.status == from_docs:
+            continue
+        latest_doc = max(
+            (_as_utc(doc.reviewed_at or doc.created_at) for doc in docs),
+            default=None,
+        )
+        checklist_at = _as_utc(item.updated_at)
+        documents_are_newer = latest_doc is not None and (
+            checklist_at is None or latest_doc >= checklist_at
+        )
+        if documents_are_newer:
+            _set_checklist_status(item, from_docs, actor)
+            changed = True
+            continue
+        document_status = DOCUMENT_STATUS_FOR_CHECKLIST.get(item.status)
+        if not document_status:
+            continue
+        now = _now()
+        for doc in docs:
+            if doc.status == document_status:
+                continue
+            doc.status = document_status
+            doc.reviewed_by = actor.id
+            doc.reviewed_at = now
+            changed = True
+    return changed
+
+
+def _sync_documents_from_checklist(case: LegalCase, actor: User, labels: set[str]) -> None:
+    """A checklist change moves every document in that category with it."""
+    now = _now()
+    for label in labels:
+        category = CHECKLIST_CATEGORY.get(label)
+        if not category:
+            continue
+        item = next((row for row in case.checklist if row.label == label), None)
+        document_status = DOCUMENT_STATUS_FOR_CHECKLIST.get(item.status) if item is not None else None
+        if not document_status:
+            continue
+        for doc in case.documents:
+            if doc.category != category or doc.status == document_status:
+                continue
+            doc.status = document_status
+            doc.reviewed_by = actor.id
+            doc.reviewed_at = now
+
+
+def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
     approved = case.status == "Approved"
+    documents = _unique_rows(case.documents)
+    checklist = _unique_rows(case.checklist)
+    names = _uploader_names(db, documents)
     return LegalCaseOut(
         id=case.id,
         lead_id=lead.id,
@@ -147,13 +293,15 @@ def _out(case: LegalCase, lead: Lead) -> LegalCaseOut:
             LegalDocumentOut(
                 id=doc.id,
                 category=doc.category,
-                file_name=doc.file_name,
+                file_name=_display_file_name(doc.file_name),
                 status=doc.status,
                 uploaded_by=doc.uploaded_by,
+                uploaded_by_name=names.get(doc.uploaded_by),
+                uploaded_at=_when(doc.created_at),
                 reviewed_by=doc.reviewed_by,
                 reviewed_at=_when(doc.reviewed_at),
             )
-            for doc in case.documents
+            for doc in documents
         ],
         checklist=[
             ChecklistItemOut(
@@ -164,7 +312,7 @@ def _out(case: LegalCase, lead: Lead) -> LegalCaseOut:
                 updated_by=item.updated_by,
                 updated_at=_when(item.updated_at),
             )
-            for item in case.checklist
+            for item in checklist
         ],
         finance=_finance_out(case.finance),
         decision=_decision_out(case.decision),
@@ -195,13 +343,27 @@ def list_cases(db: Session, actor: User) -> list[LegalCaseOut]:
         .order_by(LegalCase.id.desc())
         .all()
     )
-    return [_out(case, lead) for case, lead in rows]
+    seen = set()
+    pairs = []
+    changed = False
+    for case, lead in rows:
+        if case.id in seen:
+            continue
+        seen.add(case.id)
+        changed = _reconcile_linked_reviews(case, actor) or changed
+        pairs.append((case, lead))
+    if changed:
+        db.commit()
+    return [_out(db, case, lead) for case, lead in pairs]
 
 
 def get_case(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     _require_reviewer(actor)
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    if _reconcile_linked_reviews(case, actor):
+        db.commit()
+        case, lead = _load(db, case_id)
+    return _out(db, case, lead)
 
 
 def _approval_blockers(case: LegalCase) -> list[str]:
@@ -252,7 +414,7 @@ def decide_case(db: Session, actor: User, case_id: int, data: LegalDecision) -> 
         case.decision.decided_at = case.decided_at
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def save_checklist(db: Session, actor: User, case_id: int, data: LegalChecklistUpdate) -> LegalCaseOut:
@@ -261,6 +423,7 @@ def save_checklist(db: Session, actor: User, case_id: int, data: LegalChecklistU
     if case.status in ("Approved", "Rejected", "Conditionally Approved"):
         raise HTTPException(status_code=409, detail="This case already has a decision.")
     by_id = {item.id: item for item in case.checklist}
+    changed_labels = set()
     for change in data.items:
         item = by_id.get(change.id)
         if item is None:
@@ -269,11 +432,13 @@ def save_checklist(db: Session, actor: User, case_id: int, data: LegalChecklistU
         item.note = change.note
         item.updated_by = actor.id
         item.updated_at = _now()
+        changed_labels.add(item.label)
+    _sync_documents_from_checklist(case, actor, changed_labels)
     if case.status == "New from CRM":
         case.status = "In Review"
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def save_finance(db: Session, actor: User, case_id: int, data: LegalFinanceUpdate) -> LegalCaseOut:
@@ -312,7 +477,7 @@ def save_finance(db: Session, actor: User, case_id: int, data: LegalFinanceUpdat
         case.escalation_at = terms.updated_at
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
@@ -330,7 +495,7 @@ def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     case.escalation_at = _now()
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def decide_escalation(db: Session, actor: User, case_id: int, data: EscalationDecision) -> LegalCaseOut:
@@ -345,7 +510,7 @@ def decide_escalation(db: Session, actor: User, case_id: int, data: EscalationDe
     case.escalation_at = _now()
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 async def add_document(db: Session, actor: User, case_id: int, category: str, file: UploadFile) -> LegalCaseOut:
@@ -364,19 +529,23 @@ async def add_document(db: Session, actor: User, case_id: int, category: str, fi
     name = f"{case_id}-{uuid4().hex}{suffix}"
     path = _upload_dir() / name
     path.write_bytes(content)
+    original = PurePath((file.filename or "").replace("\\", "/")).name.strip()
     db.add(LegalDocument(
         case_id=case.id,
         category=category,
-        file_name=file.filename or name,
+        file_name=original or name,
         stored_path=str(path),
         status="Pending Review",
         uploaded_by=actor.id,
     ))
     if case.status == "New from CRM":
         case.status = "In Review"
+    db.flush()
+    db.expire(case, ["documents"])
+    _sync_checklist_from_documents(case, actor, {category})
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def _document(db: Session, case_id: int, document_id: int) -> LegalDocument:
@@ -399,9 +568,10 @@ def set_document_status(db: Session, actor: User, case_id: int, document_id: int
     document.status = status
     document.reviewed_by = actor.id
     document.reviewed_at = _now()
+    _sync_checklist_from_documents(case, actor, {document.category})
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def download_document(db: Session, actor: User, case_id: int, document_id: int) -> FileResponse:
@@ -422,7 +592,7 @@ def resubmit_case(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     case.status = "In Review"
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
@@ -438,7 +608,7 @@ def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     case.advance_received_at = _now()
     db.commit()
     case, lead = _load(db, case_id)
-    return _out(case, lead)
+    return _out(db, case, lead)
 
 
 def case_approved(db: Session, lead_id: int) -> bool:

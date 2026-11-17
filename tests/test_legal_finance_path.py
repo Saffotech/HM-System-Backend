@@ -1,4 +1,5 @@
 import unittest
+from datetime import timedelta
 from types import SimpleNamespace
 
 from fastapi import HTTPException
@@ -22,18 +23,22 @@ from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
 from Models.role import Role  # noqa: F401
 from Models.tenant import Tenant  # noqa: F401
-from Models.user import User  # noqa: F401
+from Models.user import User
 from Schemas.legal_case_schema import EscalationDecision, LegalChecklistUpdate, LegalDecision, LegalFinanceUpdate, ChecklistItemUpdate
 from Services.legal_case_service import (
+    _now,
     case_ready_for_registration,
     confirm_advance,
     decide_case,
     decide_escalation,
+    get_case,
+    list_cases,
     open_case_for_agreed_lead,
     request_escalation,
     resubmit_case,
     save_checklist,
     save_finance,
+    set_document_status,
 )
 from Services.registration_service import list_registrations
 
@@ -244,3 +249,77 @@ class LegalFinancePathTests(unittest.TestCase):
         self.assertFalse(sent_back.advance_received)
         reviewed = resubmit_case(self.db, _actor("legal_finance"), case.id)
         self.assertEqual(reviewed.status, "In Review")
+
+    def _checklist(self, case_id, label):
+        return self.db.query(LegalChecklistItem).filter_by(case_id=case_id, label=label).one()
+
+    def test_document_and_checklist_status_stay_together(self):
+        self.db.add(User(id=1, first_name="Krishna", last_name="Singh", email="krishna@example.com", password="x"))
+        case = open_case_for_agreed_lead(self.db, self.lead)
+        self.db.commit()
+        document = LegalDocument(
+            case_id=case.id,
+            category="Entity Registration",
+            file_name=r"C:\papers\licence.pdf",
+            stored_path="licence.pdf",
+            status="Pending Review",
+            uploaded_by=1,
+        )
+        self.db.add(document)
+        self.db.commit()
+
+        pending = set_document_status(self.db, _actor("legal_finance"), case.id, document.id, "Pending Review")
+        identity = next(item for item in pending.checklist if item.label == "Legal entity identity verified")
+        shown = next(row for row in pending.documents if row.id == document.id)
+        self.assertEqual(identity.status, "Pending")
+        self.assertEqual(shown.file_name, "licence.pdf")
+        self.assertEqual(shown.uploaded_by_name, "Krishna Singh")
+        self.assertTrue(shown.uploaded_at)
+
+        verified = set_document_status(self.db, _actor("legal_finance"), case.id, document.id, "Verified")
+        identity = next(item for item in verified.checklist if item.label == "Legal entity identity verified")
+        self.assertEqual(identity.status, "Verified")
+
+        rejected = set_document_status(self.db, _actor("legal_finance"), case.id, document.id, "Changes Requested")
+        identity = next(item for item in rejected.checklist if item.label == "Legal entity identity verified")
+        self.assertEqual(identity.status, "Issue Found")
+
+        item = self._checklist(case.id, "Legal entity identity verified")
+        saved = save_checklist(
+            self.db,
+            _actor("legal_finance"),
+            case.id,
+            LegalChecklistUpdate(items=[ChecklistItemUpdate(id=item.id, status="Verified", note=None)]),
+        )
+        shown = next(row for row in saved.documents if row.id == document.id)
+        self.assertEqual(shown.status, "Verified")
+
+    def test_loading_cases_repairs_a_stale_mismatch(self):
+        case = open_case_for_agreed_lead(self.db, self.lead)
+        self.db.commit()
+        now = _now()
+        document = LegalDocument(
+            case_id=case.id,
+            category="Hospital License",
+            file_name="licence.pdf",
+            stored_path="licence.pdf",
+            status="Verified",
+            reviewed_at=now,
+        )
+        self.db.add(document)
+        item = self._checklist(case.id, "Relevant licenses checked (where applicable)")
+        item.status = "Pending"
+        item.updated_at = now - timedelta(minutes=5)
+        self.db.commit()
+
+        loaded = get_case(self.db, _actor("legal_finance"), case.id)
+        identity = next(row for row in loaded.checklist if row.label == item.label)
+        self.assertEqual(identity.status, "Verified")
+
+        item = self._checklist(case.id, item.label)
+        item.status = "Issue Found"
+        item.updated_at = _now() + timedelta(minutes=5)
+        self.db.commit()
+        listed = list_cases(self.db, _actor("legal_finance"))
+        shown = next(row for row in listed[0].documents if row.category == "Hospital License")
+        self.assertEqual(shown.status, "Changes Requested")

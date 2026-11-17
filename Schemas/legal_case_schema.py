@@ -79,6 +79,8 @@ class LegalDocumentOut(BaseModel):
     file_name: str
     status: str
     uploaded_by: int | None = None
+    uploaded_by_name: str | None = None
+    uploaded_at: str | None = None
     reviewed_by: int | None = None
     reviewed_at: str | None = None
 
