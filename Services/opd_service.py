@@ -83,28 +83,36 @@ def _ensure_patient_not_active_in_ipd(
             ),
         )
 
+def _preview_consultation_fee(pricing, data: BillPreviewRequest) -> float:
+    """Doctor fee for a bill preview.
+
+    A selected doctor is resolved the same way as a saved visit: that doctor's
+    fee, then the department fee, then the hospital default. Register New
+    Patient still posts only the fee it calculated and omits the doctor id.
+    That sent amount is the consultation line. It must not be replaced by the
+    hospital default (₹500), which dropped a ₹700 doctor fee from the bill.
+    """
+    if data.doctor_id is not None:
+        return opd_settings_service.resolve_consultation_fee(
+            pricing,
+            doctor_id=data.doctor_id,
+            department_id=data.department_id,
+        )
+    if "consultation_fee" in data.model_fields_set:
+        return float(data.consultation_fee)
+    return float(pricing.consultation_fee)
+
+
 def build_bill_preview(db: Session, data: BillPreviewRequest) -> BillPreviewResponse:
     """Preview using Admin OPD pricing (same resolver as create_visit)."""
     pricing = opd_settings_service.get_pricing(db)
-    doctor_id = data.doctor_id
-    department_id = data.department_id
-    if doctor_id is not None and department_id is not None:
-        registration_fee, consultation_fee, gst_percent = (
-            opd_settings_service.resolve_visit_fees(
-                pricing,
-                doctor_id=doctor_id,
-                department_id=department_id,
-                registration_fee=data.registration_fee,
-            )
-        )
-    else:
-        registration_fee = (
-            0.0
-            if float(data.registration_fee or 0) == 0
-            else float(pricing.registration_fee)
-        )
-        consultation_fee = float(pricing.consultation_fee)
-        gst_percent = float(pricing.gst_percent)
+    registration_fee = (
+        0.0
+        if float(data.registration_fee or 0) == 0
+        else float(pricing.registration_fee)
+    )
+    gst_percent = float(pricing.gst_percent)
+    consultation_fee = _preview_consultation_fee(pricing, data)
 
     subtotal, gst_amount, grand_total = h.bill_totals(
         registration_fee, consultation_fee, gst_percent
@@ -411,15 +419,104 @@ def create_visit_for_existing_patient(
         scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at) if apt else None,
     )
 
+_BILLABLE_APPOINTMENT_STATUSES = frozenset({
+    AppointmentStatus.scheduled.value,
+    AppointmentStatus.completed.value,
+})
+_OPD_APPOINTMENT_TYPES = frozenset({"opd", "follow-up", "follow_up", "followup"})
+
+
+def _appointment_status_value(apt: Appointment) -> str:
+    return str(getattr(apt.status, "value", apt.status) or "").strip().lower()
+
+
+def _appointment_type_value(apt: Appointment) -> str:
+    return str(apt.appointment_type or "opd").strip().lower()
+
+
+def _assert_appointment_billable(apt: Appointment) -> None:
+    """Scheduled and completed OPD appointments can be billed. Cancelled and no-show cannot."""
+    if _appointment_type_value(apt) not in _OPD_APPOINTMENT_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="OPD billing requires an OPD appointment.",
+        )
+    if _appointment_status_value(apt) not in _BILLABLE_APPOINTMENT_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail="This appointment cannot be billed.",
+        )
+
+
+def validate_opd_billing_eligibility(
+    db: Session,
+    *,
+    patient: Patient,
+    appointment_id: Optional[int],
+) -> Appointment:
+    """Gate for normal OPD bill generation.
+
+    The patient must belong to this hospital, must not have an active IPD stay,
+    and must already have an OPD appointment that is theirs and still billable.
+    A second bill for that appointment is rejected. Registration and revisit
+    booking do not use this gate.
+    """
+    if appointment_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="An OPD appointment or visit is required before generating an OPD bill.",
+        )
+
+    _ensure_patient_not_active_in_ipd(db, patient.id)
+
+    apt = (
+        db.query(Appointment)
+        .filter(Appointment.id == appointment_id)
+        .with_for_update()
+        .first()
+    )
+    if apt is None:
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    session_tenant = db.info.get("tenant_id")
+    if (
+        session_tenant is not None
+        and apt.tenant_id is not None
+        and int(apt.tenant_id) != int(session_tenant)
+    ):
+        raise HTTPException(status_code=404, detail="Appointment not found")
+
+    if int(apt.patient_id) != int(patient.id):
+        raise HTTPException(
+            status_code=400,
+            detail="This appointment does not belong to the selected patient.",
+        )
+
+    _assert_appointment_billable(apt)
+
+    existing = appointment_service._visit_for_appointment(db, apt)
+    if existing is not None and str(existing.status or "").lower() != "cancelled":
+        raise HTTPException(
+            status_code=409,
+            detail="A bill already exists for this appointment.",
+        )
+    return apt
+
+
 def generate_bill(
     db: Session, data: GenerateBillRequest, registered_by: int
 ) -> VisitSuccessResponse:
     patient = h.get_patient(db, data.patient_id)
+    apt = validate_opd_billing_eligibility(
+        db,
+        patient=patient,
+        appointment_id=data.appointment_id,
+    )
     extra = [{"description": i.description, "qty": i.qty, "unit_price": i.unit_price} for i in data.extra_items]
 
     billing = VisitBillingFields(
-        department_id=data.department_id,
-        doctor_id=data.doctor_id,
+        department_id=apt.department_id,
+        doctor_id=apt.doctor_id,
         registration_fee=data.registration_fee,
         consultation_fee=data.consultation_fee,
         gst_percent=data.gst_percent,
@@ -433,28 +530,8 @@ def generate_bill(
         transaction_reference=data.transaction_reference,
         bill_from_selection=True,
     )
-    # Prefer explicit appointment link (book-then-bill); else same-day orphan match.
-    # If still missing, resolve/create the canonical walk-in appointment using the
-    # existing appointment service (includes same-day de-dup + validation rules).
-    apt = None
-    if data.appointment_id:
-        apt = db.query(Appointment).filter(Appointment.id == data.appointment_id).first()
-        if apt is None:
-            raise HTTPException(status_code=404, detail="Appointment not found")
-        visit.appointment_id = apt.id
-        db.flush()
-    else:
-        apt = appointment_service.link_orphan_visit_to_appointment(db, visit)
-        if apt is None:
-            apt = appointment_service.create_walk_in_appointment(
-                db,
-                patient_id=patient.id,
-                doctor_id=visit.doctor_id,
-                department_id=visit.department_id,
-                created_by=registered_by,
-            )
-            visit.appointment_id = apt.id
-            db.flush()
+    visit.appointment_id = apt.id
+    db.flush()
     enqueue_after_payment_with_notifications(db, visit, handled_by=registered_by)
     if visit.payment_status in ("pending", "partial"):
         notify_opd_payment_pending(db, visit, created_by=registered_by)
@@ -485,11 +562,15 @@ def ensure_bill_for_appointment(
     Used when Book Appointment pay-later left an appointment without a visit,
     or Collect Payment is opened for a pending/unpaid appointment with no_bill.
     """
-    apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
+    apt = (
+        db.query(Appointment)
+        .filter(Appointment.id == appointment_id)
+        .with_for_update()
+        .first()
+    )
     if not apt:
         raise HTTPException(status_code=404, detail="Appointment not found")
-    if apt.status and str(getattr(apt.status, "value", apt.status)).lower() == "cancelled":
-        raise HTTPException(status_code=400, detail="Cannot bill a cancelled appointment")
+    _assert_appointment_billable(apt)
 
     existing = appointment_service._visit_for_appointment(db, apt)
     if existing is not None:
@@ -594,6 +675,10 @@ def list_patients(db: Session, search: Optional[str] = None, page: int = 1, limi
     term_raw = (search or "").strip()
     include_inactive = bool(re.fullmatch(r"P-\d+", term_raw, flags=re.IGNORECASE))
     q = db.query(Patient)
+
+    # OPD should display only patients registered through OPD.
+    q = q.filter(Patient.registration_source == RegistrationSource.OPD)
+    # Preserve existing inactive-patient handling.
     if not include_inactive:
         q = q.filter(Patient.is_active.is_(True))
     # Match each word on its own. "Raju Khan" must hit first_name and last_name
@@ -1186,11 +1271,26 @@ def _today_bills_aggregates(db: Session) -> tuple[int, float, int]:
 def _recent_patients_for_dashboard(db: Session) -> list[DashboardRecentPatient]:
     rows = (
         db.query(Patient)
-        .filter(Patient.is_active.is_(True))
+        .filter(
+            Patient.is_active.is_(True),
+            Patient.registration_source == RegistrationSource.OPD,
+        )
         .order_by(Patient.id.desc())
         .limit(_DASHBOARD_RECENT_PATIENTS)
         .all()
     )
+
+    return [
+        DashboardRecentPatient(
+            id=p.id,
+            patient_uid=p.patient_uid,
+            name=h.display_name(p.first_name, p.last_name),
+            phone=p.phone,
+            registration_source=p.registration_source,
+            created_at=p.created_at.isoformat() if p.created_at else None,
+        )
+        for p in rows
+    ]
     return [
         DashboardRecentPatient(
             id=p.id,
