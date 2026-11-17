@@ -22,7 +22,16 @@ from Services.opd_billing_profile_service import create_empty_opd_billing_profil
 from Services.ipd_profile_service import create_empty_ipd_profile
 from Services.pharmacist_profile_service import create_empty_pharmacist_profile
 from Services.receptionist_profile_service import create_empty_receptionist_profile
-from Services.role_policy import assert_can_assign_role, caller_role_name
+from Services.employee_id_service import (
+    assert_employee_id_available,
+    ensure_employee_id,
+    remember_employee_number,
+)
+from Services.role_policy import (
+    assert_can_assign_role,
+    assert_can_deactivate_staff,
+    caller_role_name,
+)
 from dependencies import PLATFORM_ROLES
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -92,6 +101,7 @@ def _ensure_profile(db: Session, user: User, role_name: str):
     profile = create_fn(db, user.id)
     attr = _ROLE_PROFILE_ATTR[role_name]
     setattr(user, attr, profile)
+    ensure_employee_id(db, user, profile)
     return profile
 
 
@@ -145,9 +155,14 @@ def _apply_account_profile_updates(
     if "employee_id" in account_updates:
         raw = account_updates["employee_id"]
         if raw is None or (isinstance(raw, str) and not raw.strip()):
-            profile.employee_id = None
+            if not getattr(profile, "employee_id", None):
+                ensure_employee_id(db, user, profile)
         else:
-            profile.employee_id = str(raw).strip()
+            value = str(raw).strip()
+            if user.tenant_id is not None:
+                assert_employee_id_available(db, user.tenant_id, value, user.id)
+                remember_employee_number(db, user.tenant_id, value)
+            profile.employee_id = value
 
     if "joining_date" in account_updates:
         profile.joining_date = account_updates["joining_date"]
@@ -174,6 +189,7 @@ def _to_list_item(user: User) -> StaffListItem:
         department_id=user.department_id,
         department_name=user.department.name if user.department else None,
         is_active=bool(user.is_active),
+        employee_id=_profile_account_fields(user)["employee_id"],
         last_login=user.last_login,
         created_at=user.created_at,
     )
@@ -181,11 +197,13 @@ def _to_list_item(user: User) -> StaffListItem:
 
 def _to_detail(user: User) -> StaffDetailOut:
     base = _to_list_item(user)
+    account = _profile_account_fields(user)
+    account.pop("employee_id", None)
     return StaffDetailOut(
         **base.model_dump(),
         phone=user.phone,
         login_count=user.login_count or 0,
-        **_profile_account_fields(user),
+        **account,
     )
 
 
@@ -201,6 +219,7 @@ def _base_query(db: Session):
             joinedload(User.receptionist_profile),
             joinedload(User.lab_technician_profile),
             joinedload(User.opd_billing_profile),
+            joinedload(User.ipd_profile),
             joinedload(User.pharmacist_profile),
             joinedload(User.admin_profile),
             joinedload(User.manager_profile),
@@ -287,6 +306,11 @@ def activate_staff(
         _block_self_action(actor.id, user_id, "deactivate")
 
     user = _get_staff_or_404(db, user_id)
+    if not is_active:
+        assert_can_deactivate_staff(
+            caller_role_name(actor),
+            caller_role_name(user),
+        )
     user.is_active = is_active
     db.commit()
 
@@ -437,6 +461,10 @@ def delete_staff(db: Session, user_id: int, actor: User) -> dict:
     _block_self_action(actor.id, user_id, "delete")
 
     user = _get_staff_or_404(db, user_id)
+    assert_can_deactivate_staff(
+        caller_role_name(actor),
+        caller_role_name(user),
+    )
     user.deleted_at = datetime.now(IST)
     user.is_active = False
     db.commit()

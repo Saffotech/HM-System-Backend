@@ -37,7 +37,7 @@ class DoctorProfile(Base):
 
     qualification = Column(String(255), nullable=True)
     medical_license_number = Column(String(100), nullable=True)
-    employee_id = Column(String(50), nullable=True, unique=True)
+    employee_id = Column(String(50), nullable=True, index=True)
     experience_years = Column(Integer, nullable=True)
     joining_date = Column(Date, nullable=True)
     consultation_fee = Column(Float, nullable=True)

@@ -131,6 +131,7 @@ def _enrich_vital(db: Session, vital: PatientVitals) -> PatientVitals:
         .filter(
             Bed.patient_id == vital.patient_id,
             Bed.status == "occupied",
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .first()
@@ -180,6 +181,7 @@ def _enrich_vitals_batch(
         .filter(
             Bed.patient_id.in_(patient_ids),
             Bed.status == "occupied",
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .all()
@@ -319,6 +321,7 @@ def _occupied_bed_for_patient(db: Session, patient_id: int) -> Bed | None:
         .filter(
             Bed.patient_id == patient_id,
             Bed.status == "occupied",
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .first()

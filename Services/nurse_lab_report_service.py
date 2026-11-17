@@ -32,6 +32,7 @@ def _occupied_beds_by_patient_id(db: Session) -> dict[int, Bed]:
         .filter(
             Bed.status == "occupied",
             Bed.patient_id.isnot(None),
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .all()

@@ -123,6 +123,8 @@ def ensure_admission_for_occupied_bed(
 
 
 def occupy_bed(db: Session, bed: Bed, patient_id: int, department_id: Optional[int] = None) -> None:
+    if not bed.is_active:
+        raise HTTPException(status_code=400, detail="Bed is inactive")
     if bed.status != "available":
         raise HTTPException(status_code=400, detail="Bed is not available")
     bed.patient_id = patient_id
@@ -289,6 +291,7 @@ def allocated_nurses_for_patients(
             Bed.patient_id.in_(unique),
             Bed.status == "occupied",
             Bed.patient_id.isnot(None),
+            Bed.is_active.is_(True),
         )
         .order_by(Bed.admitted_at.desc())
         .all()

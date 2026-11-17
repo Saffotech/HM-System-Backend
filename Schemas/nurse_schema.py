@@ -1,7 +1,6 @@
 from datetime import datetime
 from typing import List, Optional
-
-from pydantic import BaseModel, model_validator
+from pydantic import BaseModel, model_validator ,Field
 
 
 # ==========================================================
@@ -13,19 +12,20 @@ class VitalCreate(BaseModel):
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
 
-    temperature: Optional[float] = None
+    temperature: Optional[float] = Field(None, ge=25, le=150)
     blood_pressure: Optional[str] = None
-    heart_rate: Optional[int] = None
-    respiratory_rate: Optional[int] = None
-    oxygen_saturation: Optional[int] = None
-    blood_sugar: Optional[float] = None
-    weight: Optional[float] = None
-    pain_level: Optional[int] = None
+    heart_rate: Optional[int] = Field(None, ge=1, le=300)
+    respiratory_rate: Optional[int] = Field(None, ge=1, le=100)
+    oxygen_saturation: Optional[int] = Field(None, ge=1, le=100)
+    blood_sugar: Optional[float] = Field(None, gt=0, le=1000)
+    weight: Optional[float] = Field(None, gt=0, le=500)
+    pain_level: Optional[int] = Field(None, ge=0, le=10)
+
     observation_notes: Optional[str] = None
 
     @model_validator(mode="after")
     def require_appointment_or_patient(self):
-        if not self.appointment_id and not self.patient_id:
+        if self.appointment_id is None and self.patient_id is None:
             raise ValueError("Provide appointment_id or patient_id")
         return self
 
@@ -35,21 +35,14 @@ class VitalCreate(BaseModel):
 
 class VitalUpdate(BaseModel):
 
-    temperature: Optional[float] = None
-
+    temperature: Optional[float] = Field(None, ge=25, le=45)
     blood_pressure: Optional[str] = None
-
-    heart_rate: Optional[int] = None
-
-    respiratory_rate: Optional[int] = None
-
-    oxygen_saturation: Optional[int] = None
-
-    blood_sugar: Optional[float] = None
-
-    weight: Optional[float] = None
-
-    pain_level: Optional[int] = None
+    heart_rate: Optional[int] = Field(None, ge=1, le=300)
+    respiratory_rate: Optional[int] = Field(None, ge=1, le=100)
+    oxygen_saturation: Optional[int] = Field(None, ge=1, le=100)
+    blood_sugar: Optional[float] = Field(None, gt=0, le=1000)
+    weight: Optional[float] = Field(None, gt=0, le=500)
+    pain_level: Optional[int] = Field(None, ge=0, le=10)
 
     observation_notes: Optional[str] = None
 
@@ -101,7 +94,6 @@ class NursingNoteCreate(BaseModel):
 
     appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
-    appointment_id: Optional[int] = None
     patient_id: Optional[int] = None
 
     symptoms: Optional[str] = None
@@ -138,7 +130,6 @@ class NursingNoteResponse(BaseModel):
 
     id: int
 
-    appointment_id: Optional[int] = None
     appointment_id: Optional[int] = None
     patient_id: int
     patient_uid: Optional[str] = None

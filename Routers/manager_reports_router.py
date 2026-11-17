@@ -35,6 +35,10 @@ def reports_visits(
     from_date: Optional[date] = Query(None, description="Start date (YYYY-MM-DD)"),
     to_date: Optional[date] = Query(None, description="End date (YYYY-MM-DD)"),
     department_id: Optional[int] = Query(None),
+    source: Optional[str] = Query(
+        None,
+        description="opd, ipd, or all. Omit for all visit types.",
+    ),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
@@ -46,6 +50,7 @@ def reports_visits(
         from_date=from_date,
         to_date=to_date,
         department_id=department_id,
+        source=source,
         page=page,
         limit=limit,
     )

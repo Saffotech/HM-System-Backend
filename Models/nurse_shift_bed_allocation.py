@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
     Time,
 )
 from sqlalchemy.orm import relationship
@@ -24,10 +25,12 @@ def _now():
 
 
 class NurseShiftBedAllocation(TenantScoped):
-    """Persistent bed responsibility for a nurse until admin changes it.
+    """Bed responsibility for one nurse on one shift until admin changes it.
 
     Does not modify beds.patient_id or imply patient ownership.
     shift_date = assigned_from; assigned_until set when deactivated/reassigned.
+    The same bed may be assigned to another nurse on a different shift.
+    shift_name and times are taken from that nurse's roster for shift_date.
     """
 
     __tablename__ = "nurse_shift_bed_allocations"
@@ -52,6 +55,12 @@ class NurseShiftBedAllocation(TenantScoped):
 
     assigned_until = Column(Date, nullable=True, index=True)
 
+    ended_at = Column(
+        DateTime(timezone=True),
+        nullable=True,
+        index=True,
+    )
+
     shift_name = Column(String(100), nullable=False, index=True)
 
     shift_start = Column(Time, nullable=True)
@@ -74,6 +83,14 @@ class NurseShiftBedAllocation(TenantScoped):
     notes = Column(Text, nullable=True)
 
     is_active = Column(Boolean, nullable=False, default=True, index=True)
+
+    status = Column(
+        String(20),
+        nullable=False,
+        default="active",
+        server_default=text("'active'"),
+        index=True,
+    )
 
     created_at = Column(
         DateTime(timezone=True),

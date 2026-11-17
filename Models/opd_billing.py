@@ -3,6 +3,7 @@ import enum
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Date,
@@ -111,6 +112,15 @@ class Bed(TenantScoped):
     department_id = Column(Integer, ForeignKey("departments.id"), nullable=True)
     patient_id = Column(Integer, ForeignKey("patients.id"), nullable=True)
     status = Column(String, default="available")  # available / occupied
+    # Inventory lifecycle. Occupancy stays on status. Inactive beds stay in
+    # place so allocation history can keep its bed references.
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default="true",
+        index=True,
+    )
     bed_type = Column(String, nullable=False, default="single")  # single / double
     admitted_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), default=_now)

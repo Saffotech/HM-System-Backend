@@ -34,7 +34,7 @@ class AdminProfile(Base):
         index=True,
     )
 
-    employee_id = Column(String(50), nullable=True, unique=True)
+    employee_id = Column(String(50), nullable=True, index=True)
     joining_date = Column(Date, nullable=True)
     bio = Column(Text, nullable=True)
     languages = Column(JSONB, nullable=False, server_default="[]")

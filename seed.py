@@ -582,6 +582,7 @@ def ensure_catalog_for_tenant(db, tenant_id: int) -> tuple[int, int, int]:
                 tenant_id=tenant_id,
                 name=item["name"],
                 code=item["code"],
+                kind="lab" if item["code"] in {"LAB", "RAD"} else "doctor",
                 is_active=True,
             )
             db.add(dept)
@@ -590,6 +591,8 @@ def ensure_catalog_for_tenant(db, tenant_id: int) -> tuple[int, int, int]:
         else:
             dept.name = item["name"]
             dept.is_active = True
+            if item["code"] in {"LAB", "RAD"}:
+                dept.kind = "lab"
         dept_ids[item["code"]] = dept.id
 
     lab_added = 0
@@ -1187,6 +1190,13 @@ def main() -> None:
 
         seed_default_beds(db)
         print("Bed inventory: admin-managed (no hardcoded defaults)")
+
+        from Services.employee_id_service import assign_missing_employee_ids
+
+        filled = assign_missing_employee_ids(db)
+        if filled:
+            db.commit()
+        print(f"Employee IDs assigned: {filled}")
 
         print("\nSeed completed successfully!")
         print("\nRole IDs:")

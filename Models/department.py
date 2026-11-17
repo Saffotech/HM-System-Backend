@@ -13,4 +13,6 @@ class Department(TenantScoped):
     name        = Column(String, nullable=False)   # Cardiology, Ortho, General
     code        = Column(String(10), nullable=True) # CARD, ORTH, GEN
     description = Column(String, nullable=True)
+    # doctor = clinical unit; lab = laboratory / imaging unit chosen on the form
+    kind        = Column(String(10), nullable=False, default="doctor", server_default="doctor")
     is_active   = Column(Boolean, default=True)

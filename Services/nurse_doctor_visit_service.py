@@ -94,6 +94,53 @@ def _parse_visited_at(value: datetime | None) -> datetime:
         return value.replace(tzinfo=IST)
     return value.astimezone(IST)
 
+def _validate_visit_datetime(
+    db: Session,
+    patient_id: int,
+    visited_at: datetime,
+) -> datetime:
+
+    visited_at = _parse_visited_at(visited_at)
+    now = _now()
+
+    # Reject future visits
+    if visited_at > now:
+        raise HTTPException(
+            status_code=422,
+            detail="Future doctor visits are not allowed."
+        )
+
+    # Find the patient's active IPD admission
+    admission = (
+        db.query(IpdAdmission)
+        .filter(
+            IpdAdmission.patient_id == patient_id,
+            IpdAdmission.status == "admitted",
+        )
+        .order_by(IpdAdmission.id.desc())
+        .first()
+    )
+
+    # Validate against admission datetime when an active
+    # IPD admission exists.
+    if admission:
+        admission_at = admission.admitted_at
+
+        if admission_at is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Patient admission date is unavailable."
+            )
+
+        admission_at = _parse_visited_at(admission_at)
+
+        if visited_at < admission_at:
+            raise HTTPException(
+                status_code=422,
+                detail="Doctor visit cannot be before patient admission."
+            )
+
+    return visited_at
 
 def _active_doctor(db: Session, doctor_id: int) -> User:
     doctor = (
@@ -158,16 +205,26 @@ def _resolve_visit_department(
     return None, None
 
 
-def _visit_query(db: Session):
-    return (
+def _visit_query(
+    db: Session,
+    *,
+    include_voided: bool = False,
+):
+    query = (
         db.query(NurseDoctorVisit)
         .options(
             joinedload(NurseDoctorVisit.patient),
             joinedload(NurseDoctorVisit.doctor).joinedload(User.department),
             joinedload(NurseDoctorVisit.department),
         )
-        .filter(NurseDoctorVisit.is_voided.is_(False))
     )
+
+    if not include_voided:
+        query = query.filter(
+            NurseDoctorVisit.is_voided.is_(False)
+        )
+
+    return query
 
 
 def _visit_date_filter(query, visit_date: date | None):
@@ -320,6 +377,10 @@ def _serialize_visit(
         updated_by_name=visit.updated_by_name,
         updated_at=visit.updated_at,
         is_voided=visit.is_voided,
+        void_reason=visit.void_reason,
+        voided_at=visit.voided_at,
+        voided_by=visit.voided_by,
+        voided_by_name=visit.voided_by_name,
     )
 
 
@@ -346,7 +407,7 @@ def create_doctor_visit_service(
         doctor_name=doctor_display(db, doctor.id) or _user_display_name(doctor),
         department_id=department_id,
         department_name=department_name,
-        visited_at=_parse_visited_at(payload.visited_at),
+        visited_at=_validate_visit_datetime(db,patient.id,payload.visited_at or _now(),),
         notes=(payload.notes or "").strip() or None,
         recorded_by=nurse.id,
         recorded_by_name=_user_display_name(nurse),
@@ -548,7 +609,11 @@ def update_doctor_visit_service(
         )
 
     if "visited_at" in update_data:
-        visit.visited_at = _parse_visited_at(update_data["visited_at"])
+        visit.visited_at = _validate_visit_datetime(
+            db,
+            visit.patient_id,
+            update_data["visited_at"],
+        )
 
     if "notes" in update_data:
         visit.notes = (update_data["notes"] or "").strip() or None
@@ -736,17 +801,22 @@ def get_doctor_patient_visits_service(
         )
 
     on_date = visit_date or _now().date()
+    # Doctors still see nurse-deleted (voided) visits. Counts and visit numbers
+    # stay on active rows so IPD "No of visits" does not include cancellations.
     visits = (
         _visit_date_filter(
-            _visit_query(db).filter(NurseDoctorVisit.patient_id == patient.id),
+            _visit_query(db, include_voided=True).filter(
+                NurseDoctorVisit.patient_id == patient.id
+            ),
             on_date,
         )
         .order_by(NurseDoctorVisit.visited_at.asc(), NurseDoctorVisit.id.asc())
         .all()
     )
-    numbers = _assign_visit_numbers(visits)
+    active_visits = [visit for visit in visits if not visit.is_voided]
+    numbers = _assign_visit_numbers(active_visits)
     billing = _billing_map(db, [v.id for v in visits])
-    day_count = len(visits)
+    day_count = len(active_visits)
     serialized = [
         _serialize_visit(
             visit,

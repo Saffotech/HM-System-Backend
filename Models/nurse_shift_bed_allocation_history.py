@@ -30,6 +30,7 @@ class NurseShiftBedAllocationHistory(Base):
     # created | edited | reassigned | activated | deactivated | deleted
 
     actor_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    actor_name = Column(String(200), nullable=True)
 
     old_nurse_id = Column(Integer, ForeignKey("users.id"), nullable=True)
     new_nurse_id = Column(Integer, ForeignKey("users.id"), nullable=True)

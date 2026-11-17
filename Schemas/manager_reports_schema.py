@@ -23,7 +23,7 @@ class AdminReportsOverviewResponse(BaseModel):
     new_patients_in_period: int
     total_visits: int
     completed_visits: int
-    pending_payments: int
+    pending_payments: float
     total_revenue: float
     collected_revenue: float
     outstanding_revenue: float
@@ -36,14 +36,18 @@ class AdminVisitsReportItem(BaseModel):
     bill_number: str
     token_number: str
     patient_id: int
+    patient_uid: Optional[str] = None
+    patient_name: Optional[str] = None
     department_id: int
     department_name: str
     doctor_id: Optional[int] = None
+    doctor_name: Optional[str] = None
     grand_total: float
     paid_amount: Optional[float] = None
     payment_status: str
     status: str
     visit_date: Optional[str] = None
+    source: Optional[str] = None
 
 
 class AdminVisitsReportResponse(BaseModel):

@@ -1,6 +1,6 @@
 """OPD & billing API — routes only; logic in Services/."""
 from datetime import date, datetime
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
@@ -622,12 +622,22 @@ def list_beds(
     ward: Optional[str] = None,
     status: Optional[str] = None,
     search: Optional[str] = None,
+    status_filter: Literal["active", "inactive", "all"] = Query(
+        "active",
+        description="Inventory lifecycle. active, inactive, or all. Not occupancy.",
+    ),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("users:list")),
 ):
     """Admin Settings → OPD: bed inventory list (not IPD occupancy workflows)."""
-    return bed_service.list_beds(db, ward=ward, status=status, search=search)
+    return bed_service.list_beds(
+        db,
+        ward=ward,
+        status=status,
+        search=search,
+        status_filter=status_filter,
+    )
 
 
 @router.get("/beds/inventory-summary")
@@ -693,6 +703,18 @@ def delete_ward(
     return bed_service.delete_ward(db, ward_name)
 
 
+@router.patch("/beds/by-ward/{ward_name}/activate")
+def activate_ward(
+    ward_name: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: put every inactive bed in a ward back into inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "wards")
+    return bed_service.activate_ward(db, ward_name)
+
+
 @router.delete("/beds/{bed_id}")
 def delete_bed(
     bed_id: int,
@@ -703,3 +725,15 @@ def delete_bed(
     """Admin: remove an available bed from inventory."""
     opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
     return bed_service.delete_bed(db, bed_id)
+
+
+@router.patch("/beds/{bed_id}/activate")
+def activate_bed(
+    bed_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("users:list")),
+):
+    """Admin: put an inactive bed back into inventory."""
+    opd_settings_service.assert_admin_may_edit_bed_section(db, current_user, "all_beds")
+    return bed_service.activate_bed(db, bed_id)

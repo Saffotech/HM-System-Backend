@@ -15,6 +15,7 @@ class StaffListItem(BaseModel):
     department_id: Optional[int] = None
     department_name: Optional[str] = None
     is_active: bool
+    employee_id: Optional[str] = None
     last_login: Optional[datetime] = None
     created_at: Optional[datetime] = None
 
@@ -30,7 +31,6 @@ class StaffDetailOut(StaffListItem):
     phone: Optional[str] = None
     login_count: int = 0
     # Role-profile Account fields (admin managed)
-    employee_id: Optional[str] = None
     joining_date: Optional[date] = None
     shift_name: Optional[str] = None
     shift_start_time: Optional[str] = None

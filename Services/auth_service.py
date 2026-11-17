@@ -1,13 +1,14 @@
 from fastapi import HTTPException
 from sqlalchemy import func
 from sqlalchemy.orm import Session
-
+from Models.department import Department
 from Models.role import Role
 from Models.user import User
 from Schemas.schemas import UserCreate
 from hash import hash_password
 from Services import audit_service
 from Services.admin_users_service import _PROFILE_CREATE
+from Services.employee_id_service import ensure_employee_id
 from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.role_policy import assert_can_assign_role, caller_role_name
 
@@ -28,6 +29,22 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
         raise HTTPException(status_code=404, detail=f"Role with id {data.role_id} not found")
 
     assert_can_assign_role(caller_role_name(actor), role.name)
+    # Validate that the selected department exists and is active.
+    if data.department_id is not None:
+        department = (
+            db.query(Department)
+            .filter(
+                Department.id == data.department_id,
+                Department.is_active.is_(True),
+            )
+            .first()
+        )
+
+        if not department:
+            raise HTTPException(
+                status_code=400,
+                detail="Selected department is inactive or does not exist.",
+            )
 
     if role.name == "doctor" and not data.department_id:
         raise HTTPException(status_code=400, detail="department_id required for doctor")
@@ -59,7 +76,8 @@ def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
 
     create_profile = _PROFILE_CREATE.get(role.name)
     if create_profile:
-        create_profile(db, new_user.id)
+        profile = create_profile(db, new_user.id)
+        ensure_employee_id(db, new_user, profile)
 
     db.commit()
     db.refresh(new_user)
