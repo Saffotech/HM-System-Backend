@@ -22,18 +22,62 @@ logger = logging.getLogger(__name__)
 OPD_BILLING_ROLE = "opd_billing"
 
 
-def _active_opd_billing_ids(db: Session) -> list[int]:
+def _active_role_ids(db: Session, role_name: str) -> list[int]:
     rows = (
         db.query(User.id)
         .join(Role, User.role_id == Role.id)
         .filter(
-            Role.name == OPD_BILLING_ROLE,
+            Role.name == role_name,
             User.is_active.is_(True),
             User.deleted_at.is_(None),
         )
         .all()
     )
     return [row[0] for row in rows]
+
+
+def notify_payment_modes_disabled(
+    db: Session,
+    *,
+    labels: list[str],
+    actor: User,
+    settings_id: int,
+) -> None:
+    """Tell OPD billing and IPD staff that a manager turned payment modes off."""
+    if not labels:
+        return
+    names = ", ".join(labels)
+    title = "Payment mode disabled"
+    message = (
+        f"{names} can no longer be used for payment. "
+        "A hospital administrator disabled this mode in Payment & Insurance."
+    )
+    actor_name = h.display_name(actor.first_name, actor.last_name)
+    targets = (
+        (_active_role_ids(db, OPD_BILLING_ROLE), SourceModule.OPD_BILLING),
+        (_active_role_ids(db, "ipd"), SourceModule.IPD),
+    )
+    for staff_ids, source in targets:
+        for staff_id in staff_ids:
+            if staff_id == actor.id:
+                continue
+            create_notification(
+                db,
+                user_id=staff_id,
+                title=title,
+                message=message,
+                notification_type=NotificationType.ADMIN_UPDATE,
+                source_module=source,
+                reference_type=ReferenceType.ALERT,
+                reference_id=settings_id,
+                created_by=actor.id,
+                created_by_name=actor_name,
+                priority=NotificationPriority.HIGH,
+            )
+
+
+def _active_opd_billing_ids(db: Session) -> list[int]:
+    return _active_role_ids(db, OPD_BILLING_ROLE)
 
 
 def _staff_name(db: Session, user_id: int | None) -> str:

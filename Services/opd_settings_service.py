@@ -689,6 +689,13 @@ def update_settings(
             if v is not None:
                 merged_pm[k] = v
         extra["payment_modes"] = PaymentSettingsOut.model_validate(merged_pm).model_dump()
+        disabled_labels = []
+        before_enabled = {m.code: m.enabled for m in current_pm.modes}
+        for mode in PaymentSettingsOut.model_validate(extra["payment_modes"]).modes:
+            if before_enabled.get(mode.code, True) and not mode.enabled:
+                disabled_labels.append(mode.label or mode.code)
+    else:
+        disabled_labels = []
 
     for key in ("appointment_slots",):
         if key in updates and updates[key] is not None:
@@ -700,6 +707,16 @@ def update_settings(
 
     db.commit()
     db.refresh(row)
+
+    if disabled_labels:
+        from Services.opd_notification_helpers import notify_payment_modes_disabled
+
+        notify_payment_modes_disabled(
+            db,
+            labels=disabled_labels,
+            actor=actor,
+            settings_id=row.id,
+        )
 
     after = {
         "allow_patient_delete": row.allow_patient_delete,

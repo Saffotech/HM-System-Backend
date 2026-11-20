@@ -189,6 +189,10 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
     admit_mode = (data.payment_mode or "").strip().lower()
     if admit_mode == "insurance":
         opd_settings_service.validate_payment_mode(db, payment_mode="insurance")
+        insurer = (data.insurance.insurer if data.insurance else "").strip()
+        if not insurer:
+            raise HTTPException(status_code=400, detail="Insurance provider not found.")
+        opd_settings_service.validate_insurance_provider(db, provider_name=insurer)
     elif self_pay_method:
         opd_settings_service.validate_payment_mode(db, payment_mode=self_pay_method)
 

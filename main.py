@@ -101,6 +101,7 @@ from Routers.opd import router as opd_router
 from Routers.ipd import router as ipd_router
 from Routers.ipd_insurance_router import router as ipd_insurance_router
 from Routers.ipd_profile_router import router as ipd_profile_router
+from Routers.ipd_notification_router import router as ipd_notification_router
 from Routers.pharmacy import router as pharmacy_router
 from Routers.pharmacist_profile_router import router as pharmacist_profile_router
 from Routers.pharmacist_notification_router import (
@@ -203,6 +204,7 @@ app.include_router(opd_billing_notification_router)
 app.include_router(ipd_router)
 app.include_router(ipd_insurance_router)
 app.include_router(ipd_profile_router)
+app.include_router(ipd_notification_router)
 app.include_router(appointments_router)
 app.include_router(doctor_ipd_router)
 app.include_router(consultation_router)
