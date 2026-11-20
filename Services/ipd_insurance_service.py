@@ -17,6 +17,7 @@ from Schemas.ipd_schema import (
     IpdInsurancePaymentIn,
 )
 from Services import ipd_helpers as h
+from Services import opd_settings_service
 from Services.doctor_helpers import format_patient_age_label, patient_age
 from Services.ipd_insurance_split import insurance_split
 
@@ -652,6 +653,8 @@ def add_payment(
     *,
     kind: str,
 ) -> dict:
+    if kind == "patient" and (payload.mode or "").strip():
+        opd_settings_service.validate_payment_mode(db, payment_mode=payload.mode)
     entry = {
         "id": f"{kind}-{int(_now().timestamp() * 1000)}",
         "amount": float(payload.amount),

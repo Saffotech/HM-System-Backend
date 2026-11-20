@@ -1,6 +1,6 @@
 """OPD & billing — patients, visits, bills, payments, dashboard."""
 import re
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
 from fastapi import HTTPException
@@ -92,6 +92,8 @@ def _preview_consultation_fee(pricing, data: BillPreviewRequest) -> float:
     That sent amount is the consultation line. It must not be replaced by the
     hospital default (₹500), which dropped a ₹700 doctor fee from the bill.
     """
+    if not pricing.consultation_enabled:
+        return 0.0
     if data.doctor_id is not None:
         return opd_settings_service.resolve_consultation_fee(
             pricing,
@@ -203,6 +205,8 @@ def _consultation_fee_for_generated_bill(
     remaining items. When that payment matches those items and not the total
     that includes consultation, the removed charge is not billed.
     """
+    if not pricing.consultation_enabled:
+        return 0.0
     if requested <= 0:
         return 0.0
     fee = requested if bool(pricing.allow_manual_price_entry) else resolved
@@ -501,6 +505,35 @@ def validate_opd_billing_eligibility(
             detail="A bill already exists for this appointment.",
         )
     return apt
+
+
+def release_fresh_unbilled_appointment(db: Session, appointment_id: Optional[int]) -> None:
+    """Drop a slot reserved in the same booking attempt when payment is then refused.
+
+    Book Appointment creates the appointment before the bill request. A disabled
+    payment mode must not keep that slot or hide the patient. Appointments that
+    already have a bill, or that were booked earlier, are left as they are.
+    """
+    if not appointment_id:
+        return
+    apt = (
+        db.query(Appointment)
+        .filter(Appointment.id == appointment_id)
+        .first()
+    )
+    if apt is None or apt.status != AppointmentStatus.scheduled:
+        return
+    existing = appointment_service._visit_for_appointment(db, apt)
+    if existing is not None and str(existing.status or "").lower() != "cancelled":
+        return
+    created = apt.created_at
+    if created is None:
+        return
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=timezone.utc)
+    if datetime.now(timezone.utc) - created.astimezone(timezone.utc) > timedelta(minutes=3):
+        return
+    appointment_service.cancel_appointment(db, apt.id)
 
 
 def generate_bill(
@@ -1002,17 +1035,17 @@ def update_bill(db: Session, visit_id: int, data: BillUpdateRequest) -> dict:
         elif not doctor_or_dept_changed:
             registration_fee = prev_reg
 
-        if "consultation_fee" in updates:
-            consultation_fee = float(updates["consultation_fee"])
-        elif not doctor_or_dept_changed:
-            consultation_fee = prev_consult
-
         if "gst_percent" in updates:
             gst_percent = float(updates["gst_percent"])
         elif not doctor_or_dept_changed:
             gst_percent = prev_gst
         else:
             gst_percent = float(pricing.gst_percent)
+
+    if "consultation_fee" in updates and pricing.consultation_enabled:
+        consultation_fee = float(updates["consultation_fee"])
+    else:
+        consultation_fee = prev_consult
 
     visit.registration_fee = registration_fee
     visit.consultation_fee = consultation_fee

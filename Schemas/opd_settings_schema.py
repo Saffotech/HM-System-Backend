@@ -91,6 +91,7 @@ class PricingOut(BaseModel):
     consultation_fee: float = Field(500.0, ge=0)
     gst_percent: float = Field(5.0, ge=0)
     allow_manual_price_entry: bool = True
+    consultation_enabled: bool = True
     bed_tariff: BedTariffOut = Field(default_factory=BedTariffOut)
     department_consultation_fees: list[DepartmentConsultationFee] = Field(default_factory=list)
     doctor_consultation_fees: list[DoctorConsultationFee] = Field(default_factory=list)
@@ -102,6 +103,7 @@ class PricingUpdate(BaseModel):
     consultation_fee: Optional[float] = Field(None, ge=0)
     gst_percent: Optional[float] = Field(None, ge=0)
     allow_manual_price_entry: Optional[bool] = None
+    consultation_enabled: Optional[bool] = None
     bed_tariff: Optional[BedTariffUpdate] = None
     department_consultation_fees: Optional[list[DepartmentConsultationFee]] = None
     doctor_consultation_fees: Optional[list[DoctorConsultationFee]] = None

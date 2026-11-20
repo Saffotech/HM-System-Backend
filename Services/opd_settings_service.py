@@ -33,6 +33,7 @@ DEFAULT_PRICING: dict[str, Any] = {
     "consultation_fee": 500.0,
     "gst_percent": 5.0,
     "allow_manual_price_entry": True,
+    "consultation_enabled": True,
     "bed_tariff": {
         "general_ward_charge": 500.0,
         "private_ward_charge": 2000.0,
@@ -478,13 +479,17 @@ def resolve_visit_fees(
     Apply Admin pricing to a visit.
 
     - registration_fee: keep 0 (waived / revisit); otherwise use settings.
-    - consultation_fee: always resolved via doctor → department → hospital.
+    - consultation_fee: 0 when consultation charges are disabled. Otherwise
+      doctor → department → hospital. Configured prices stay stored either way.
     - gst_percent: always from settings.
     """
     reg = 0.0 if float(registration_fee or 0) == 0 else float(pricing.registration_fee)
-    consult = resolve_consultation_fee(
-        pricing, doctor_id=doctor_id, department_id=department_id
-    )
+    if pricing.consultation_enabled:
+        consult = resolve_consultation_fee(
+            pricing, doctor_id=doctor_id, department_id=department_id
+        )
+    else:
+        consult = 0.0
     gst = float(pricing.gst_percent)
     return reg, consult, gst
 
@@ -526,6 +531,14 @@ def validate_extra_bill_items(
         description = str(item.get("description") or "").strip()
         if not description:
             raise HTTPException(status_code=400, detail="Bill item description is required")
+        if "consultation" in description.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Consultation is billed as its own charge and cannot be added "
+                    "as an extra bill item."
+                ),
+            )
         try:
             qty = int(item.get("qty") or 1)
         except (TypeError, ValueError) as exc:

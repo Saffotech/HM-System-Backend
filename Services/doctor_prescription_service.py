@@ -66,15 +66,31 @@ def _add_items(db: Session, rx_id: int, items: list[PrescriptionItemCreate]) -> 
         db.add(_item(rx_id, item))
 
 
-def _get_prescription(db: Session, prescription_id: int, doctor_id: int) -> Prescription:
+def _doctor_is_assigned(db: Session, doctor_id: int, patient_id: int) -> bool:
+    from Services.doctor_patient_clinical_service import get_assigned_patient_ids
+
+    return patient_id in get_assigned_patient_ids(db, doctor_id)
+
+
+def _get_prescription(
+    db: Session,
+    prescription_id: int,
+    doctor_id: int,
+    *,
+    allow_assigned_read: bool = False,
+) -> Prescription:
     rx = (
         _prescription_query(db)
-        .filter(Prescription.id == prescription_id, Prescription.doctor_id == doctor_id)
+        .filter(Prescription.id == prescription_id)
         .first()
     )
     if not rx:
         raise HTTPException(status_code=404, detail="Prescription not found")
-    return rx
+    if rx.doctor_id == doctor_id:
+        return rx
+    if allow_assigned_read and _doctor_is_assigned(db, doctor_id, rx.patient_id):
+        return rx
+    raise HTTPException(status_code=404, detail="Prescription not found")
 
 
 def create_prescription_for_appointment(
@@ -254,7 +270,7 @@ def create_prescription_service(db: Session, prescription_data: PrescriptionCrea
 
 def get_prescription_by_id_service(db: Session, prescription_id: int, doctor_id: int):
     return _serialize_prescription(
-        _get_prescription(db, prescription_id, doctor_id)
+        _get_prescription(db, prescription_id, doctor_id, allow_assigned_read=True)
     )
 
 
@@ -275,13 +291,13 @@ def get_patient_prescriptions_service(
     page = max(int(page or 1), 1)
     page_size = min(max(int(page_size or 20), 1), 100)
 
-    query = (
-        _prescription_query(db)
-        .filter(Prescription.doctor_id == doctor_id)
-    )
+    if patient_id is None and patient_uid:
+        match = db.query(Patient).filter(Patient.patient_uid == patient_uid).first()
+        patient_id = match.id if match else None
+    if patient_id is None or not _doctor_is_assigned(db, doctor_id, patient_id):
+        raise HTTPException(status_code=403, detail="Patient is not assigned to this doctor")
 
-    if patient_id:
-        query = query.filter(Prescription.patient_id == patient_id)
+    query = _prescription_query(db).filter(Prescription.patient_id == patient_id)
 
     if patient_uid:
         query = query.join(
