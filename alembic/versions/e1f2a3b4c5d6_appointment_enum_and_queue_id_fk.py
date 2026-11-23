@@ -43,9 +43,14 @@ def upgrade() -> None:
     if _table_exists(inspector, "appointments"):
         cols = _column_names(inspector, "appointments")
         if "status" in cols:
-            status_col = next(c for c in inspector.get_columns("appointments") if c["name"] == "status")
-            type_name = str(status_col["type"]).upper()
-            if "APPOINTMENTSTATUS" not in type_name:
+            udt = conn.execute(
+                sa.text(
+                    "SELECT udt_name FROM information_schema.columns "
+                    "WHERE table_schema = 'public' AND table_name = 'appointments' "
+                    "AND column_name = 'status'"
+                )
+            ).scalar()
+            if udt != "appointmentstatus":
                 op.execute(
                     "UPDATE appointments SET status = 'scheduled' "
                     "WHERE status IS NULL OR TRIM(status) = ''"
