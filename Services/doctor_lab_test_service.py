@@ -302,7 +302,25 @@ def get_lab_tests_service(
     page: int = 1,
     page_size: int = 20,
 ):
-    query = db.query(LabTestOrder).filter(LabTestOrder.doctor_id == doctor_id)
+    query = db.query(LabTestOrder)
+    # A shared patient chart may include another doctor's orders. The unfiltered
+    # worklist stays this doctor's own orders.
+    if patient_id or (patient_uid and patient_uid.strip()):
+        from Services.doctor_patient_clinical_service import get_assigned_patient_ids
+
+        assigned = get_assigned_patient_ids(db, doctor_id)
+        if patient_id and patient_id not in assigned:
+            raise HTTPException(status_code=403, detail="Patient is not assigned to this doctor")
+        if not patient_id and patient_uid:
+            match = (
+                db.query(Patient)
+                .filter(Patient.patient_uid == patient_uid.strip())
+                .first()
+            )
+            if match is None or match.id not in assigned:
+                raise HTTPException(status_code=403, detail="Patient is not assigned to this doctor")
+    else:
+        query = query.filter(LabTestOrder.doctor_id == doctor_id)
 
     if patient_id:
         query = query.filter(LabTestOrder.patient_id == patient_id)
@@ -485,18 +503,20 @@ def _get_doctor_order(
     db: Session,
     test_id: int,
     doctor_id: int,
+    *,
+    allow_assigned_read: bool = False,
 ) -> LabTestOrder:
-    order = (
-        db.query(LabTestOrder)
-        .filter(
-            LabTestOrder.id == test_id,
-            LabTestOrder.doctor_id == doctor_id,
-        )
-        .first()
-    )
+    order = db.query(LabTestOrder).filter(LabTestOrder.id == test_id).first()
     if not order:
         raise HTTPException(status_code=404, detail="Lab test not found")
-    return order
+    if order.doctor_id == doctor_id:
+        return order
+    if allow_assigned_read and order.patient_id:
+        from Services.doctor_patient_clinical_service import get_assigned_patient_ids
+
+        if order.patient_id in get_assigned_patient_ids(db, doctor_id):
+            return order
+    raise HTTPException(status_code=404, detail="Lab test not found")
 
 
 def get_doctor_lab_report_by_test_service(
@@ -504,7 +524,9 @@ def get_doctor_lab_report_by_test_service(
     test_id: int,
     doctor_id: int,
 ):
-    order = _get_doctor_order(db=db, test_id=test_id, doctor_id=doctor_id)
+    order = _get_doctor_order(
+        db=db, test_id=test_id, doctor_id=doctor_id, allow_assigned_read=True
+    )
 
     report = (
         db.query(LabResult)
@@ -579,7 +601,9 @@ def get_doctor_lab_report_file_by_test_service(
     test_id: int,
     doctor_id: int,
 ):
-    order = _get_doctor_order(db=db, test_id=test_id, doctor_id=doctor_id)
+    order = _get_doctor_order(
+        db=db, test_id=test_id, doctor_id=doctor_id, allow_assigned_read=True
+    )
 
     report = (
         db.query(LabResult)

@@ -32,6 +32,7 @@ DEFAULT_ADMIN_EDIT: dict[str, bool] = {
     "lab_access": True,
     "lab_results": True,
     "lab_profile": True,
+    "lab_catalog": True,
     # Nurse
     "nurse_access": True,
     "nurse_clinical": True,
@@ -133,7 +134,13 @@ MODULE_CARD_PERMISSION_KEYS: dict[str, frozenset[str]] = {
             "nurse_doctor_visits:update",
         }
     ),
-    "nurse_operations": frozenset(),
+    "nurse_operations": frozenset(
+        {
+            "emergency_alerts:view",
+            "emergency_alerts:create",
+            "emergency_alerts:update",
+        }
+    ),
     "pharmacy_access": frozenset(
         {
             "prescriptions:view",
@@ -156,6 +163,7 @@ ROLE_MODULE_LOCK_KEYS: dict[str, tuple[str, ...]] = {
     "doctor": ("doctor_access", "doctor_clinical", "doctor_profile"),
     "receptionist": ("receptionist_access", "receptionist_profile"),
     "lab_technician": ("lab_access", "lab_results", "lab_profile"),
+    "lab_technician": ("lab_access", "lab_results", "lab_profile", "lab_catalog"),
     "nurse": ("nurse_access", "nurse_clinical", "nurse_operations"),
     "pharmacist": ("pharmacy_access", "pharmacy_dispense", "pharmacy_profile"),
 }

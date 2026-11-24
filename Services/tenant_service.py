@@ -147,6 +147,9 @@ def register_tenant(db: Session, data: TenantRegisterRequest, actor: User, *, co
     from seed import ensure_catalog_for_tenant
 
     ensure_catalog_for_tenant(db, tenant.id)
+    from Services.tenant_permission_service import ensure_tenant_copies
+
+    ensure_tenant_copies(db, tenant.id)
     tenant.subscription_amount = price_for(db, tenant.plan, tenant.billing_cycle)
     create_first_invoice(db, tenant)
     db.flush()

@@ -33,6 +33,7 @@ DEFAULT_PRICING: dict[str, Any] = {
     "consultation_fee": 500.0,
     "gst_percent": 5.0,
     "allow_manual_price_entry": True,
+    "consultation_enabled": True,
     "bed_tariff": {
         "general_ward_charge": 500.0,
         "private_ward_charge": 2000.0,
@@ -100,12 +101,25 @@ def get_settings_row(db: Session, tenant_id: int | None = None) -> OpdSettings:
 
 
 def assert_admin_may_edit_bed_section(db: Session, actor: User, section: str) -> None:
-    """Freeze switches no longer block bed writes."""
-    return
+    """Block hospital managers from bed configuration while the section lock is off."""
+    if _role_name(actor) != "manager":
+        return
+    row = get_settings_row(db, actor.tenant_id)
+    extra = row.extra if isinstance(row.extra, dict) else {}
+    locks = normalize_admin_edit(extra.get("admin_edit"))
+    if not locks.get(section, True):
+        raise HTTPException(
+            status_code=403,
+            detail="This settings section is locked.",
+        )
 
 
 def assert_admin_may_edit_bed_inventory(db: Session, actor: User) -> None:
     assert_admin_may_edit_bed_section(db, actor, "bed_inventory")
+
+
+def assert_manager_section_unlocked(db: Session, actor: User, section: str) -> None:
+    assert_admin_may_edit_bed_section(db, actor, section)
 
 
 def default_pricing() -> PricingOut:
@@ -278,8 +292,8 @@ def is_payment_mode_enabled(settings: PaymentSettingsOut, mode: str) -> bool:
     key = (mode or "").strip().lower()
     for m in settings.modes:
         if m.code == key:
-            return m.enabled
-    return True
+            return bool(m.enabled)
+    return False
 
 
 def get_active_insurance_providers(settings: PaymentSettingsOut) -> list:
@@ -314,7 +328,10 @@ def validate_payment_mode(
 
     if key == "insurance":
         if not any(p.is_active for p in settings.insurance_providers):
-            pass
+            raise HTTPException(
+                status_code=403,
+                detail="Insurance payment requires an active insurance provider.",
+            )
 
 
 def validate_insurance_provider(
@@ -478,13 +495,17 @@ def resolve_visit_fees(
     Apply Admin pricing to a visit.
 
     - registration_fee: keep 0 (waived / revisit); otherwise use settings.
-    - consultation_fee: always resolved via doctor → department → hospital.
+    - consultation_fee: 0 when consultation charges are disabled. Otherwise
+      doctor → department → hospital. Configured prices stay stored either way.
     - gst_percent: always from settings.
     """
     reg = 0.0 if float(registration_fee or 0) == 0 else float(pricing.registration_fee)
-    consult = resolve_consultation_fee(
-        pricing, doctor_id=doctor_id, department_id=department_id
-    )
+    if pricing.consultation_enabled:
+        consult = resolve_consultation_fee(
+            pricing, doctor_id=doctor_id, department_id=department_id
+        )
+    else:
+        consult = 0.0
     gst = float(pricing.gst_percent)
     return reg, consult, gst
 
@@ -526,6 +547,14 @@ def validate_extra_bill_items(
         description = str(item.get("description") or "").strip()
         if not description:
             raise HTTPException(status_code=400, detail="Bill item description is required")
+        if "consultation" in description.lower():
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Consultation is billed as its own charge and cannot be added "
+                    "as an extra bill item."
+                ),
+            )
         try:
             qty = int(item.get("qty") or 1)
         except (TypeError, ValueError) as exc:
@@ -606,6 +635,109 @@ def get_settings(db: Session) -> OpdSettingsOut:
     return _to_out(get_settings_row(db))
 
 
+def _values_differ(current: Any, incoming: Any) -> bool:
+    if isinstance(current, bool) or isinstance(incoming, bool):
+        return bool(current) != bool(incoming)
+    if isinstance(current, (int, float)) and isinstance(incoming, (int, float)) and not isinstance(incoming, bool):
+        return float(current) != float(incoming)
+    return current != incoming
+
+
+def _locked_keys_changed(lock_open: bool, current: dict, incoming: dict, keys: set[str]) -> bool:
+    if lock_open:
+        return False
+    for key in keys:
+        if key not in incoming or incoming[key] is None:
+            continue
+        if _values_differ(current.get(key), incoming[key]):
+            return True
+    return False
+
+
+def _reject_locked_setting_write(locks: dict, updates: dict, row: OpdSettings, extra: dict) -> None:
+    """Reject a Manager write that changes a locked section. Unchanged locked fields are ignored."""
+    if "delete_controls" in updates:
+        current = {
+            "allow_patient_delete": row.allow_patient_delete,
+            "allow_appointment_delete": row.allow_appointment_delete,
+            "allow_unpaid_bill_delete": row.allow_unpaid_bill_delete,
+            "require_admin_approval_for_delete": row.require_admin_approval_for_delete,
+        }
+        incoming = updates.get("delete_controls") or {}
+        if _locked_keys_changed(locks.get("delete_controls", True), current, incoming, set(current)):
+            raise HTTPException(status_code=403, detail="This settings section is locked.")
+        if not locks.get("delete_controls", True):
+            updates.pop("delete_controls", None)
+
+    if "discount_refund" in updates:
+        current = normalize_discount_refund(extra.get("discount_refund")).model_dump()
+        incoming = updates.get("discount_refund") or {}
+        if _locked_keys_changed(locks.get("discount_refund", True), current, incoming, set(current)):
+            raise HTTPException(status_code=403, detail="This settings section is locked.")
+        if not locks.get("discount_refund", True):
+            updates.pop("discount_refund", None)
+
+    if "pricing" in updates and isinstance(updates["pricing"], dict):
+        current = normalize_pricing(extra.get("pricing")).model_dump()
+        pricing_locks = {
+            "registration_fee": "global_fees_tax",
+            "consultation_fee": "global_fees_tax",
+            "gst_percent": "global_fees_tax",
+            "consultation_enabled": "global_fees_tax",
+            "allow_manual_price_entry": "global_fees_tax",
+            "bed_tariff": "bed_tariff",
+            "department_consultation_fees": "consultation_fee_by_department",
+            "doctor_consultation_fees": "consultation_fee_by_doctor",
+            "bill_items": "bill_item_price_list",
+        }
+        incoming = updates["pricing"]
+        for key, lock_key in pricing_locks.items():
+            if key not in incoming or incoming[key] is None:
+                continue
+            if not locks.get(lock_key, True) and _values_differ(current.get(key), incoming[key]):
+                raise HTTPException(status_code=403, detail="This settings section is locked.")
+        for key, lock_key in pricing_locks.items():
+            if not locks.get(lock_key, True):
+                incoming.pop(key, None)
+        if not incoming:
+            updates.pop("pricing", None)
+
+    if "appointment_slots" in updates and isinstance(updates["appointment_slots"], dict):
+        current = normalize_appointment_slots(extra.get("appointment_slots"))
+        slots = updates["appointment_slots"]
+        hospital_keys = {"start_time", "end_time", "slot_duration_minutes", "working_days"}
+        if _locked_keys_changed(locks.get("hospital_default_slots", True), current, slots, hospital_keys):
+            raise HTTPException(status_code=403, detail="This settings section is locked.")
+        if _locked_keys_changed(locks.get("doctor_slot_overrides", True), current, slots, {"doctor_slots"}):
+            raise HTTPException(status_code=403, detail="This settings section is locked.")
+        if not locks.get("hospital_default_slots", True):
+            for key in hospital_keys:
+                slots.pop(key, None)
+        if not locks.get("doctor_slot_overrides", True):
+            slots.pop("doctor_slots", None)
+        if not slots:
+            updates.pop("appointment_slots", None)
+
+    if "payment_modes" in updates and isinstance(updates["payment_modes"], dict):
+        current = normalize_payment_settings(extra.get("payment_modes")).model_dump()
+        payment = updates["payment_modes"]
+        payment_locks = {
+            "modes": "payment_modes",
+            "bank_details": "bank_upi_details",
+            "insurance_providers": "insurance_providers",
+        }
+        for key, lock_key in payment_locks.items():
+            if key not in payment or payment[key] is None:
+                continue
+            if not locks.get(lock_key, True) and _values_differ(current.get(key), payment[key]):
+                raise HTTPException(status_code=403, detail="This settings section is locked.")
+        for key, lock_key in payment_locks.items():
+            if not locks.get(lock_key, True):
+                payment.pop(key, None)
+        if not payment:
+            updates.pop("payment_modes", None)
+
+
 def update_settings(
     db: Session,
     data: OpdSettingsUpdate,
@@ -619,9 +751,30 @@ def update_settings(
     is_admin = _role_name(actor) in {"admin", "manager"}
     extra = dict(row.extra) if isinstance(row.extra, dict) else {}
     updates = dict(requested)
-    updates.pop("admin_edit", None)
+    admin_edit_patch = updates.pop("admin_edit", None)
+    actor_role = _role_name(actor)
 
-    if not updates:
+    if admin_edit_patch is not None:
+        from Services.admin_edit_policy import merge_admin_edit_patch
+
+        current_locks = normalize_admin_edit(extra.get("admin_edit"))
+        merged_locks = merge_admin_edit_patch(current_locks, admin_edit_patch)
+        if actor_role != "admin":
+            if merged_locks != current_locks:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Only the hospital admin can change edit locks.",
+                )
+            # Same locks as stored, including a partial patch of current values.
+            admin_edit_patch = None
+        else:
+            extra["admin_edit"] = merged_locks
+
+    if actor_role == "manager":
+        locks = normalize_admin_edit(extra.get("admin_edit"))
+        _reject_locked_setting_write(locks, updates, row, extra)
+
+    if not updates and admin_edit_patch is None:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     before = {
@@ -676,6 +829,13 @@ def update_settings(
             if v is not None:
                 merged_pm[k] = v
         extra["payment_modes"] = PaymentSettingsOut.model_validate(merged_pm).model_dump()
+        disabled_labels = []
+        before_enabled = {m.code: m.enabled for m in current_pm.modes}
+        for mode in PaymentSettingsOut.model_validate(extra["payment_modes"]).modes:
+            if before_enabled.get(mode.code, True) and not mode.enabled:
+                disabled_labels.append(mode.label or mode.code)
+    else:
+        disabled_labels = []
 
     for key in ("appointment_slots",):
         if key in updates and updates[key] is not None:
@@ -687,6 +847,16 @@ def update_settings(
 
     db.commit()
     db.refresh(row)
+
+    if disabled_labels:
+        from Services.opd_notification_helpers import notify_payment_modes_disabled
+
+        notify_payment_modes_disabled(
+            db,
+            labels=disabled_labels,
+            actor=actor,
+            settings_id=row.id,
+        )
 
     after = {
         "allow_patient_delete": row.allow_patient_delete,
@@ -705,7 +875,7 @@ def update_settings(
             "before": before,
             "after": after,
             "pricing_updated": "pricing" in updates,
-            "admin_edit_updated": False,
+            "admin_edit_updated": admin_edit_patch is not None,
         },
     )
 
@@ -723,10 +893,20 @@ def assert_delete_allowed(
     kind: 'patient' | 'appointment' | 'bill'
     """
     role = _role_name(current_user)
-    if role in _ADMIN_OVERRIDE_ROLES:
+    if role == "admin":
         return
 
     row = get_settings_row(db)
+    if row.require_admin_approval_for_delete and role != "manager":
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Deletion requires administrator approval. "
+                "No approval-request workflow is configured."
+            ),
+        )
+    if role == "manager":
+        return
     if kind == "patient":
         if not row.allow_patient_delete:
             raise HTTPException(

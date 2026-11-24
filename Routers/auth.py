@@ -28,10 +28,10 @@ from Services import audit_service, auth_service
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
 
-def _permissions_for_user(user: User) -> list[str]:
-    if not user.role_obj:
-        return []
-    return [p.name for p in (user.role_obj.permissions or [])]
+def _permissions_for_user(user: User, db: Session) -> list[str]:
+    from Services.tenant_permission_service import permission_names_for_user
+
+    return permission_names_for_user(db, user)
 
 def _hospital_blocked(user: User) -> bool:
     role_name = user.role_obj.name if user.role_obj else ""
@@ -49,8 +49,8 @@ def _hospital_payload(user: User) -> dict | None:
         "code": user.tenant.code,
     }
 
-def _issue_token_pair(user: User) -> dict:
-    permissions = _permissions_for_user(user)
+def _issue_token_pair(user: User, db: Session) -> dict:
+    permissions = _permissions_for_user(user, db)
     access_token = create_access_token(
         {
             "sub": str(user.id),
@@ -171,7 +171,7 @@ def login(
         user_agent=user_agent(request),
     )
 
-    return _issue_token_pair(user)
+    return _issue_token_pair(user, db)
 
 
 @router.post("/logout")
@@ -272,11 +272,12 @@ def refresh_tokens(data: RefreshTokenRequest, db: Session = Depends(get_db)):
         )
         raise HTTPException(status_code=403, detail=detail)
 
-    tokens = _issue_token_pair(user)
+    tokens = _issue_token_pair(user, db)
     return {
         "access_token": tokens["access_token"],
         "refresh_token": tokens["refresh_token"],
         "token_type": tokens["token_type"],
+        "permissions": tokens["permissions"],
     }
 
 
@@ -317,7 +318,7 @@ def get_me(
         "is_active": user.is_active,
         "created_at": str(user.created_at),
         "profile_image_url": profile_image_url_for_user(user),
-        "permissions": _permissions_for_user(user),
+        "permissions": _permissions_for_user(user, db),
         "tenant_id": user.tenant_id,
         "hospital": _hospital_payload(user),
     }

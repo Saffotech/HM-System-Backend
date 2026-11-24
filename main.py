@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from sqlalchemy import inspect as sa_inspect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
@@ -101,6 +102,7 @@ from Routers.opd import router as opd_router
 from Routers.ipd import router as ipd_router
 from Routers.ipd_insurance_router import router as ipd_insurance_router
 from Routers.ipd_profile_router import router as ipd_profile_router
+from Routers.ipd_notification_router import router as ipd_notification_router
 from Routers.pharmacy import router as pharmacy_router
 from Routers.pharmacist_profile_router import router as pharmacist_profile_router
 from Routers.pharmacist_notification_router import (
@@ -165,7 +167,11 @@ def start_renewal_billing() -> None:
     threading.Thread(target=_renewal_loop, name="subscription-renewal", daemon=True).start()
 
 
-Base.metadata.create_all(bind=engine)
+# Once Alembic owns the database, startup must not create tables that a
+# pending migration is also responsible for. Empty databases still get the
+# model schema so a developer can boot before the first migration command.
+if not sa_inspect(engine).has_table("alembic_version"):
+    Base.metadata.create_all(bind=engine)
 ensure_activity_history_columns(engine)
 ensure_subscription_columns(engine)
 ensure_user_token_version(engine)
@@ -203,6 +209,7 @@ app.include_router(opd_billing_notification_router)
 app.include_router(ipd_router)
 app.include_router(ipd_insurance_router)
 app.include_router(ipd_profile_router)
+app.include_router(ipd_notification_router)
 app.include_router(appointments_router)
 app.include_router(doctor_ipd_router)
 app.include_router(consultation_router)

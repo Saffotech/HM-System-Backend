@@ -86,7 +86,11 @@ def get_current_user(
     return user
 
 
-def _permissions_for_user(user: User) -> list[str]:
+def _permissions_for_user(user: User, db: Session | None = None) -> list[str]:
+    if db is not None and user.tenant_id is not None:
+        from Services.tenant_permission_service import permission_names_for_user
+
+        return permission_names_for_user(db, user)
     if not user.role_obj:
         return []
     return [p.name for p in (user.role_obj.permissions or [])]
@@ -129,7 +133,7 @@ class PermissionChecker:
             _reject_if_token_stale(user, payload)
             _bind_hospital_session(db, user)
 
-            live_permissions = set(_permissions_for_user(user))
+            live_permissions = set(_permissions_for_user(user, db))
             token_permissions = set(payload.get("permissions") or [])
             if user.role_obj is not None:
                 permissions = live_permissions

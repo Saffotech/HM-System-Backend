@@ -48,11 +48,16 @@ def ensure_immediate_payment_valid(
     pay_later: bool,
     paid: float,
     transaction_reference: Optional[str] = None,
+    db: Optional[Session] = None,
 ) -> None:
     """Validate payment mode and card/upi reference when recording payment now."""
     if pay_later or paid <= 0:
         return
     validate_payment_mode(payment_mode)
+    if db is not None:
+        from Services.opd_settings_service import validate_payment_mode as validate_enabled_mode
+
+        validate_enabled_mode(db, payment_mode=payment_mode)
     ref = (transaction_reference or "").strip()
     if payment_mode in ("card", "upi") and not ref:
         raise HTTPException(
@@ -222,7 +227,13 @@ def record_payment(
     mode = (payment_mode or "cash").strip().lower()
     if mode == "online":
         mode = "insurance"
-    ensure_immediate_payment_valid(mode, pay_later=False, paid=amount, transaction_reference=transaction_reference)
+    ensure_immediate_payment_valid(
+        mode,
+        pay_later=False,
+        paid=amount,
+        transaction_reference=transaction_reference,
+        db=db,
+    )
     txn = PaymentTransaction(
         visit_id=visit.id,
         amount=amount,

@@ -69,6 +69,7 @@ def get_prescription_by_id(
     request: Request,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("patients:view")),
 ):
     prescription = get_prescription_by_id_service(
         db=db,
@@ -101,6 +102,7 @@ def get_patient_prescriptions(
     page_size: int = Query(default=20, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    _: bool = Depends(PermissionChecker("patients:view")),
 ):
     return get_patient_prescriptions_service(
         db=db,

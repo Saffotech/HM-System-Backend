@@ -186,6 +186,15 @@ def admit_patient(db: Session, data: IpdAdmitRequest, admitted_by: int) -> IpdAd
         data.self_pay_method,
         data.insurance,
     )
+    admit_mode = (data.payment_mode or "").strip().lower()
+    if admit_mode == "insurance":
+        opd_settings_service.validate_payment_mode(db, payment_mode="insurance")
+        insurer = (data.insurance.insurer if data.insurance else "").strip()
+        if not insurer:
+            raise HTTPException(status_code=400, detail="Insurance provider not found.")
+        opd_settings_service.validate_insurance_provider(db, provider_name=insurer)
+    elif self_pay_method:
+        opd_settings_service.validate_payment_mode(db, payment_mode=self_pay_method)
 
     admitted_at = _parse_dt(data.admission_date)
     _ensure_admission_date_in_range(admitted_at, patient)
@@ -1476,8 +1485,13 @@ def generate_bill(
     pay_later = bool(data.pay_later)
     if not pay_later and amount_received > 0:
         mode = (data.payment_mode or "cash").strip().lower()
+        opd_settings_service.validate_payment_mode(db, payment_mode=mode)
         oh.ensure_immediate_payment_valid(
-            mode, pay_later=False, paid=amount_received, transaction_reference=data.transaction_reference
+            mode,
+            pay_later=False,
+            paid=amount_received,
+            transaction_reference=data.transaction_reference,
+            db=db,
         )
     else:
         mode = (data.payment_mode or None)
@@ -1645,8 +1659,13 @@ def collect_payment(
     mode = (data.payment_mode or "cash").strip().lower()
     if mode == "online":
         mode = "insurance"
+    opd_settings_service.validate_payment_mode(db, payment_mode=mode)
     oh.ensure_immediate_payment_valid(
-        mode, pay_later=False, paid=amount, transaction_reference=data.transaction_reference
+        mode,
+        pay_later=False,
+        paid=amount,
+        transaction_reference=data.transaction_reference,
+        db=db,
     )
 
     db.add(

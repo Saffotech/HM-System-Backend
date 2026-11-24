@@ -202,6 +202,10 @@ ADMIN_PERMISSIONS = [
     "users:delete",
     "roles:view",
     "reports:view",
+    "lab_catalog:view",
+    "lab_catalog:create",
+    "lab_catalog:update",
+    "lab_catalog:activate",
     "manager_profile:view",
     "manager_profile:update",
     "manager_profile:upload_image",
@@ -1201,6 +1205,13 @@ def main() -> None:
         if filled:
             db.commit()
         print(f"Employee IDs assigned: {filled}")
+
+        from Models.tenant import Tenant
+        from Services.tenant_permission_service import ensure_tenant_copies
+
+        for tenant in db.query(Tenant).all():
+            ensure_tenant_copies(db, tenant.id)
+        db.commit()
 
         print("\nSeed completed successfully!")
         print("\nRole IDs:")

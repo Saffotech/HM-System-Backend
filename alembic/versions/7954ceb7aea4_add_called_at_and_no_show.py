@@ -30,9 +30,15 @@ def upgrade() -> None:
     op.execute(
         """
         DO $$ BEGIN
-            ALTER TYPE queuestatus ADD VALUE 'no_show';
-        EXCEPTION
-            WHEN duplicate_object THEN NULL;
+            IF EXISTS (SELECT 1 FROM pg_type WHERE typname = 'queuestatus')
+               AND NOT EXISTS (
+                    SELECT 1
+                    FROM pg_enum e
+                    JOIN pg_type t ON e.enumtypid = t.oid
+                    WHERE t.typname = 'queuestatus' AND e.enumlabel = 'no_show'
+               ) THEN
+                ALTER TYPE queuestatus ADD VALUE 'no_show';
+            END IF;
         END $$;
         """
     )

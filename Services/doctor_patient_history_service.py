@@ -2,7 +2,7 @@ from datetime import date, datetime
 from typing import Optional
 
 from fastapi import HTTPException
-from sqlalchemy import extract, or_
+from sqlalchemy import extract, false, or_
 from sqlalchemy.orm import Session
 
 from Models.ipd import IpdAdmission
@@ -61,6 +61,12 @@ def _apply_ipd_date_filters(query, filter_date: Optional[date], month: Optional[
     return query
 
 
+def _assigned_patient_ids(db: Session, doctor_id: int) -> set[int]:
+    from Services.doctor_patient_clinical_service import get_assigned_patient_ids
+
+    return get_assigned_patient_ids(db, doctor_id)
+
+
 def _opd_history_query(
     db: Session,
     doctor_id: int,
@@ -68,13 +74,15 @@ def _opd_history_query(
     search: Optional[str] = None,
     patient_uid: Optional[str] = None,
 ):
+    """Completed OPD visits for patients assigned to this doctor, any consulting doctor."""
+    assigned = _assigned_patient_ids(db, doctor_id)
     query = (
         db.query(Appointment, Patient)
         .join(Patient, Appointment.patient_id == Patient.id)
         .filter(
-            Appointment.doctor_id == doctor_id,
             Appointment.status == "completed",
             Patient.is_active.is_(True),
+            Appointment.patient_id.in_(assigned) if assigned else false(),
         )
     )
     if patient_uid:
@@ -92,13 +100,14 @@ def _ipd_history_query(
     search: Optional[str] = None,
     patient_uid: Optional[str] = None,
 ):
+    assigned = _assigned_patient_ids(db, doctor_id)
     query = (
         db.query(IpdAdmission, Patient)
         .join(Patient, IpdAdmission.patient_id == Patient.id)
         .filter(
-            IpdAdmission.doctor_id == doctor_id,
             IpdAdmission.status == "discharged",
             Patient.is_active.is_(True),
+            IpdAdmission.patient_id.in_(assigned) if assigned else false(),
         )
     )
     if patient_uid:
@@ -239,6 +248,16 @@ def get_patient_details_service(
     page = max(int(page or 1), 1)
     page_size = min(max(int(page_size or 20), 1), 100)
     kind = _normalize_encounter_type(encounter_type)
+
+    patient = (
+        db.query(Patient)
+        .filter(Patient.patient_uid == patient_uid, Patient.is_active.is_(True))
+        .first()
+    )
+    if patient is None:
+        raise HTTPException(status_code=404, detail="Patient not found")
+    if patient.id not in _assigned_patient_ids(db, doctor_id):
+        raise HTTPException(status_code=403, detail="Patient is not assigned to this doctor")
 
     opd_query = _opd_history_query(db, doctor_id, patient_uid=patient_uid)
     ipd_query = _ipd_history_query(db, doctor_id, patient_uid=patient_uid)

@@ -18,10 +18,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("appointments", sa.Column("diagnosis", sa.Text(), nullable=True))
-    op.add_column("appointments", sa.Column("follow_up_date", sa.Date(), nullable=True))
+    bind = op.get_bind()
+    columns = {col["name"] for col in sa.inspect(bind).get_columns("appointments")}
+    if "diagnosis" not in columns:
+        op.add_column("appointments", sa.Column("diagnosis", sa.Text(), nullable=True))
+    if "follow_up_date" not in columns:
+        op.add_column("appointments", sa.Column("follow_up_date", sa.Date(), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("appointments", "follow_up_date")
-    op.drop_column("appointments", "diagnosis")
+    bind = op.get_bind()
+    columns = {col["name"] for col in sa.inspect(bind).get_columns("appointments")}
+    if "follow_up_date" in columns:
+        op.drop_column("appointments", "follow_up_date")
+    if "diagnosis" in columns:
+        op.drop_column("appointments", "diagnosis")

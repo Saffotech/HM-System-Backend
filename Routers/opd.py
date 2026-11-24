@@ -2,7 +2,7 @@
 from datetime import date, datetime
 from typing import Literal, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from database import get_db
@@ -286,7 +286,11 @@ def generate_bill(
             db, current_user=current_user, discount_percent=data.discount_percent,
         )
     if not data.pay_later:
-        opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
+        try:
+            opd_settings_service.validate_payment_mode(db, payment_mode=data.payment_mode)
+        except HTTPException:
+            opd_service.release_fresh_unbilled_appointment(db, data.appointment_id)
+            raise
     result = opd_service.generate_bill(db, data, current_user.id)
     opd_audit.log_bill_generate(
         db,
