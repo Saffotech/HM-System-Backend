@@ -61,6 +61,7 @@ class LeadCreate(BaseModel):
     designation: str | None = Field(None, max_length=120)
     contact_phone: str = Field(..., max_length=30)
     contact_email: EmailStr | None = None
+    hospital_email: EmailStr | None = None
     city: str = Field(..., min_length=1, max_length=100)
     state: str | None = Field(None, max_length=100)
     plan: str | None = None
@@ -74,7 +75,16 @@ class LeadCreate(BaseModel):
     def strip_required(cls, value: str) -> str:
         return value.strip()
 
-    @field_validator("designation", "state", "plan", "billing_cycle", "message", "contact_email", mode="before")
+    @field_validator(
+        "designation",
+        "state",
+        "plan",
+        "billing_cycle",
+        "message",
+        "contact_email",
+        "hospital_email",
+        mode="before",
+    )
     @classmethod
     def empty_to_none(cls, value):
         return _blank(value)
@@ -280,8 +290,9 @@ class LeadAgree(BaseModel):
     plan: str
     billing_cycle: str
     note: str | None = Field(None, max_length=2000)
+    hospital_email: EmailStr | None = None
 
-    @field_validator("note", mode="before")
+    @field_validator("note", "hospital_email", mode="before")
     @classmethod
     def empty_note(cls, value):
         return _blank(value)

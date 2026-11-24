@@ -22,6 +22,23 @@ class LegalCase(Base):
     hospital_name = Column(String(200), nullable=True)
     city = Column(String(100), nullable=True)
     plan = Column(String(50), nullable=True)
+    hospital_type = Column(String(50), nullable=True)
+    state = Column(String(100), nullable=True)
+    hospital_email = Column(String(200), nullable=True)
+    contact_person = Column(String(200), nullable=True)
+    designation = Column(String(120), nullable=True)
+    contact_phone = Column(String(30), nullable=True)
+    contact_email = Column(String(200), nullable=True)
+    lead_source = Column(String(50), nullable=True)
+    priority = Column(String(20), nullable=True)
+    requirement = Column(Text, nullable=True)
+    assigned_employee_id = Column(Integer, nullable=True)
+    assigned_employee_name = Column(String(200), nullable=True)
+    agreed_at = Column(DateTime(timezone=True), nullable=True)
+    agreed_by_name = Column(String(200), nullable=True)
+    handover_note = Column(Text, nullable=True)
+    billing_cycle = Column(String(20), nullable=True)
+    commercial_change_note = Column(Text, nullable=True)
     status = Column(String(40), nullable=False, default="New from CRM", index=True)
     decision_reason = Column(Text, nullable=True)
     decided_by = Column(Integer, ForeignKey("users.id"), nullable=True)
@@ -132,6 +149,27 @@ def ensure_legal_case_columns(bind) -> None:
         statements.append("ALTER TABLE legal_cases ADD COLUMN city VARCHAR(100)")
     if "plan" not in columns:
         statements.append("ALTER TABLE legal_cases ADD COLUMN plan VARCHAR(50)")
+    for name, definition in (
+        ("hospital_type", "VARCHAR(50)"),
+        ("state", "VARCHAR(100)"),
+        ("hospital_email", "VARCHAR(200)"),
+        ("contact_person", "VARCHAR(200)"),
+        ("designation", "VARCHAR(120)"),
+        ("contact_phone", "VARCHAR(30)"),
+        ("contact_email", "VARCHAR(200)"),
+        ("lead_source", "VARCHAR(50)"),
+        ("priority", "VARCHAR(20)"),
+        ("requirement", "TEXT"),
+        ("assigned_employee_id", "INTEGER"),
+        ("assigned_employee_name", "VARCHAR(200)"),
+        ("agreed_at", "TIMESTAMP"),
+        ("agreed_by_name", "VARCHAR(200)"),
+        ("handover_note", "TEXT"),
+        ("billing_cycle", "VARCHAR(20)"),
+        ("commercial_change_note", "TEXT"),
+    ):
+        if name not in columns:
+            statements.append(f"ALTER TABLE legal_cases ADD COLUMN {name} {definition}")
     if "discount" not in columns:
         statements.append("ALTER TABLE legal_cases ADD COLUMN discount INTEGER NOT NULL DEFAULT 0")
     if "escalation" not in columns:

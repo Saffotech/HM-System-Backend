@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, joinedload
 from Models.lead import Lead
 from Models.legal_case import LegalCase, LegalCaseDecision, LegalChecklistItem, LegalDocument, LegalFinanceTerms
 from Models.user import User
+from Services.plan_service import price_for
 from Schemas.legal_case_schema import (
     ChecklistItemOut,
     EscalationDecision,
@@ -83,25 +84,121 @@ def _upload_dir() -> Path:
     return folder
 
 
+DECIDED = ("Approved", "Rejected", "Conditionally Approved")
+
+
+def _full_name(user: User | None) -> str | None:
+    if user is None:
+        return None
+    name = " ".join(part for part in (user.first_name, user.last_name) if part).strip()
+    return name or None
+
+
+def _user_name(db: Session, user_id: int | None) -> str | None:
+    if user_id is None:
+        return None
+    return _full_name(db.query(User).filter(User.id == user_id).first())
+
+
+def _copy_snapshot(db: Session, case: LegalCase, lead: Lead) -> None:
+    case.hospital_name = lead.hospital_name
+    case.city = lead.city
+    case.plan = lead.plan
+    case.hospital_type = lead.hospital_type
+    case.state = lead.state
+    case.hospital_email = lead.hospital_email
+    case.contact_person = lead.contact_person
+    case.designation = lead.designation
+    case.contact_phone = lead.contact_phone
+    case.contact_email = lead.contact_email
+    case.lead_source = lead.source
+    case.priority = lead.priority
+    case.requirement = lead.message
+    case.assigned_employee_id = lead.assigned_to
+    case.assigned_employee_name = _user_name(db, lead.assigned_to)
+    case.agreed_at = lead.agreed_at
+    case.agreed_by_name = _user_name(db, lead.agreed_by)
+    case.handover_note = lead.handover_note
+    case.billing_cycle = lead.billing_cycle
+
+
+def _change_note(old_plan, new_plan, old_cycle, new_cycle) -> str:
+    parts = []
+    if (old_plan or "") != (new_plan or ""):
+        parts.append(f"plan changed from {old_plan or 'none'} to {new_plan or 'none'}")
+    if (old_cycle or "") != (new_cycle or ""):
+        parts.append(f"billing cycle changed from {old_cycle or 'none'} to {new_cycle or 'none'}")
+    return "Finance review required. " + "; ".join(parts) + "."
+
+
+def _apply_finance(db: Session, case: LegalCase, lead: Lead, old_plan: str | None, old_cycle: str | None) -> bool:
+    """Return True when a reviewed price must be reviewed again."""
+    price = price_for(db, lead.plan, lead.billing_cycle)
+    terms = case.finance
+    if terms is None:
+        terms = LegalFinanceTerms(
+            case_id=case.id,
+            frequency=lead.billing_cycle,
+            standard_price=price,
+            reviewed=False,
+            invoice_email=None,
+        )
+        db.add(terms)
+        case.finance = terms
+        return False
+    if not terms.reviewed:
+        terms.frequency = lead.billing_cycle
+        terms.standard_price = price
+        return False
+    if (old_plan or "") == (lead.plan or "") and (old_cycle or "") == (lead.billing_cycle or ""):
+        return False
+    previous_price = price_for(db, old_plan, old_cycle) if old_plan and old_cycle else None
+    terms.frequency = lead.billing_cycle
+    if terms.standard_price == 0 or (previous_price is not None and terms.standard_price == previous_price):
+        terms.standard_price = price
+    terms.reviewed = False
+    case.commercial_change_note = _change_note(old_plan, lead.plan, old_cycle, lead.billing_cycle)
+    return True
+
+
 def open_case_for_agreed_lead(db: Session, lead: Lead) -> LegalCase:
-    """One agreed hospital lead gets one case. A second call returns the same row."""
-    existing = db.query(LegalCase).filter(LegalCase.lead_id == lead.id).first()
+    """One agreed hospital lead gets one case. A second call updates the same row."""
+    existing = (
+        db.query(LegalCase)
+        .options(joinedload(LegalCase.finance))
+        .filter(LegalCase.lead_id == lead.id)
+        .first()
+    )
     if existing is not None:
+        existing.finance_rereview_required = False
+        if existing.status in DECIDED:
+            return existing
+        old_plan = existing.plan
+        old_cycle = existing.billing_cycle
+        _copy_snapshot(db, existing, lead)
+        existing.finance_rereview_required = _apply_finance(db, existing, lead, old_plan, old_cycle)
+        db.flush()
         return existing
     case = LegalCase(
         lead_id=lead.id,
-        hospital_name=lead.hospital_name,
-        city=lead.city,
-        plan=lead.plan,
         status="New from CRM",
         advance_received=False,
         discount=0,
     )
+    _copy_snapshot(db, case, lead)
     db.add(case)
     db.flush()
     for label in HOSPITAL_CHECKLIST:
         db.add(LegalChecklistItem(case_id=case.id, label=label, status="Pending"))
-    db.add(LegalFinanceTerms(case_id=case.id))
+    price = price_for(db, lead.plan, lead.billing_cycle)
+    db.add(LegalFinanceTerms(
+        case_id=case.id,
+        frequency=lead.billing_cycle,
+        standard_price=price,
+        reviewed=False,
+        invoice_email=None,
+    ))
+    case.finance_rereview_required = False
     db.flush()
     return case
 
@@ -272,6 +369,10 @@ def _sync_documents_from_checklist(case: LegalCase, actor: User, labels: set[str
             doc.reviewed_at = now
 
 
+def _kept(stored, live):
+    return live if stored is None else stored
+
+
 def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
     approved = case.status == "Approved"
     documents = _unique_rows(case.documents)
@@ -280,9 +381,26 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
     return LegalCaseOut(
         id=case.id,
         lead_id=lead.id,
-        hospital_name=case.hospital_name or lead.hospital_name,
-        city=case.city or lead.city,
-        plan=case.plan or lead.plan,
+        hospital_name=_kept(case.hospital_name, lead.hospital_name),
+        city=_kept(case.city, lead.city),
+        plan=_kept(case.plan, lead.plan),
+        hospital_type=_kept(case.hospital_type, lead.hospital_type),
+        state=_kept(case.state, lead.state),
+        hospital_email=_kept(case.hospital_email, lead.hospital_email),
+        contact_person=_kept(case.contact_person, lead.contact_person),
+        designation=_kept(case.designation, lead.designation),
+        contact_phone=_kept(case.contact_phone, lead.contact_phone),
+        contact_email=_kept(case.contact_email, lead.contact_email),
+        lead_source=_kept(case.lead_source, lead.source),
+        priority=_kept(case.priority, lead.priority),
+        requirement=_kept(case.requirement, lead.message),
+        assigned_employee_id=_kept(case.assigned_employee_id, lead.assigned_to),
+        assigned_employee_name=_kept(case.assigned_employee_name, _full_name(getattr(lead, "assignee", None))),
+        agreed_at=_when(_kept(case.agreed_at, lead.agreed_at)),
+        agreed_by_name=case.agreed_by_name,
+        handover_note=_kept(case.handover_note, lead.handover_note),
+        billing_cycle=_kept(case.billing_cycle, lead.billing_cycle),
+        commercial_change_note=case.commercial_change_note,
         status=case.status,
         decision_reason=case.decision_reason,
         discount=int(case.discount or 0),
@@ -463,6 +581,7 @@ def save_finance(db: Session, actor: User, case_id: int, data: LegalFinanceUpdat
     terms.po_required = data.po_required
     terms.invoice_email = data.invoice_email
     terms.reviewed = True
+    case.commercial_change_note = None
     terms.updated_by = actor.id
     terms.updated_at = _now()
     case.discount = data.discount

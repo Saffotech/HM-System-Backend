@@ -126,6 +126,23 @@ class LegalCaseOut(BaseModel):
     hospital_name: str
     city: str | None = None
     plan: str | None = None
+    hospital_type: str | None = None
+    state: str | None = None
+    hospital_email: str | None = None
+    contact_person: str | None = None
+    designation: str | None = None
+    contact_phone: str | None = None
+    contact_email: str | None = None
+    lead_source: str | None = None
+    priority: str | None = None
+    requirement: str | None = None
+    assigned_employee_id: int | None = None
+    assigned_employee_name: str | None = None
+    agreed_at: str | None = None
+    agreed_by_name: str | None = None
+    handover_note: str | None = None
+    billing_cycle: str | None = None
+    commercial_change_note: str | None = None
     status: str
     decision_reason: str | None = None
     discount: int = 0

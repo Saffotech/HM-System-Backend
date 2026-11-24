@@ -22,6 +22,7 @@ from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
 from Models.role import Role  # noqa: F401
+from Models.subscription_plan import SubscriptionPlan  # noqa: F401
 from Models.tenant import Tenant  # noqa: F401
 from Models.user import User
 from Schemas.legal_case_schema import EscalationDecision, LegalChecklistUpdate, LegalDecision, LegalFinanceUpdate, ChecklistItemUpdate
@@ -50,6 +51,7 @@ def _actor(role_name):
 class LegalFinancePathTests(unittest.TestCase):
     def setUp(self):
         engine = create_engine("sqlite://")
+        SubscriptionPlan.__table__.create(engine)
         Lead.__table__.create(engine)
         LegalCase.__table__.create(engine)
         LegalChecklistItem.__table__.create(engine)
@@ -86,7 +88,13 @@ class LegalFinancePathTests(unittest.TestCase):
         self.assertEqual(first.hospital_name, "City Care")
         self.assertEqual(first.city, "Pune")
         self.assertEqual(first.plan, "Starter")
+        self.assertEqual(first.billing_cycle, "Monthly")
         self.assertEqual(first.discount, 0)
+        finance_rows = self.db.query(LegalFinanceTerms).filter_by(case_id=first.id).all()
+        self.assertEqual(len(finance_rows), 1)
+        self.assertEqual(finance_rows[0].frequency, "Monthly")
+        self.assertEqual(finance_rows[0].standard_price, 4999)
+        self.assertFalse(finance_rows[0].reviewed)
         self.assertEqual(self.db.query(LegalDocument).filter_by(case_id=first.id).count(), 0)
         checks = self.db.query(LegalChecklistItem).filter_by(case_id=first.id).all()
         self.assertEqual(len(checks), 7)

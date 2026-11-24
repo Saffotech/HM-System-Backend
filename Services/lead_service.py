@@ -6,6 +6,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from Models.lead import Lead, LeadActivity
+from Models.legal_case import LegalCase
 from Models.tenant import Tenant
 from Models.user import User
 from Schemas.lead_schema import (
@@ -135,7 +136,11 @@ def _lead_query(db: Session):
 
 def _find_duplicates(db: Session, data: LeadCreate, actor: User) -> list[dict]:
     name = data.hospital_name.casefold()
-    email = str(data.contact_email).casefold() if data.contact_email else ""
+    incoming_emails = {
+        str(item).casefold()
+        for item in (data.contact_email, data.hospital_email)
+        if item
+    }
     phone = _digits(data.contact_phone)
     matches: list[dict] = []
 
@@ -148,7 +153,7 @@ def _find_duplicates(db: Session, data: LeadCreate, actor: User) -> list[dict]:
             for item in (lead.contact_email, lead.hospital_email)
             if item
         }
-        if email and email in lead_emails:
+        if incoming_emails & lead_emails:
             reasons.append("Same email")
         if phone and _digits(lead.contact_phone) == phone:
             reasons.append("Same phone")
@@ -169,7 +174,7 @@ def _find_duplicates(db: Session, data: LeadCreate, actor: User) -> list[dict]:
         reasons = []
         if hospital.name and hospital.name.strip().casefold() == name:
             reasons.append("Same hospital name")
-        if email and hospital.email and hospital.email.strip().casefold() == email:
+        if incoming_emails and hospital.email and hospital.email.strip().casefold() in incoming_emails:
             reasons.append("Same email")
         if phone and _digits(hospital.phone) == phone:
             reasons.append("Same phone")
@@ -206,6 +211,7 @@ def create_lead(db: Session, data: LeadCreate, actor: User) -> LeadDetail:
         designation=data.designation,
         contact_phone=data.contact_phone,
         contact_email=str(data.contact_email).lower() if data.contact_email else None,
+        hospital_email=str(data.hospital_email).lower() if data.hospital_email else None,
         source=data.source,
         priority=data.priority,
         plan=data.plan,
@@ -501,7 +507,14 @@ def update_lead(db: Session, lead_id: int, data: LeadUpdate, actor: User) -> Lea
 
 def agree_lead(db: Session, lead_id: int, data: LeadAgree, actor: User) -> LeadDetail:
     _assert_platform_staff(actor)
-    lead = _require_owner(_lock_lead(db, lead_id), actor, ("Contacted",))
+    lead = _require_owner(_lock_lead(db, lead_id), actor, ("Contacted", "Agreed"))
+    existing = db.query(LegalCase).filter(LegalCase.lead_id == lead.id).first()
+    if existing is not None and existing.status in ("Approved", "Rejected", "Conditionally Approved"):
+        raise HTTPException(status_code=409, detail="This case already has a decision.")
+    previous_plan = lead.plan
+    previous_billing_cycle = lead.billing_cycle
+    if data.hospital_email:
+        lead.hospital_email = str(data.hospital_email).lower()
     lead.status = "Agreed"
     lead.plan = data.plan
     lead.billing_cycle = data.billing_cycle
@@ -510,7 +523,7 @@ def agree_lead(db: Session, lead_id: int, data: LeadAgree, actor: User) -> LeadD
     lead.agreed_by = actor.id
     lead.follow_up_date = None
     lead.next_action = None
-    open_case_for_agreed_lead(db, lead)
+    case = open_case_for_agreed_lead(db, lead)
     note = f"Hospital agreed to register on {data.plan} · {data.billing_cycle}. Sent to Legal and Finance."
     if data.note:
         note = f"{note} {data.note}"
@@ -521,7 +534,13 @@ def agree_lead(db: Session, lead_id: int, data: LeadAgree, actor: User) -> LeadD
         actor,
         "lead.agree",
         f"Sent {lead.hospital_name} to Legal and Finance",
-        {"plan": data.plan, "billing_cycle": data.billing_cycle},
+        {
+            "plan": data.plan,
+            "billing_cycle": data.billing_cycle,
+            "previous_plan": previous_plan,
+            "previous_billing_cycle": previous_billing_cycle,
+            "finance_rereview_required": bool(getattr(case, "finance_rereview_required", False)),
+        },
     )
 
 
