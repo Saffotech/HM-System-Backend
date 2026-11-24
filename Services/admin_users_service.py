@@ -257,8 +257,15 @@ def list_staff(
     is_active: Optional[bool] = None,
     page: int = 1,
     limit: int = 20,
+    actor: Optional[User] = None,
 ) -> dict:
     q = _base_query(db)
+    # The Manager staff screen does not show the hospital admin. Exclude that
+    # role before count and pagination so the total matches the visible rows.
+    # Hospital Admin callers still receive the admin account.
+    if actor is not None and caller_role_name(actor) == "manager":
+        admin_role_ids = db.query(Role.id).filter(Role.name == "admin")
+        q = q.filter(User.role_id.notin_(admin_role_ids))
 
     full_name = func.concat_ws(" " ,User.first_name , User.last_name)
     if search:

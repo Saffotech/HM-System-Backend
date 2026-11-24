@@ -36,6 +36,7 @@ def list_staff(
         is_active=is_active,
         page=page,
         limit=limit,
+        actor=current_user,
     )
 
 
