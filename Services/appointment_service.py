@@ -219,6 +219,8 @@ def resolve_appointment_for_visit(
     h.get_doctor_in_department(db, doctor_id, department_id)
 
     slot = _to_ist(scheduled_at) if scheduled_at is not None else h.now_ist()
+    if scheduled_at is not None:
+        _assert_working_day(db, doctor_id, slot)
 
     if appointment_id is not None:
         apt = db.query(Appointment).filter(Appointment.id == appointment_id).first()
@@ -746,6 +748,17 @@ def preview_today_appointments(db: Session, *, limit: int = 8) -> list[Appointme
     return _appointments_out_list(db, rows, visit_map)
 
 
+def _assert_working_day(db: Session, doctor_id: int, when: datetime) -> None:
+    slot_config = opd_settings_svc.resolve_doctor_slot_settings(db, doctor_id)
+    weekday = opd_settings_svc.slot_weekday_key(_to_ist(when))
+    working_days = {str(day).lower()[:3] for day in (slot_config.get("working_days") or [])}
+    if working_days and weekday not in working_days:
+        raise HTTPException(
+            status_code=400,
+            detail="The hospital is closed for this doctor on the selected day.",
+        )
+
+
 def _slot_has_passed(slot_time: datetime) -> bool:
     """True when the slot start is already at or before the current India time."""
     return _to_ist(slot_time) <= h.now_ist()
@@ -758,6 +771,8 @@ def create_appointment(db: Session, data: AppointmentCreate, created_by: int) ->
             status_code=400,
             detail="Cannot book a time that has already passed",
         )
+
+    _assert_working_day(db, data.doctor_id, data.scheduled_at)
 
     if get_active_admission_for_patient(db, data.patient_id) is not None:
         raise HTTPException(
@@ -983,6 +998,10 @@ def update_appointment(db: Session, appointment_id: int, data: AppointmentUpdate
                 status_code=422,
                 detail=f"Invalid appointment status. Use one of: {allowed}",
             ) from exc
+
+    if updates.get("scheduled_at") is not None:
+        doctor_id = updates.get("doctor_id") or apt.doctor_id
+        _assert_working_day(db, doctor_id, updates["scheduled_at"])
 
     if updates.get("scheduled_at") is not None and apt.status == AppointmentStatus.completed:
         apt.status = AppointmentStatus.scheduled

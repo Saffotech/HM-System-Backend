@@ -1202,6 +1202,13 @@ def main() -> None:
             db.commit()
         print(f"Employee IDs assigned: {filled}")
 
+        from Models.tenant import Tenant
+        from Services.tenant_permission_service import ensure_tenant_copies
+
+        for tenant in db.query(Tenant).all():
+            ensure_tenant_copies(db, tenant.id)
+        db.commit()
+
         print("\nSeed completed successfully!")
         print("\nRole IDs:")
         for name, rid in role_ids.items():

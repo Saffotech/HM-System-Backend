@@ -1487,7 +1487,11 @@ def generate_bill(
         mode = (data.payment_mode or "cash").strip().lower()
         opd_settings_service.validate_payment_mode(db, payment_mode=mode)
         oh.ensure_immediate_payment_valid(
-            mode, pay_later=False, paid=amount_received, transaction_reference=data.transaction_reference
+            mode,
+            pay_later=False,
+            paid=amount_received,
+            transaction_reference=data.transaction_reference,
+            db=db,
         )
     else:
         mode = (data.payment_mode or None)
@@ -1657,7 +1661,11 @@ def collect_payment(
         mode = "insurance"
     opd_settings_service.validate_payment_mode(db, payment_mode=mode)
     oh.ensure_immediate_payment_valid(
-        mode, pay_later=False, paid=amount, transaction_reference=data.transaction_reference
+        mode,
+        pay_later=False,
+        paid=amount,
+        transaction_reference=data.transaction_reference,
+        db=db,
     )
 
     db.add(

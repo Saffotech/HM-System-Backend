@@ -276,7 +276,9 @@ def create_visit(
     else:
         paid = grand_total
 
-    h.ensure_immediate_payment_valid(payment_mode, pay_later, paid, transaction_reference)
+    h.ensure_immediate_payment_valid(
+        payment_mode, pay_later, paid, transaction_reference, db=db
+    )
 
     # Ledger starts unpaid. record_payment is the only writer of paid_amount.
     visit = OpdVisit(

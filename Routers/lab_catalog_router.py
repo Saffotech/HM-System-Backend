@@ -12,6 +12,7 @@ from Schemas.lab_test_schema import (
     LabTestUpdate,
 )
 from Services import lab_test_catalog_service as service
+from Services.opd_settings_service import assert_manager_section_unlocked
 from Utils.pagination import paginate_sequence
 
 router = APIRouter(prefix="/lab-catalog", tags=["Lab Test Catalog"])
@@ -57,6 +58,7 @@ def create_lab_catalog_test(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab_catalog:create")),
 ):
+    assert_manager_section_unlocked(db, current_user, "lab_catalog")
     return service.create_lab_test(db, data, current_user)
 
 
@@ -68,6 +70,7 @@ def update_lab_catalog_test(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab_catalog:update")),
 ):
+    assert_manager_section_unlocked(db, current_user, "lab_catalog")
     return service.update_lab_test(db, test_id, data, current_user)
 
 
@@ -79,4 +82,5 @@ def activate_lab_catalog_test(
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("lab_catalog:activate")),
 ):
+    assert_manager_section_unlocked(db, current_user, "lab_catalog")
     return service.set_lab_test_active(db, test_id, data, current_user)
