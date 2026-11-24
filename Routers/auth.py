@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session, joinedload
 from database import get_db
 from Models.user import User
 from Models.role import Role
-from Schemas.schemas import RefreshTokenRequest, UserCreate, UserLogin
+from Schemas.schemas import PatientSelfRegister, RefreshTokenRequest, UserCreate, UserLogin
 from hash import verify_password
 from jwt_token import (
     create_access_token,
@@ -84,6 +84,11 @@ def register(
     _: bool = Depends(PermissionChecker("users:create")),
 ):
     return auth_service.register_staff(db, data, current_user)
+
+
+@router.post("/patient/register", status_code=201)
+def register_patient(data: PatientSelfRegister, db: Session = Depends(get_db)):
+    return auth_service.register_patient_account(db, data)
 
 
 @router.post("/login")

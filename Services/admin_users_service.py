@@ -208,7 +208,7 @@ def _to_detail(user: User) -> StaffDetailOut:
 
 
 def _base_query(db: Session):
-    hospital_role_ids = db.query(Role.id).filter(Role.name.notin_(tuple(PLATFORM_ROLES)))
+    hospital_role_ids = db.query(Role.id).filter(Role.name.notin_(tuple(PLATFORM_ROLES | {"patient"})))
     query = (
         db.query(User)
         .options(

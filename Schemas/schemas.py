@@ -19,6 +19,18 @@ class UserCreate(BaseModel):
     consultation_fee: Optional[float] = Field(None, ge=0)
 
 
+class PatientSelfRegister(BaseModel):
+    """Public patient account. No visit, doctor, or payment."""
+
+    full_name: str = Field(..., min_length=1, max_length=120)
+    phone: str = Field(..., min_length=10, max_length=15)
+    email: EmailStr
+    password: str = Field(..., min_length=8, max_length=72)
+    date_of_birth: date
+    gender: int = Field(..., ge=1, le=4)
+    hospital_code: str = Field(..., min_length=1, max_length=50)
+
+
 class UserLogin(BaseModel):
     email:    EmailStr
     password: str

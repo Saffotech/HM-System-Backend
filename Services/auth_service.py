@@ -3,14 +3,74 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from Models.department import Department
 from Models.role import Role
+from Models.tenant import Tenant
 from Models.user import User
-from Schemas.schemas import UserCreate
+from Schemas.schemas import PatientSelfRegister, UserCreate
 from hash import hash_password
 from Services import audit_service
 from Services.admin_users_service import _PROFILE_CREATE
 from Services.employee_id_service import ensure_employee_id
 from Services.lab_department_helpers import validate_lab_tech_department_id
 from Services.role_policy import assert_can_assign_role, caller_role_name
+
+
+def _patient_role(db: Session) -> Role:
+    role = db.query(Role).filter(Role.name == "patient").first()
+    if role is None:
+        role = Role(name="patient", description="Hospital patient login")
+        db.add(role)
+        db.flush()
+    return role
+
+
+def register_patient_account(db: Session, data: PatientSelfRegister) -> dict:
+    """Public signup for the patient dashboard. Does not create a visit or a bill."""
+    email = str(data.email).strip().lower()
+    existing = (
+        db.query(User)
+        .execution_options(include_all_tenants=True)
+        .filter(func.lower(User.email) == email)
+        .first()
+    )
+    if existing:
+        raise HTTPException(status_code=409, detail="Email already registered")
+
+    hospital = (
+        db.query(Tenant)
+        .filter(func.lower(Tenant.code) == data.hospital_code.strip().lower(), Tenant.is_active.is_(True))
+        .first()
+    )
+    if hospital is None:
+        raise HTTPException(status_code=404, detail="Hospital not found")
+
+    phone = "".join(ch for ch in data.phone if ch.isdigit())
+    if len(phone) < 10:
+        raise HTTPException(status_code=422, detail="Phone must be at least 10 digits")
+
+    parts = data.full_name.strip().split(None, 1)
+    first_name = parts[0]
+    last_name = parts[1] if len(parts) > 1 else None
+
+    user = User(
+        first_name=first_name,
+        last_name=last_name,
+        email=email,
+        phone=phone[-15:],
+        password=hash_password(data.password),
+        role_id=_patient_role(db).id,
+        tenant_id=hospital.id,
+        gender=data.gender,
+        date_of_birth=data.date_of_birth,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return {
+        "message": "Patient account created",
+        "user_id": user.id,
+        "email": user.email,
+        "hospital_code": hospital.code,
+    }
 
 
 def register_staff(db: Session, data: UserCreate, actor: User) -> dict:

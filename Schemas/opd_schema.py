@@ -173,6 +173,8 @@ class RegisterSuccessResponse(BaseModel):
     appointment_id: Optional[int] = None
     appointment_uid: Optional[str] = None
     scheduled_at: Optional[str] = None
+    login_email: Optional[str] = None
+    temporary_password: Optional[str] = None
 
 
 class VisitSuccessResponse(BaseModel):

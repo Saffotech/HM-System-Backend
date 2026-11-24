@@ -229,6 +229,10 @@ ROLES_DATA = {
         "description": "Hospital operations manager",
         "permissions": ADMIN_PERMISSIONS,
     },
+    "patient": {
+        "description": "Hospital patient login",
+        "permissions": [],
+    },
     "doctor": {
         "description": "Clinical doctor",
         "permissions": [

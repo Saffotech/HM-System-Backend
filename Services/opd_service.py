@@ -1,5 +1,6 @@
 """OPD & billing — patients, visits, bills, payments, dashboard."""
 import re
+import secrets
 from datetime import timedelta
 from typing import List, Optional
 
@@ -10,7 +11,9 @@ from Models.ipd import IpdAdmission
 from Models.department import Department
 from Models.opd_billing import Appointment, AppointmentStatus, BillItem, PaymentTransaction
 from Models.patient import OpdVisit, Patient, RegistrationSource
+from Models.role import Role
 from Models.user import User
+from hash import hash_password
 from Schemas.opd_schema import (
     BillLineItem,
     BillListItem,
@@ -308,6 +311,48 @@ def create_visit(
     return visit
 
 
+def _temporary_password() -> str:
+    alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
+    return "".join(secrets.choice(alphabet) for _ in range(10))
+
+
+def _patient_role(db: Session) -> Role:
+    role = db.query(Role).filter(Role.name == "patient").first()
+    if role is None:
+        role = Role(name="patient", description="Hospital patient login")
+        db.add(role)
+        db.flush()
+    return role
+
+
+def _open_patient_login(db: Session, patient: Patient, registered_by: int) -> tuple[str, str]:
+    """Create the patient dashboard login. The plain password is returned once."""
+    email = (patient.email or "").strip().lower()
+    if not email:
+        raise HTTPException(status_code=422, detail="Email is required so the patient can sign in later.")
+    taken = (
+        db.query(User)
+        .execution_options(include_all_tenants=True)
+        .filter(func.lower(User.email) == email)
+        .first()
+    )
+    if taken:
+        raise HTTPException(status_code=409, detail="This email already has a login.")
+    registrar = db.query(User).filter(User.id == registered_by).first()
+    password = _temporary_password()
+    db.add(User(
+        first_name=patient.first_name,
+        last_name=patient.last_name,
+        email=email,
+        username=patient.patient_uid,
+        password=hash_password(password),
+        role_id=_patient_role(db).id,
+        tenant_id=patient.tenant_id or (registrar.tenant_id if registrar else None),
+    ))
+    db.flush()
+    return email, password
+
+
 def register_new_patient(
     db: Session,
     data: PatientRegisterRequest,
@@ -350,6 +395,7 @@ def register_new_patient(
         transaction_reference=transaction_reference,
     )
     _finalize_visit_appointment_and_queue(db, visit, apt, handled_by=registered_by)
+    login_email, temporary_password = _open_patient_login(db, patient, registered_by)
     db.commit()
     db.refresh(visit)
     db.refresh(apt)
@@ -364,6 +410,8 @@ def register_new_patient(
         appointment_id=apt.id,
         appointment_uid=apt.appointment_uid,
         scheduled_at=appointment_service.iso_scheduled_at(apt.scheduled_at),
+        login_email=login_email,
+        temporary_password=temporary_password,
     )
 
 
