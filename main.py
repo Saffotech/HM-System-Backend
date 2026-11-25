@@ -6,6 +6,7 @@ from pathlib import Path
 from Models.accountant_profile import AccountantProfile  # noqa: F401
 from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.crm_profile import CrmProfile  # noqa: F401
+from Models.legal_finance_profile import LegalFinanceProfile  # noqa: F401
 from Models.legal_case import LegalCase, ensure_legal_case_columns  # noqa: F401
 from Models.subscription_invoice import SubscriptionInvoice  # noqa: F401
 from Models.subscription_plan import SubscriptionPlan  # noqa: F401
@@ -131,6 +132,7 @@ from Routers.accountant_profile_router import router as accountant_profile_route
 from Routers.plan_router import router as plan_router
 from Routers.platform_admin_profile_router import router as platform_admin_profile_router
 from Routers.crm_profile_router import router as crm_profile_router
+from Routers.legal_finance_profile_router import router as legal_finance_profile_router
 from Routers.crm_revenue_router import router as crm_revenue_router
 from Routers.platform_report_router import router as platform_report_router
 from Routers.platform_staff_router import router as platform_staff_router
@@ -252,6 +254,7 @@ app.include_router(plan_router)
 app.include_router(platform_report_router)
 app.include_router(platform_admin_profile_router)
 app.include_router(crm_profile_router)
+app.include_router(legal_finance_profile_router)
 app.include_router(crm_revenue_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)

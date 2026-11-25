@@ -893,20 +893,12 @@ def assert_delete_allowed(
     kind: 'patient' | 'appointment' | 'bill'
     """
     role = _role_name(current_user)
-    if role == "admin":
+    if role in {"admin", "manager"}:
         return
 
     row = get_settings_row(db)
-    if row.require_admin_approval_for_delete and role != "manager":
-        raise HTTPException(
-            status_code=403,
-            detail=(
-                "Deletion requires administrator approval. "
-                "No approval-request workflow is configured."
-            ),
-        )
-    if role == "manager":
-        return
+    # require_admin_approval_for_delete has no request queue. The allow_* flags
+    # are the live control. An allowed delete must not be rejected for approval.
     if kind == "patient":
         if not row.allow_patient_delete:
             raise HTTPException(

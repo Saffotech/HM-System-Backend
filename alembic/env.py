@@ -55,6 +55,7 @@ from Models.subscription_plan import SubscriptionPlan  # noqa: F401
 from Models.accountant_profile import AccountantProfile  # noqa: F401
 from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401
 from Models.crm_profile import CrmProfile  # noqa: F401
+from Models.legal_finance_profile import LegalFinanceProfile  # noqa: F401
 from Models.admin_profile import AdminProfile  # noqa: F401
 from Models.manager_profile import ManagerProfile  # noqa: F401
 from Models.receptionist_profile import ReceptionistProfile  # noqa: F401
