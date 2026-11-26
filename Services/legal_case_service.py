@@ -374,7 +374,6 @@ def _kept(stored, live):
 
 
 def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
-    approved = case.status == "Approved"
     documents = _unique_rows(case.documents)
     checklist = _unique_rows(case.checklist)
     names = _uploader_names(db, documents)
@@ -435,7 +434,7 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
         finance=_finance_out(case.finance),
         decision=_decision_out(case.decision),
         advance_received=bool(case.advance_received),
-        ready_to_register=approved,
+        ready_to_register=approvals_complete(case),
     )
 
 
@@ -482,6 +481,34 @@ def get_case(db: Session, actor: User, case_id: int) -> LegalCaseOut:
         db.commit()
         case, lead = _load(db, case_id)
     return _out(db, case, lead)
+
+
+def approvals_complete(case: LegalCase | None) -> bool:
+    """Legal Docs and Finance are both finished, including a required escalation.
+
+    A missing case or finance row is incomplete. It is not an error.
+    """
+    if case is None or case.status != "Approved":
+        return False
+    terms = case.finance
+    if terms is None or not terms.reviewed:
+        return False
+    if int(case.discount or 0) > 10 and case.escalation != "Approved":
+        return False
+    return True
+
+
+def _commercial_terms_locked(case: LegalCase) -> bool:
+    """Reviewed terms stay fixed once Legal has approved them.
+
+    A CRM commercial change clears the review, so Finance can approve again.
+    """
+    if case.status not in ("Approved", "Conditionally Approved"):
+        return False
+    terms = case.finance
+    if terms is None or not terms.reviewed:
+        return False
+    return not case.commercial_change_note
 
 
 def _approval_blockers(case: LegalCase) -> list[str]:
@@ -562,8 +589,12 @@ def save_checklist(db: Session, actor: User, case_id: int, data: LegalChecklistU
 def save_finance(db: Session, actor: User, case_id: int, data: LegalFinanceUpdate) -> LegalCaseOut:
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
-    if case.status in ("Approved", "Rejected", "Conditionally Approved"):
+    if case.status == "Rejected":
         raise HTTPException(status_code=409, detail="This case already has a decision.")
+    if _commercial_terms_locked(case):
+        raise HTTPException(status_code=409, detail="Approved commercial terms cannot be changed.")
+    if case.status in ("Approved", "Conditionally Approved") and data.discount > 10 and case.escalation != "Approved":
+        raise HTTPException(status_code=422, detail="Discount above 10% requires Finance Head escalation approval.")
     terms = case.finance or LegalFinanceTerms(case_id=case.id)
     if case.finance is None:
         db.add(terms)
@@ -603,7 +634,7 @@ def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     """Ask the Finance Head to review a discount above 10%."""
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
-    if case.status in ("Approved", "Rejected", "Conditionally Approved"):
+    if case.status == "Rejected" or _commercial_terms_locked(case):
         raise HTTPException(status_code=409, detail="This case already has a decision.")
     if int(case.discount or 0) <= 10:
         raise HTTPException(status_code=409, detail="This discount does not need Finance Head approval.")
@@ -620,6 +651,8 @@ def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
 def decide_escalation(db: Session, actor: User, case_id: int, data: EscalationDecision) -> LegalCaseOut:
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
+    if case.status == "Rejected" or _commercial_terms_locked(case):
+        raise HTTPException(status_code=409, detail="This case already has a decision.")
     if int(case.discount or 0) <= 10:
         raise HTTPException(status_code=409, detail="This discount does not need Finance Head approval.")
     if case.escalation != "Pending":
@@ -718,7 +751,7 @@ def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     if _role(actor) != "accountant":
         raise HTTPException(status_code=403, detail="Only Accounts can record the advance payment")
     case, _lead = _load(db, case_id)
-    if case.status != "Approved":
+    if not approvals_complete(case):
         raise HTTPException(status_code=409, detail="Record the advance only after Legal and Finance approves the case.")
     if case.advance_received:
         raise HTTPException(status_code=409, detail="The advance is already recorded.")
@@ -731,10 +764,16 @@ def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
 
 
 def case_approved(db: Session, lead_id: int) -> bool:
+    """Legal Docs decision only. Registration uses case_ready_for_registration."""
     case = db.query(LegalCase).filter(LegalCase.lead_id == lead_id).first()
     return case is not None and case.status == "Approved"
 
 
 def case_ready_for_registration(db: Session, lead_id: int) -> bool:
-    case = db.query(LegalCase).filter(LegalCase.lead_id == lead_id).first()
-    return case is not None and case.status == "Approved"
+    case = (
+        db.query(LegalCase)
+        .options(joinedload(LegalCase.finance))
+        .filter(LegalCase.lead_id == lead_id)
+        .first()
+    )
+    return approvals_complete(case)

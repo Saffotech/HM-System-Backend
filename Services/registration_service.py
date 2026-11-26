@@ -2,16 +2,17 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import HTTPException
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from Models.lead import Lead, LeadActivity
-from Models.legal_case import LegalCase
+from Models.legal_case import LegalCase, LegalFinanceTerms
 from Models.tenant import Tenant
 from Models.user import User
 from Schemas.registration_schema import RegisterFromLead, RegistrationOut
 from Schemas.tenant_schema import TenantRegisterRequest
 from Services import audit_service
-from Services.legal_case_service import case_approved, case_ready_for_registration
+from Services.legal_case_service import case_ready_for_registration
 from Services.tenant_service import register_tenant
 
 IST = ZoneInfo("Asia/Kolkata")
@@ -79,8 +80,12 @@ def list_registrations(db: Session, actor: User, status: str) -> list[Registrati
         .filter(Lead.status == lead_status)
     )
     if lead_status == "Agreed":
-        query = query.join(LegalCase, LegalCase.lead_id == Lead.id).filter(
+        query = query.join(LegalCase, LegalCase.lead_id == Lead.id).join(
+            LegalFinanceTerms, LegalFinanceTerms.case_id == LegalCase.id
+        ).filter(
             LegalCase.status == "Approved",
+            LegalFinanceTerms.reviewed.is_(True),
+            or_(LegalCase.discount <= 10, LegalCase.escalation == "Approved"),
         )
     leads = query.order_by(
         Lead.agreed_at.asc() if lead_status == "Agreed" else Lead.registered_at.desc()
@@ -100,7 +105,7 @@ def get_registration(db: Session, actor: User, lead_id: int) -> RegistrationOut:
     lead = _load(db, lead_id)
     if lead is None or lead.status not in ("Agreed", "Registered"):
         raise HTTPException(status_code=404, detail="Registration not found")
-    if lead.status == "Agreed" and not case_approved(db, lead.id):
+    if lead.status == "Agreed" and not case_ready_for_registration(db, lead.id):
         raise HTTPException(status_code=404, detail="Registration not found")
     code = None
     if lead.hospital_id is not None:
