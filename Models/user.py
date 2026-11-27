@@ -93,6 +93,12 @@ class User(Base):
         uselist=False,
         cascade="all, delete-orphan",
     )
+    legal_finance_profile = relationship(
+        "LegalFinanceProfile",
+        back_populates="user",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
     manager_profile = relationship(
         "ManagerProfile",
         back_populates="user",

@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hello {{ client_name }},</p>
+<p>Please upload the documents required to continue onboarding for <strong>{{ hospital_name }}</strong>.</p>
+<p>Required documents:</p>
+<ul>
+{% for item in required_documents %}
+  <li>{{ item.name }}{% if item.description %} — {{ item.description }}{% endif %}</li>
+{% endfor %}
+</ul>
+{% if optional_documents %}
+<p>Optional documents:</p>
+<ul>
+{% for item in optional_documents %}
+  <li>{{ item.name }}</li>
+{% endfor %}
+</ul>
+{% endif %}
+<p><a href="{{ upload_url }}">Upload documents</a></p>
+<p>This link expires at {{ expires_at }}.</p>
+<p>Upload each requested file, then submit the form. You do not need an HMS login.</p>
+{% endblock %}

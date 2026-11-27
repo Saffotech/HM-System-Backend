@@ -161,6 +161,32 @@ def _apply_finance(db: Session, case: LegalCase, lead: Lead, old_plan: str | Non
     return True
 
 
+def sync_case_from_lead(db: Session, lead: Lead) -> None:
+    """Copy CRM edits onto the case. Plan and billing stay on the agreement path."""
+    existing = (
+        db.query(LegalCase)
+        .options(joinedload(LegalCase.finance))
+        .filter(LegalCase.lead_id == lead.id)
+        .first()
+    )
+    if existing is None:
+        return
+    if existing.status in DECIDED:
+        existing.city = lead.city
+        existing.state = lead.state
+        existing.hospital_type = lead.hospital_type
+        existing.hospital_email = lead.hospital_email
+        existing.contact_person = lead.contact_person
+        existing.designation = lead.designation
+        existing.contact_phone = lead.contact_phone
+        existing.contact_email = lead.contact_email
+        existing.lead_source = lead.source
+        existing.priority = lead.priority
+        db.flush()
+        return
+    open_case_for_agreed_lead(db, lead)
+
+
 def open_case_for_agreed_lead(db: Session, lead: Lead) -> LegalCase:
     """One agreed hospital lead gets one case. A second call updates the same row."""
     existing = (
@@ -373,8 +399,29 @@ def _kept(stored, live):
     return live if stored is None else stored
 
 
+def _refresh_crm_details(case: LegalCase, lead: Lead) -> bool:
+    """Keep hospital contact details aligned with the CRM lead."""
+    fields = {
+        "city": lead.city,
+        "state": lead.state,
+        "hospital_type": lead.hospital_type,
+        "hospital_email": lead.hospital_email,
+        "contact_person": lead.contact_person,
+        "designation": lead.designation,
+        "contact_phone": lead.contact_phone,
+        "contact_email": lead.contact_email,
+        "lead_source": lead.source,
+        "priority": lead.priority,
+    }
+    changed = False
+    for name, value in fields.items():
+        if getattr(case, name) != value:
+            setattr(case, name, value)
+            changed = True
+    return changed
+
+
 def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
-    approved = case.status == "Approved"
     documents = _unique_rows(case.documents)
     checklist = _unique_rows(case.checklist)
     names = _uploader_names(db, documents)
@@ -382,17 +429,17 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
         id=case.id,
         lead_id=lead.id,
         hospital_name=_kept(case.hospital_name, lead.hospital_name),
-        city=_kept(case.city, lead.city),
+        city=lead.city,
         plan=_kept(case.plan, lead.plan),
-        hospital_type=_kept(case.hospital_type, lead.hospital_type),
-        state=_kept(case.state, lead.state),
-        hospital_email=_kept(case.hospital_email, lead.hospital_email),
-        contact_person=_kept(case.contact_person, lead.contact_person),
-        designation=_kept(case.designation, lead.designation),
-        contact_phone=_kept(case.contact_phone, lead.contact_phone),
-        contact_email=_kept(case.contact_email, lead.contact_email),
-        lead_source=_kept(case.lead_source, lead.source),
-        priority=_kept(case.priority, lead.priority),
+        hospital_type=lead.hospital_type,
+        state=lead.state,
+        hospital_email=lead.hospital_email,
+        contact_person=lead.contact_person,
+        designation=lead.designation,
+        contact_phone=lead.contact_phone,
+        contact_email=lead.contact_email,
+        lead_source=lead.source,
+        priority=lead.priority,
         requirement=_kept(case.requirement, lead.message),
         assigned_employee_id=_kept(case.assigned_employee_id, lead.assigned_to),
         assigned_employee_name=_kept(case.assigned_employee_name, _full_name(getattr(lead, "assignee", None))),
@@ -435,7 +482,7 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
         finance=_finance_out(case.finance),
         decision=_decision_out(case.decision),
         advance_received=bool(case.advance_received),
-        ready_to_register=approved,
+        ready_to_register=approvals_complete(case),
     )
 
 
@@ -468,6 +515,7 @@ def list_cases(db: Session, actor: User) -> list[LegalCaseOut]:
         if case.id in seen:
             continue
         seen.add(case.id)
+        changed = _refresh_crm_details(case, lead) or changed
         changed = _reconcile_linked_reviews(case, actor) or changed
         pairs.append((case, lead))
     if changed:
@@ -478,16 +526,46 @@ def list_cases(db: Session, actor: User) -> list[LegalCaseOut]:
 def get_case(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     _require_reviewer(actor)
     case, lead = _load(db, case_id)
-    if _reconcile_linked_reviews(case, actor):
+    changed = _refresh_crm_details(case, lead)
+    if _reconcile_linked_reviews(case, actor) or changed:
         db.commit()
         case, lead = _load(db, case_id)
     return _out(db, case, lead)
 
 
+def approvals_complete(case: LegalCase | None) -> bool:
+    """Legal Docs and Finance are both finished, including a required escalation.
+
+    A missing case or finance row is incomplete. It is not an error.
+    """
+    if case is None or case.status != "Approved":
+        return False
+    terms = case.finance
+    if terms is None or not terms.reviewed:
+        return False
+    if int(case.discount or 0) > 10 and case.escalation != "Approved":
+        return False
+    return True
+
+
+def _commercial_terms_locked(case: LegalCase) -> bool:
+    """Reviewed terms stay fixed once Legal has approved them.
+
+    A CRM commercial change clears the review, so Finance can approve again.
+    """
+    if case.status not in ("Approved", "Conditionally Approved"):
+        return False
+    terms = case.finance
+    if terms is None or not terms.reviewed:
+        return False
+    return not case.commercial_change_note
+
+
 def _approval_blockers(case: LegalCase) -> list[str]:
     blocked = []
-    verified = [doc for doc in case.documents if doc.status == "Verified"]
-    if len(case.documents) < 4 or len(verified) != len(case.documents):
+    current_documents = [doc for doc in case.documents if getattr(doc, "is_current", True)]
+    verified = [doc for doc in current_documents if doc.status == "Verified"]
+    if len(current_documents) < 4 or len(verified) != len(current_documents):
         blocked.append("At least 4 documents must be uploaded and all documents verified.")
     if any(item.status not in ("Verified", "Not applicable") for item in case.checklist):
         blocked.append("Complete every legal checklist item.")
@@ -562,8 +640,12 @@ def save_checklist(db: Session, actor: User, case_id: int, data: LegalChecklistU
 def save_finance(db: Session, actor: User, case_id: int, data: LegalFinanceUpdate) -> LegalCaseOut:
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
-    if case.status in ("Approved", "Rejected", "Conditionally Approved"):
+    if case.status == "Rejected":
         raise HTTPException(status_code=409, detail="This case already has a decision.")
+    if _commercial_terms_locked(case):
+        raise HTTPException(status_code=409, detail="Approved commercial terms cannot be changed.")
+    if case.status in ("Approved", "Conditionally Approved") and data.discount > 10 and case.escalation != "Approved":
+        raise HTTPException(status_code=422, detail="Discount above 10% requires Finance Head escalation approval.")
     terms = case.finance or LegalFinanceTerms(case_id=case.id)
     if case.finance is None:
         db.add(terms)
@@ -603,7 +685,7 @@ def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     """Ask the Finance Head to review a discount above 10%."""
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
-    if case.status in ("Approved", "Rejected", "Conditionally Approved"):
+    if case.status == "Rejected" or _commercial_terms_locked(case):
         raise HTTPException(status_code=409, detail="This case already has a decision.")
     if int(case.discount or 0) <= 10:
         raise HTTPException(status_code=409, detail="This discount does not need Finance Head approval.")
@@ -620,6 +702,8 @@ def request_escalation(db: Session, actor: User, case_id: int) -> LegalCaseOut:
 def decide_escalation(db: Session, actor: User, case_id: int, data: EscalationDecision) -> LegalCaseOut:
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
+    if case.status == "Rejected" or _commercial_terms_locked(case):
+        raise HTTPException(status_code=409, detail="This case already has a decision.")
     if int(case.discount or 0) <= 10:
         raise HTTPException(status_code=409, detail="This discount does not need Finance Head approval.")
     if case.escalation != "Pending":
@@ -632,9 +716,19 @@ def decide_escalation(db: Session, actor: User, case_id: int, data: EscalationDe
     return _out(db, case, lead)
 
 
+def _category_allowed(db: Session, category: str) -> bool:
+    if category in DOCUMENT_CATEGORIES:
+        return True
+    try:
+        from client_documents.Services.document_type_service import by_name
+        return by_name(db, category) is not None
+    except Exception:
+        return False
+
+
 async def add_document(db: Session, actor: User, case_id: int, category: str, file: UploadFile) -> LegalCaseOut:
     _require_reviewer(actor)
-    if category not in DOCUMENT_CATEGORIES:
+    if not _category_allowed(db, category):
         raise HTTPException(status_code=422, detail="Choose a hospital document category.")
     case, _lead = _load(db, case_id)
     if case.status in ("Approved", "Rejected", "Conditionally Approved"):
@@ -645,17 +739,19 @@ async def add_document(db: Session, actor: User, case_id: int, category: str, fi
     content = await file.read()
     if not content or len(content) > MAX_BYTES:
         raise HTTPException(status_code=422, detail="The file must be between 1 byte and 5 MB.")
-    name = f"{case_id}-{uuid4().hex}{suffix}"
-    path = _upload_dir() / name
-    path.write_bytes(content)
+    from client_documents.Services.document_storage_service import save_private
+    path = save_private(case.id, suffix, content)
     original = PurePath((file.filename or "").replace("\\", "/")).name.strip()
     db.add(LegalDocument(
         case_id=case.id,
         category=category,
-        file_name=original or name,
+        file_name=original or path.name,
         stored_path=str(path),
         status="Pending Review",
         uploaded_by=actor.id,
+        upload_source="EMPLOYEE",
+        is_current=True,
+        version=1,
     ))
     if case.status == "New from CRM":
         case.status = "In Review"
@@ -678,12 +774,14 @@ def _document(db: Session, case_id: int, document_id: int) -> LegalDocument:
     return document
 
 
-def set_document_status(db: Session, actor: User, case_id: int, document_id: int, status: str) -> LegalCaseOut:
+def set_document_status(db: Session, actor: User, case_id: int, document_id: int, status: str, remarks: str | None = None) -> LegalCaseOut:
     _require_reviewer(actor)
     case, _lead = _load(db, case_id)
     if case.status in ("Approved", "Rejected", "Conditionally Approved"):
         raise HTTPException(status_code=409, detail="This case already has a decision.")
     document = _document(db, case_id, document_id)
+    from client_documents.Services.document_review_service import record_review
+    record_review(db, actor, document, status, remarks)
     document.status = status
     document.reviewed_by = actor.id
     document.reviewed_at = _now()
@@ -696,8 +794,10 @@ def set_document_status(db: Session, actor: User, case_id: int, document_id: int
 def download_document(db: Session, actor: User, case_id: int, document_id: int) -> FileResponse:
     _require_reviewer(actor)
     document = _document(db, case_id, document_id)
-    path = Path(document.stored_path)
-    if not path.is_file():
+    from client_documents.Services.document_storage_service import StorageError, resolve_existing
+    try:
+        path = resolve_existing(document.stored_path)
+    except StorageError:
         raise HTTPException(status_code=404, detail="Document file not found")
     return FileResponse(path, filename=document.file_name)
 
@@ -718,7 +818,7 @@ def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
     if _role(actor) != "accountant":
         raise HTTPException(status_code=403, detail="Only Accounts can record the advance payment")
     case, _lead = _load(db, case_id)
-    if case.status != "Approved":
+    if not approvals_complete(case):
         raise HTTPException(status_code=409, detail="Record the advance only after Legal and Finance approves the case.")
     if case.advance_received:
         raise HTTPException(status_code=409, detail="The advance is already recorded.")
@@ -731,10 +831,16 @@ def confirm_advance(db: Session, actor: User, case_id: int) -> LegalCaseOut:
 
 
 def case_approved(db: Session, lead_id: int) -> bool:
+    """Legal Docs decision only. Registration uses case_ready_for_registration."""
     case = db.query(LegalCase).filter(LegalCase.lead_id == lead_id).first()
     return case is not None and case.status == "Approved"
 
 
 def case_ready_for_registration(db: Session, lead_id: int) -> bool:
-    case = db.query(LegalCase).filter(LegalCase.lead_id == lead_id).first()
-    return case is not None and case.status == "Approved"
+    case = (
+        db.query(LegalCase)
+        .options(joinedload(LegalCase.finance))
+        .filter(LegalCase.lead_id == lead_id)
+        .first()
+    )
+    return approvals_complete(case)

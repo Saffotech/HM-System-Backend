@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hello {{ client_name }},</p>
+<p>We received documents for <strong>{{ hospital_name }}</strong> at {{ submitted_at }}.</p>
+<ul>
+{% for name in document_names %}
+  <li>{{ name }}</li>
+{% endfor %}
+</ul>
+<p>These documents are awaiting review. This message does not confirm legal approval, finance review, or hospital registration.</p>
+{% endblock %}

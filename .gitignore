@@ -5,3 +5,4 @@ __pycache__/
 .venv/
 venv/
 uploads/
+private_uploads/

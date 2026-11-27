@@ -47,6 +47,7 @@ from Models.admin_profile import AdminProfile
 from Models.accountant_profile import AccountantProfile  # noqa: F401 — User relationship
 from Models.platform_admin_profile import PlatformAdminProfile  # noqa: F401 — User relationship
 from Models.crm_profile import CrmProfile  # noqa: F401 — User relationship
+from Models.legal_finance_profile import LegalFinanceProfile  # noqa: F401 — User relationship
 from Models.manager_profile import ManagerProfile
 from Models.role import Permission, Role, RolePermission
 from Models.user import User
@@ -191,7 +192,19 @@ PERMISSIONS_LIST = [
     "crm_profile:update",
     "crm_profile:upload_image",
     "crm_profile:delete_image",
+    "legal_finance_profile:view",
+    "legal_finance_profile:update",
+    "legal_finance_profile:upload_image",
+    "legal_finance_profile:delete_image",
     "legal:review",
+    "legal:request_documents",
+    "legal:request_resubmission",
+    "legal:document_requests_view",
+    "legal:document_requests_revoke",
+    "document_types:view",
+    "document_types:manage",
+    "email_jobs:view",
+    "email_jobs:retry",
 ]
 
 # Hospital Admin panel — see Docs/backend/roles/admin.md
@@ -413,6 +426,17 @@ ROLES_DATA = {
         "description": "Platform Legal and Finance. Reviews an agreed hospital lead before Accounts registers it.",
         "permissions": [
             "legal:review",
+            "legal:request_documents",
+            "legal:request_resubmission",
+            "legal:document_requests_view",
+            "legal:document_requests_revoke",
+            "document_types:view",
+            "email_jobs:view",
+            "email_jobs:retry",
+            "legal_finance_profile:view",
+            "legal_finance_profile:update",
+            "legal_finance_profile:upload_image",
+            "legal_finance_profile:delete_image",
         ],
     },
     "platform_admin": {
@@ -421,6 +445,10 @@ ROLES_DATA = {
             "leads:manage",
             "hospitals:create",
             "invoices:manage",
+            "document_types:view",
+            "document_types:manage",
+            "email_jobs:view",
+            "email_jobs:retry",
             "platform_admin_profile:view",
             "platform_admin_profile:update",
             "platform_admin_profile:upload_image",
@@ -509,7 +537,7 @@ def _target_permission_ids(
     raw = role_data["permissions"]
     if raw == "__all__":
         # Hospital admin must not register other hospitals or work platform CRM leads.
-        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal:review"} if role_name == "admin" else set()
+        skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal_finance_profile:view", "legal_finance_profile:update", "legal_finance_profile:upload_image", "legal_finance_profile:delete_image", "legal:review", "legal:request_documents", "legal:request_resubmission", "legal:document_requests_view", "legal:document_requests_revoke", "document_types:view", "document_types:manage", "email_jobs:view", "email_jobs:retry"} if role_name == "admin" else set()
         return {
             pid
             for name, pid in perm_ids.items()
@@ -1217,7 +1245,7 @@ def main() -> None:
         print("\nRole IDs:")
         for name, rid in role_ids.items():
             if ROLES_DATA[name]["permissions"] == "__all__":
-                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal:review"} if name == "admin" else set()
+                skipped = {"hospitals:create", "leads:manage", "registrations:create", "invoices:manage", "accountant_profile:view", "accountant_profile:update", "accountant_profile:upload_image", "accountant_profile:delete_image", "platform_admin_profile:view", "platform_admin_profile:update", "platform_admin_profile:upload_image", "platform_admin_profile:delete_image", "crm_profile:view", "crm_profile:update", "crm_profile:upload_image", "crm_profile:delete_image", "legal_finance_profile:view", "legal_finance_profile:update", "legal_finance_profile:upload_image", "legal_finance_profile:delete_image", "legal:review", "legal:request_documents", "legal:request_resubmission", "legal:document_requests_view", "legal:document_requests_revoke", "document_types:view", "document_types:manage", "email_jobs:view", "email_jobs:retry"} if name == "admin" else set()
                 perm_count = len(PERMISSIONS_LIST) - len(skipped)
             else:
                 perm_count = len(ROLES_DATA[name]["permissions"])

@@ -815,8 +815,19 @@ def get_patient_profile(db: Session, patient_id: int) -> dict:
             "status": v.status,
         })
 
+    has_active_ipd_admission = (
+        db.query(IpdAdmission.id)
+        .filter(
+            IpdAdmission.patient_id == patient_id,
+            IpdAdmission.status == "admitted",
+        )
+        .first()
+        is not None
+    )
+
     return {
         "patient": PatientOut.model_validate(patient),
+        "has_active_ipd_admission": has_active_ipd_admission,
         "summary": {
             "total_visits": len(visits),
             "total_billed": round(total_billed, 2),

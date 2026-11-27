@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<p>Hello {{ client_name }},</p>
+<p>Additional or replacement documents are required for <strong>{{ hospital_name }}</strong>.</p>
+<ul>
+{% for item in documents %}
+  <li>{{ item.name }}{% if item.remarks %} — {{ item.remarks }}{% endif %}</li>
+{% endfor %}
+</ul>
+<p><a href="{{ upload_url }}">Upload the requested documents</a></p>
+<p>This link expires at {{ expires_at }}.</p>
+<p>Previously accepted documents do not need to be uploaded again.</p>
+{% endblock %}
