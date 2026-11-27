@@ -83,6 +83,7 @@ class LegalDocumentOut(BaseModel):
     uploaded_at: str | None = None
     reviewed_by: int | None = None
     reviewed_at: str | None = None
+    upload_source: str | None = None
 
 
 class ChecklistItemOut(BaseModel):

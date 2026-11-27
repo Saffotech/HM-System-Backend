@@ -298,6 +298,35 @@ def _uploader_names(db: Session, documents) -> dict[int, str]:
     return {row.id: name for row in rows if (name := _person_name(row))}
 
 
+def _client_uploader_labels(db: Session, documents) -> dict[int, str]:
+    """Hospital email uploads have no staff user id; label them from the request recipient."""
+    request_ids = {
+        doc.upload_request_id
+        for doc in documents
+        if getattr(doc, "upload_source", None) == "CLIENT" and doc.upload_request_id is not None
+    }
+    if not request_ids:
+        return {}
+    from client_documents.Models.models import DocumentUploadRequest
+
+    rows = db.query(DocumentUploadRequest).filter(DocumentUploadRequest.id.in_(request_ids)).all()
+    labels: dict[int, str] = {}
+    for row in rows:
+        label = (row.recipient_name or "").strip() or (row.recipient_email or "").strip() or "Hospital"
+        labels[row.id] = label
+    return labels
+
+
+def _document_uploader_name(doc, staff_names: dict[int, str], client_labels: dict[int, str]) -> str | None:
+    if doc.uploaded_by is not None:
+        return staff_names.get(doc.uploaded_by)
+    if getattr(doc, "upload_source", None) == "CLIENT":
+        if doc.upload_request_id is not None and doc.upload_request_id in client_labels:
+            return client_labels[doc.upload_request_id]
+        return "Hospital"
+    return None
+
+
 def _checklist_status_for_documents(documents) -> str | None:
     if not documents:
         return None
@@ -425,6 +454,7 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
     documents = _unique_rows(case.documents)
     checklist = _unique_rows(case.checklist)
     names = _uploader_names(db, documents)
+    client_labels = _client_uploader_labels(db, documents)
     return LegalCaseOut(
         id=case.id,
         lead_id=lead.id,
@@ -461,10 +491,11 @@ def _out(db: Session, case: LegalCase, lead: Lead) -> LegalCaseOut:
                 file_name=_display_file_name(doc.file_name),
                 status=doc.status,
                 uploaded_by=doc.uploaded_by,
-                uploaded_by_name=names.get(doc.uploaded_by),
+                uploaded_by_name=_document_uploader_name(doc, names, client_labels),
                 uploaded_at=_when(doc.created_at),
                 reviewed_by=doc.reviewed_by,
                 reviewed_at=_when(doc.reviewed_at),
+                upload_source=getattr(doc, "upload_source", None),
             )
             for doc in documents
         ],

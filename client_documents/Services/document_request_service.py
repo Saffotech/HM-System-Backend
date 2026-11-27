@@ -375,8 +375,8 @@ def list_requests(db: Session, case_id: int) -> list[dict]:
         result.append({
             "request_id": row.id,
             "request_type": row.request_type,
-            "recipient_email": row.recipient_email,
             "status": effective_status(row),
+            "recipient_email": row.recipient_email,
             "categories": [item.document_name for item in _items(db, row.id)],
             "requested_by": row.requested_by,
             "created_at": row.created_at,
