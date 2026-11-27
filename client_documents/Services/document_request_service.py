@@ -375,6 +375,7 @@ def list_requests(db: Session, case_id: int) -> list[dict]:
         result.append({
             "request_id": row.id,
             "request_type": row.request_type,
+            "recipient_email": row.recipient_email,
             "status": effective_status(row),
             "categories": [item.document_name for item in _items(db, row.id)],
             "requested_by": row.requested_by,
@@ -416,6 +417,7 @@ def _result(request, job_id, status, duplicate: bool) -> dict:
         "message": "Existing document request" if duplicate else "Document request queued",
         "case_id": request.case_id,
         "request_id": request.id,
+        "recipient_email": request.recipient_email,
         "email_job_id": job_id,
         "email_status": status,
         "expires_at": request.expires_at,
