@@ -347,7 +347,7 @@ def _open_patient_login(db: Session, patient: Patient, registered_by: int) -> tu
         raise HTTPException(status_code=409, detail="This email already has a login.")
     registrar = db.query(User).filter(User.id == registered_by).first()
     password = _temporary_password()
-    db.add(User(
+    login = User(
         first_name=patient.first_name,
         last_name=patient.last_name,
         email=email,
@@ -355,8 +355,11 @@ def _open_patient_login(db: Session, patient: Patient, registered_by: int) -> tu
         password=hash_password(password),
         role_id=_patient_role(db).id,
         tenant_id=patient.tenant_id or (registrar.tenant_id if registrar else None),
-    ))
+    )
+    db.add(login)
     db.flush()
+    # The patient app finds its own record through patients.user_id.
+    patient.user_id = login.id
     return email, password
 
 

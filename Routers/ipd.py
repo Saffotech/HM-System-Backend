@@ -260,14 +260,19 @@ def register_patient(
     _: bool = Depends(PermissionChecker("patients:create")),
 ):
     """
-    Create Patient Master (UHID + demographics) only.
+    Create Patient Master (UHID + demographics) and the app login.
     No OPD visit, appointment, token, consultation, or bill.
+    Show login_email and temporary_password once on the desk screen.
     """
-    patient = patient_service.register_patient_only(db, data, registered_by=current_user.id)
+    patient, login_email, temporary_password = patient_service.register_patient_only(
+        db, data, registered_by=current_user.id
+    )
     return IpdPatientRegisterResponse(
         patient_id=patient.id,
         patient_uid=patient.patient_uid,
         patient=patient,
+        login_email=login_email,
+        temporary_password=temporary_password,
     )
 
 

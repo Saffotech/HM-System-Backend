@@ -57,10 +57,12 @@ class Patient(TenantScoped):
     aadhaar_number = Column(String(14), nullable=True)
     emergency_contact_name = Column(String, nullable=True)
     emergency_contact_phone = Column(String(15), nullable=True)
+    emergency_contact_relation = Column(String(50), nullable=True)
     allergies = Column(String, nullable=True)
     insurance_policy_no = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
     registered_by = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, unique=True, index=True)
     registration_source = Column(String(3), nullable=False, index=True)
     created_at = Column(DateTime(timezone=True),
                         default=lambda: datetime.now(ZoneInfo("Asia/Kolkata")))

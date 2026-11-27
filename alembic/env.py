@@ -13,6 +13,7 @@ from Models.role import Role, Permission, RolePermission
 from Models.user import User
 from Models.department import Department
 from Models.patient import Patient, OpdVisit
+from Models.patient_uploaded_report import PatientUploadedReport  # noqa: F401
 from Models.opd_billing import BillItem, PaymentTransaction, Appointment, Bed
 from Models.ipd import (
     IpdAdmission,

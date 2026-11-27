@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session, joinedload
 from database import get_db
 from Models.user import User
 from Models.role import Role
-from Schemas.schemas import PatientSelfRegister, RefreshTokenRequest, UserCreate, UserLogin
+from Schemas.schemas import (
+    ChangePasswordRequest,
+    PatientSelfRegister,
+    RefreshTokenRequest,
+    UserCreate,
+    UserLogin,
+)
 from hash import verify_password
 from jwt_token import (
     create_access_token,
@@ -214,6 +220,29 @@ def logout(
         user_agent=user_agent(request),
     )
     return {"message": "Logged out successfully"}
+
+
+@router.post("/change-password")
+def change_password(
+    request: Request,
+    data: ChangePasswordRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Any signed-in user (including a patient) changes their own password."""
+    result = auth_service.change_password(db, current_user, data)
+    audit_service.log_event(
+        db,
+        actor=current_user,
+        action="auth.password_changed",
+        resource_type="user",
+        resource_id=current_user.id,
+        summary=f"Password changed ({current_user.email})",
+        details={"email": current_user.email},
+        ip_address=client_ip(request),
+        user_agent=user_agent(request),
+    )
+    return result
 
 
 @router.post("/refresh")

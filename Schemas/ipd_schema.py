@@ -10,9 +10,11 @@ class IpdPatientRegisterRequest(PatientFields):
     """
     Patient Master registration for IPD — demographics only.
     Does not create OPD visit, appointment, token, or bill.
+    Email is required because this also opens the patient app login.
     """
 
     aadhaar_number: str = Field(..., min_length=12, max_length=12, pattern=r"^\d{12}$")
+    email: str = Field(..., min_length=3, max_length=255)
 
 
 class IpdPatientRegisterResponse(BaseModel):
@@ -20,6 +22,8 @@ class IpdPatientRegisterResponse(BaseModel):
     patient_id: int
     patient_uid: str
     patient: PatientOut
+    login_email: str
+    temporary_password: str
 
 
 class IpdAdmitInsuranceIn(BaseModel):

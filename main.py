@@ -99,6 +99,11 @@ from Routers.nurse_other_visit_router import router as nurse_other_visit_router
 from Routers.nurse_lab_report_router import router as nurse_lab_report_router
 from Routers.doctor_patient_visit_router import router as doctor_patient_visit_router
 from Routers.opd import router as opd_router
+from Routers.patient_portal_router import router as patient_portal_router
+from Routers.patient_reports_router import router as patient_reports_router
+from Routers.patient_profile_router import router as patient_profile_router
+from Routers.patient_billing_router import router as patient_billing_router
+from Models.patient_uploaded_report import PatientUploadedReport  # noqa: F401
 from Routers.ipd import router as ipd_router
 from Routers.ipd_insurance_router import router as ipd_insurance_router
 from Routers.ipd_profile_router import router as ipd_profile_router
@@ -204,6 +209,10 @@ app.include_router(manager_users_router)
 app.include_router(departments_router)
 app.include_router(roles_router)
 app.include_router(opd_router)
+app.include_router(patient_portal_router)
+app.include_router(patient_reports_router)
+app.include_router(patient_profile_router)
+app.include_router(patient_billing_router)
 app.include_router(opd_billing_profile_router)
 app.include_router(opd_billing_notification_router)
 app.include_router(ipd_router)

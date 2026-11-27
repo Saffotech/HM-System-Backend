@@ -20,20 +20,37 @@ class UserCreate(BaseModel):
 
 
 class PatientSelfRegister(BaseModel):
-    """Public patient account. No visit, doctor, or payment."""
+    """Public signup. Creates the login and the patients row. No visit or bill."""
 
-    full_name: str = Field(..., min_length=1, max_length=120)
+    first_name: str = Field(..., min_length=1, max_length=100)
+    last_name: Optional[str] = None
     phone: str = Field(..., min_length=10, max_length=15)
     email: EmailStr
     password: str = Field(..., min_length=8, max_length=72)
     date_of_birth: date
     gender: int = Field(..., ge=1, le=4)
+    aadhaar_number: str = Field(..., min_length=12, max_length=12, pattern=r"^\d{12}$")
+    address: Optional[str] = None
+    state: Optional[str] = None
+    blood_group: Optional[str] = Field(None, max_length=5)
+    allergies: Optional[str] = None
+    insurance_policy_no: Optional[str] = None
+    emergency_contact_name: Optional[str] = None
+    emergency_contact_phone: Optional[str] = None
+    emergency_contact_relation: Optional[str] = Field(None, max_length=50)
     hospital_code: str = Field(..., min_length=1, max_length=50)
 
 
 class UserLogin(BaseModel):
     email:    EmailStr
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """Signed-in user changes their own password."""
+
+    current_password: str
+    new_password: str = Field(..., min_length=8, max_length=72)
 
 
 class RefreshTokenRequest(BaseModel):

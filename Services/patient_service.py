@@ -51,6 +51,8 @@ def patient_to_model(
         aadhaar_number=data.aadhaar_number,
         emergency_contact_name=data.emergency_contact_name,
         emergency_contact_phone=data.emergency_contact_phone,
+        # Only the patient app collects this. The desk forms do not send it.
+        emergency_contact_relation=getattr(data, "emergency_contact_relation", None),
         allergies=data.allergies,
         insurance_policy_no=data.insurance_policy_no,
         registered_by=registered_by,
@@ -124,14 +126,23 @@ def register_patient_only(
     db: Session,
     data: PatientDemographics,
     registered_by: int,
-) -> PatientOut:
-    """Public entry: patient master registration with no visit/bill side effects."""
+) -> tuple[PatientOut, str, str]:
+    """IPD desk registration: patient master plus the app login.
+
+    Same login as the OPD desk. The plain password is returned once so the
+    desk can show it. Nothing is emailed yet.
+    """
+    from Services.opd_service import _open_patient_login
+
     patient = create_patient_record(
         db,
         data,
         registered_by,
         registration_source=RegistrationSource.IPD,
         require_aadhaar=True,
-        commit=True,
+        commit=False,
     )
-    return PatientOut.model_validate(patient)
+    login_email, temporary_password = _open_patient_login(db, patient, registered_by)
+    db.commit()
+    db.refresh(patient)
+    return PatientOut.model_validate(patient), login_email, temporary_password

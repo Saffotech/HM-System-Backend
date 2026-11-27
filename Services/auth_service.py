@@ -5,8 +5,8 @@ from Models.department import Department
 from Models.role import Role
 from Models.tenant import Tenant
 from Models.user import User
-from Schemas.schemas import PatientSelfRegister, UserCreate
-from hash import hash_password
+from Schemas.schemas import ChangePasswordRequest, PatientSelfRegister, UserCreate
+from hash import hash_password, verify_password
 from Services import audit_service
 from Services.admin_users_service import _PROFILE_CREATE
 from Services.employee_id_service import ensure_employee_id
@@ -24,7 +24,7 @@ def _patient_role(db: Session) -> Role:
 
 
 def register_patient_account(db: Session, data: PatientSelfRegister) -> dict:
-    """Public signup for the patient dashboard. Does not create a visit or a bill."""
+    """Public signup. Creates the login and the same patients row the desk uses. No visit or bill."""
     email = str(data.email).strip().lower()
     existing = (
         db.query(User)
@@ -37,7 +37,10 @@ def register_patient_account(db: Session, data: PatientSelfRegister) -> dict:
 
     hospital = (
         db.query(Tenant)
-        .filter(func.lower(Tenant.code) == data.hospital_code.strip().lower(), Tenant.is_active.is_(True))
+        .filter(
+            func.lower(Tenant.code) == data.hospital_code.strip().lower(),
+            Tenant.is_active.is_(True),
+        )
         .first()
     )
     if hospital is None:
@@ -47,13 +50,9 @@ def register_patient_account(db: Session, data: PatientSelfRegister) -> dict:
     if len(phone) < 10:
         raise HTTPException(status_code=422, detail="Phone must be at least 10 digits")
 
-    parts = data.full_name.strip().split(None, 1)
-    first_name = parts[0]
-    last_name = parts[1] if len(parts) > 1 else None
-
     user = User(
-        first_name=first_name,
-        last_name=last_name,
+        first_name=data.first_name.strip(),
+        last_name=(data.last_name or "").strip() or None,
         email=email,
         phone=phone[-15:],
         password=hash_password(data.password),
@@ -63,14 +62,47 @@ def register_patient_account(db: Session, data: PatientSelfRegister) -> dict:
         date_of_birth=data.date_of_birth,
     )
     db.add(user)
+    db.flush()
+
+    db.info["tenant_id"] = hospital.id
+    from Services.patient_service import create_patient_record
+
+    patient = create_patient_record(
+        db,
+        data.model_copy(update={"phone": phone[-15:], "email": email}),
+        user.id,
+        registration_source="OPD",
+        require_aadhaar=True,
+        commit=False,
+    )
+    patient.user_id = user.id
+    user.username = patient.patient_uid
     db.commit()
-    db.refresh(user)
+    db.refresh(patient)
     return {
         "message": "Patient account created",
         "user_id": user.id,
+        "patient_id": patient.id,
+        "patient_uid": patient.patient_uid,
         "email": user.email,
         "hospital_code": hospital.code,
     }
+
+
+def change_password(db: Session, user: User, data: ChangePasswordRequest) -> dict:
+    """Change the signed-in user's own password.
+
+    The token version moves forward, so every existing session (including
+    this one) must sign in again with the new password.
+    """
+    if not verify_password(data.current_password, user.password):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+    if data.current_password == data.new_password:
+        raise HTTPException(status_code=422, detail="Choose a different password.")
+    user.password = hash_password(data.new_password)
+    user.token_version = int(user.token_version or 0) + 1
+    db.commit()
+    return {"message": "Password updated. Sign in again."}
 
 
 def register_staff(db: Session, data: UserCreate, actor: User) -> dict:
