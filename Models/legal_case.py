@@ -72,6 +72,15 @@ class LegalDocument(Base):
     reviewed_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     reviewed_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), nullable=False, default=_now)
+    document_type_id = Column(Integer, ForeignKey("document_types.id"), nullable=True, index=True)
+    mime_type = Column(String(120), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    upload_source = Column(String(20), nullable=False, default="EMPLOYEE")
+    upload_request_id = Column(Integer, nullable=True, index=True)
+    review_remarks = Column(Text, nullable=True)
+    version = Column(Integer, nullable=False, default=1)
+    replaces_document_id = Column(Integer, ForeignKey("legal_documents.id"), nullable=True)
+    is_current = Column(Boolean, nullable=False, default=True)
 
     case = relationship("LegalCase", back_populates="documents")
 
@@ -86,6 +95,7 @@ class LegalChecklistItem(Base):
     note = Column(Text, nullable=True)
     updated_by = Column(Integer, ForeignKey("users.id"), nullable=True)
     updated_at = Column(DateTime(timezone=True), nullable=True)
+    document_type_id = Column(Integer, ForeignKey("document_types.id"), nullable=True, index=True)
 
     case = relationship("LegalCase", back_populates="checklist")
 

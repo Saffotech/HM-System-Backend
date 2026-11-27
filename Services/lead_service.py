@@ -24,7 +24,7 @@ from Schemas.lead_schema import (
     LeadUpdate,
 )
 from Services import audit_service
-from Services.legal_case_service import open_case_for_agreed_lead
+from Services.legal_case_service import open_case_for_agreed_lead, sync_case_from_lead
 
 IST = ZoneInfo("Asia/Kolkata")
 CLAIM_LIMIT = 5
@@ -475,6 +475,7 @@ def update_lead(db: Session, lead_id: int, data: LeadUpdate, actor: User) -> Lea
     _assert_platform_staff(actor)
     lead = _require_owner(_lock_lead(db, lead_id), actor, EDIT_STATUSES)
     changes: list[str] = []
+    email_changed = False
     for field, label in _EDIT_LABELS.items():
         if field not in data.model_fields_set:
             continue
@@ -490,10 +491,20 @@ def update_lead(db: Session, lead_id: int, data: LeadUpdate, actor: User) -> Lea
             continue
         setattr(lead, field, value)
         changes.append(label)
+        if field in ("contact_email", "hospital_email"):
+            email_changed = True
 
     if not changes:
         return _detail(_lead_query(db).filter(Lead.id == lead.id).one(), actor)
 
+    if email_changed:
+        from sqlalchemy import inspect as sa_inspect
+        from database import engine
+        if sa_inspect(engine).has_table("document_upload_requests"):
+            from client_documents.Services.document_request_service import invalidate_for_lead_email_change
+            invalidate_for_lead_email_change(db, lead.id)
+    if lead.status == "Agreed":
+        sync_case_from_lead(db, lead)
     _activity(db, lead, actor, "Details updated", f"Updated {', '.join(changes)}.")
     return _save(
         db,

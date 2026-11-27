@@ -65,7 +65,15 @@ from Models.pharmacist_profile import PharmacistProfile  # noqa: F401
 from Models.nurse_shift_bed_allocation import NurseShiftBedAllocation  # noqa: F401
 from Models.nurse_shift_bed_allocation_history import NurseShiftBedAllocationHistory  # noqa: F401
 from Models.nurse_workforce import NurseWorkforceRoster, NurseWorkforceShift  # noqa: F401
-from Models.nurse_other_visit import PatientOtherVisit  # noqa: F401
+from Models.tenant import Tenant  # noqa: F401
+from Email.Models.email_job import EmailJob  # noqa: F401
+from client_documents.Models.models import (  # noqa: F401
+    DocumentReviewHistory,
+    DocumentType,
+    DocumentUploadRequest,
+    DocumentUploadRequestItem,
+    TemporaryDocumentUpload,
+)
 
 config = context.config
 if config.config_file_name is not None:

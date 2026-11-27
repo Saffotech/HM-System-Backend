@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from sqlalchemy import inspect as sa_inspect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 from Models.accountant_profile import AccountantProfile  # noqa: F401
@@ -136,12 +137,25 @@ from Routers.legal_finance_profile_router import router as legal_finance_profile
 from Routers.crm_revenue_router import router as crm_revenue_router
 from Routers.platform_report_router import router as platform_report_router
 from Routers.platform_staff_router import router as platform_staff_router
-from Services.plan_service import ensure_default_plans
+from Email.Routers.email_router import router as email_router
+from client_documents.Routers.document_type_router import router as document_type_router
+from client_documents.Routers.document_request_router import router as document_request_router
+from client_documents.Routers.public_document_router import router as public_document_router
+from Email.Models.email_job import EmailJob  # noqa: F401
+from client_documents.Models.models import (  # noqa: F401
+    DocumentReviewHistory,
+    DocumentType,
+    DocumentUploadRequest,
+    DocumentUploadRequestItem,
+    TemporaryDocumentUpload,
+)
+import os
 import Models.tenant_filter  # noqa: F401  registers hospital row filters
 import logging
 import threading
 
 from Services.invoice_service import generate_renewal_invoices
+from Services.plan_service import ensure_default_plans
 from database import SessionLocal
 
 logger = logging.getLogger(__name__)
@@ -248,7 +262,8 @@ app.include_router(registration_router)
 app.include_router(legal_case_router)
 app.include_router(invoice_router)
 app.include_router(accountant_profile_router)
-start_renewal_billing()
+if os.getenv("DISABLE_BACKGROUND_WORKERS", "").lower() not in ("1", "true", "yes"):
+    start_renewal_billing()
 app.include_router(platform_staff_router)
 app.include_router(plan_router)
 app.include_router(platform_report_router)
@@ -256,14 +271,32 @@ app.include_router(platform_admin_profile_router)
 app.include_router(crm_profile_router)
 app.include_router(legal_finance_profile_router)
 app.include_router(crm_revenue_router)
+app.include_router(email_router)
+app.include_router(document_type_router)
+app.include_router(document_request_router)
+app.include_router(public_document_router)
 app.include_router(receptionist_router)
 app.include_router(receptionist_profile_router)
 app.include_router(receptionist_notification_router)
 
-# Serve uploaded files (profile images, etc.) — additive, no API route changes
+from client_documents.Services.document_storage_service import is_blocked_public_path
+
+
+class GuardedUploads(StaticFiles):
+    async def get_response(self, path: str, scope):
+        if is_blocked_public_path(path):
+            return Response(status_code=404)
+        return await super().get_response(path, scope)
+
+
+# Public assets only. Legal documents are rejected here and stored privately.
 _uploads_dir = Path("uploads")
 _uploads_dir.mkdir(parents=True, exist_ok=True)
-app.mount("/uploads", StaticFiles(directory=str(_uploads_dir)), name="uploads")
+app.mount("/uploads", GuardedUploads(directory=str(_uploads_dir)), name="uploads")
+
+from Email.Services.email_task_service import start_email_recovery
+if os.getenv("DISABLE_BACKGROUND_WORKERS", "").lower() not in ("1", "true", "yes"):
+    start_email_recovery()
 
 
 @app.get("/")

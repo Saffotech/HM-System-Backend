@@ -129,11 +129,12 @@ def verify_document(
 def request_document_changes(
     case_id: int,
     document_id: int,
+    remarks: str | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
     _: bool = Depends(PermissionChecker("legal:review")),
 ):
-    return set_document_status(db, current_user, case_id, document_id, "Changes Requested")
+    return set_document_status(db, current_user, case_id, document_id, "Changes Requested", remarks)
 
 
 @router.post("/{case_id}/decision", response_model=LegalCaseOut)
